@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AutoReplyBot Web</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>AutoReplyBot Dashboard</h1>
+    <p class="muted">Firebase login + Facebook/Instagram connect + schedule + post now · <a href="/device/">Remote devices</a></p>
+    <section class="card">
+      <div class="row">
+        <button id="btn-login">Login with Google</button>
+        <button id="btn-logout" class="secondary">Logout</button>
+      </div>
+      <p id="auth-status" class="muted">Not logged in</p>
+    </section>
+
+    <section class="card">
+      <h2>Connect Meta</h2>
+      <p class="muted meta-hint">
+        <strong>Facebook only:</strong> use the blue button — you only need Page permissions to post to your Facebook Page.<br />
+        <strong>Instagram too:</strong> link the Instagram account to your Page in Meta Business first, then either stay on Pages-only (works if Meta returns your IG on the Page) or use the gray button to add Instagram API permissions if Meta asks for them.
+      </p>
+      <div class="row">
+        <button id="btn-fb-login">Connect Facebook (Pages)</button>
+        <button id="btn-fb-ig-login" class="secondary">Link Instagram permissions</button>
+      </div>
+      <div class="row">
+        <button id="btn-load-pages" class="secondary">Load Pages</button>
+      </div>
+      <div class="row">
+        <select id="page-select"></select>
+        <button id="btn-use-page">Use Selected Page</button>
+      </div>
+      <p id="meta-status" class="muted">No Facebook token yet</p>
+    </section>
+
+    <section class="card">
+      <h2>Auto Posting Settings</h2>
+      <div class="grid">
+        <label><input id="scheduleEnabled" type="checkbox" /> Schedule enabled</label>
+        <label><input id="facebookAutoPostEnabled" type="checkbox" checked /> Post to Facebook</label>
+        <label><input id="instagramAutoPostEnabled" type="checkbox" /> Post to Instagram</label>
+        <label>Hour (0-23) <input id="hour" type="number" min="0" max="23" value="21" /></label>
+        <label>Minute (0-59) <input id="minute" type="number" min="0" max="59" value="0" /></label>
+        <label>Timezone (IANA) <input id="scheduleTimezone" type="text" placeholder="Asia/Kolkata" /></label>
+      </div>
+
+      <label>Topics (use --- between blocks)
+        <textarea id="topicBlocks" rows="5"></textarea>
+      </label>
+      <label>Brand / page name <input id="pageBrandName" type="text" /></label>
+      <label>Caption tone <input id="captionTone" type="text" /></label>
+      <label>Post requirements <textarea id="postRequirements" rows="3"></textarea></label>
+      <label>Image requirements <textarea id="imageGenerationRequirements" rows="3"></textarea></label>
+
+      <div class="row">
+        <button id="btn-save">Save Settings</button>
+        <button id="btn-load" class="secondary">Reload</button>
+        <button id="btn-post-now" class="warn">Post Now</button>
+      </div>
+      <p id="schedule-status" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>API Check</h2>
+      <p><a href="/api/health" target="_blank" rel="noreferrer">/api/health</a></p>
+      <p class="muted">Deploy marker: web-dashboard-v2</p>
+    </section>
+  </main>
+
+  <!-- FB SDK is injected from app.js after /api/config so FB.init runs inside fbAsyncInit (Meta-recommended). -->
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

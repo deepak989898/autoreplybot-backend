@@ -1,0 +1,453 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function id(v) {
+      return v is string && v.size() >= 1 && v.size() <= 128
+          && v.matches('^[A-Za-z0-9_-]+$');
+    }
+    function text(v, max) {
+      return v is string && v.size() <= max;
+    }
+    function millis(v) {
+      return v is int && v >= 0;
+    }
+    function intent(v) {
+      return v in [
+        'BUSINESS_SCUBA', 'BUSINESS_BOOKING', 'BUSINESS_PRICING',
+        'BUSINESS_AVAILABILITY', 'BUSINESS_LOCATION', 'BUSINESS_CANCELLATION',
+        'BUSINESS_COMPLAINT', 'BUSINESS_PAYMENT', 'GREETING', 'PERSONAL_CASUAL',
+        'FRIEND_CONVERSATION', 'FAMILY_CONVERSATION', 'PROFESSIONAL_CONVERSATION',
+        'GENERAL_QUESTION', 'EMOTIONAL_MESSAGE', 'SENSITIVE_PERSONAL', 'LEGAL',
+        'MEDICAL', 'FINANCIAL', 'EMERGENCY', 'ABUSIVE', 'SPAM',
+        'COMPANY_PROMOTION', 'BANK_ALERT', 'OTP_MESSAGE', 'TRANSACTION_NOTIFICATION',
+        'ORDER_CONFIRMATION', 'DELIVERY_UPDATE', 'PAYMENT_ALERT', 'MARKETING_MESSAGE',
+        'AUTOMATED_NOTIFICATION', 'SERVICE_NOTIFICATION', 'VERIFIED_BUSINESS_BROADCAST',
+        'SYSTEM_GENERATED_MESSAGE', 'UNKNOWN'
+      ];
+    }
+    function config(d) {
+      return d.keys().hasAll([
+          'enabled_packages', 'business_instructions', 'package_instructions_json',
+          'reply_language', 'contact_filter', 'whitelist_numbers', 'enabled',
+          'replyPolicyVersion', 'defaultReplyMode', 'aiDisclosureEnabled', 'businessAutoReplyEnabled',
+          'friendAutoReplyEnabled', 'familyAutoReplyEnabled',
+          'generalQuestionAutoReplyEnabled', 'sensitiveMessagesRequireApproval',
+          'duplicateWindowSeconds', 'contactCooldownSeconds', 'maxRecentMessages',
+          'maxRecentRepliesForSimilarity', 'minimumAutoReplyConfidence',
+          'minimumClarificationConfidence', 'scheduledFollowUpEnabled',
+          'groupAutoReplyEnabled', 'neverShareLiveLocation', 'neverShareHomeAddress',
+          'neverMakeFinancialCommitments', 'neverConfirmMeetingsAutomatically',
+          'neverRevealContactConversations', 'personalFactualFallbackEnabled',
+          'personalFactualFallback', 'ignoreCompanyMessages', 'ignorePromotionalMessages',
+          'ignoreBankMessages', 'ignoreOtpMessages', 'ignoreTransactionAlerts',
+          'ignoreDeliveryUpdates', 'ignoreAutomatedMessages',
+          'ignoreVerifiedBusinessBroadcasts'
+        ])
+        && d.keys().size() <= 48
+        && d.enabled_packages is map && d.enabled_packages.size() <= 50
+        && d.package_instructions_json is map && d.package_instructions_json.size() <= 50
+        && text(d.business_instructions, 10000)
+        && d.reply_language in ['english', 'hindi', 'auto']
+        && d.contact_filter in ['all', 'contacts_only', 'unknown_only', 'whitelist']
+        && text(d.whitelist_numbers, 5000)
+        && d.enabled is bool
+        && d.replyPolicyVersion is int && d.replyPolicyVersion >= 2
+        && d.defaultReplyMode in ['FULL_AUTO', 'SMART', 'MANUAL_ONLY']
+        && d.aiDisclosureEnabled is bool && d.businessAutoReplyEnabled is bool
+        && d.friendAutoReplyEnabled is bool && d.familyAutoReplyEnabled is bool
+        && d.generalQuestionAutoReplyEnabled is bool
+        && d.sensitiveMessagesRequireApproval is bool
+        && d.duplicateWindowSeconds is int
+        && d.duplicateWindowSeconds >= 0 && d.duplicateWindowSeconds <= 86400
+        && d.contactCooldownSeconds is int
+        && d.contactCooldownSeconds >= 0 && d.contactCooldownSeconds <= 86400
+        && d.maxRecentMessages is int
+        && d.maxRecentMessages >= 1 && d.maxRecentMessages <= 50
+        && d.maxRecentRepliesForSimilarity is int
+        && d.maxRecentRepliesForSimilarity >= 1 && d.maxRecentRepliesForSimilarity <= 20
+        && d.minimumAutoReplyConfidence is number
+        && d.minimumAutoReplyConfidence >= 0 && d.minimumAutoReplyConfidence <= 1
+        && d.minimumClarificationConfidence is number
+        && d.minimumClarificationConfidence >= 0
+        && d.minimumClarificationConfidence <= 1
+        && d.scheduledFollowUpEnabled is bool && d.groupAutoReplyEnabled is bool
+        && d.neverShareLiveLocation is bool && d.neverShareHomeAddress is bool
+        && d.neverMakeFinancialCommitments is bool
+        && d.neverConfirmMeetingsAutomatically is bool
+        && d.neverRevealContactConversations is bool
+        && d.personalFactualFallbackEnabled is bool
+        && d.ignoreCompanyMessages is bool && d.ignorePromotionalMessages is bool
+        && d.ignoreBankMessages is bool && d.ignoreOtpMessages is bool
+        && d.ignoreTransactionAlerts is bool && d.ignoreDeliveryUpdates is bool
+        && d.ignoreAutomatedMessages is bool
+        && d.ignoreVerifiedBusinessBroadcasts is bool
+        && text(d.personalFactualFallback, 2000);
+    }
+    function schedule(d) {
+      return d.keys().hasOnly([
+          'scheduleEnabled', 'hour', 'minute', 'topicBlocks', 'topicRotationIndex',
+          'topicHintLegacy', 'postLanguageIndex', 'customLanguageHint',
+          'pageBrandName', 'postRequirements', 'businessTagline', 'logoUrl',
+          'logoDescription', 'brandPrimaryColorHex', 'brandAccentColorHex',
+          'visualStyleKeywords', 'imageGenerationRequirements', 'captionTone',
+          'facebookAutoPostEnabled', 'instagramAutoPostEnabled',
+          'connectedPageNameCloud', 'scheduleTimezone', 'lastAutoPostDay', 'updatedAt'
+        ])
+        && d.get('scheduleEnabled', false) is bool
+        && d.get('hour', 21) is int && d.get('hour', 21) >= 0 && d.get('hour', 21) <= 23
+        && d.get('minute', 0) is int
+        && d.get('minute', 0) >= 0 && d.get('minute', 0) <= 59
+        && text(d.get('topicBlocks', ''), 50000)
+        && d.get('topicRotationIndex', 0) is int
+        && d.get('topicRotationIndex', 0) >= 0
+        && d.get('topicRotationIndex', 0) <= 10000
+        && text(d.get('topicHintLegacy', ''), 4000)
+        && d.get('postLanguageIndex', 0) is int
+        && d.get('postLanguageIndex', 0) >= 0
+        && d.get('postLanguageIndex', 0) <= 4
+        && text(d.get('customLanguageHint', ''), 200)
+        && text(d.get('pageBrandName', ''), 300)
+        && text(d.get('postRequirements', ''), 10000)
+        && text(d.get('businessTagline', ''), 1000)
+        && text(d.get('logoUrl', ''), 2048)
+        && text(d.get('logoDescription', ''), 4000)
+        && text(d.get('brandPrimaryColorHex', ''), 32)
+        && text(d.get('brandAccentColorHex', ''), 32)
+        && text(d.get('visualStyleKeywords', ''), 4000)
+        && text(d.get('imageGenerationRequirements', ''), 10000)
+        && text(d.get('captionTone', ''), 1000)
+        && d.get('facebookAutoPostEnabled', true) is bool
+        && d.get('instagramAutoPostEnabled', false) is bool
+        && text(d.get('connectedPageNameCloud', ''), 300)
+        && text(d.get('scheduleTimezone', ''), 64)
+        && text(d.get('lastAutoPostDay', ''), 10)
+        && d.get('updatedAt', request.time) is timestamp;
+    }
+    function contact(d, cid) {
+      return d.keys().hasOnly([
+          'contactId', 'phoneNumber', 'displayName', 'relationshipType',
+          'autoReplyEnabled', 'replyMode', 'preferredLanguage', 'customNotes',
+          'allowBusinessContext', 'allowPersonalContext', 'detectedAsCompany',
+          'companyName', 'allowCompanyReplies', 'companyReplyMode',
+          'createdAt', 'updatedAt'
+        ])
+        && d.contactId == cid && id(d.contactId)
+        && text(d.phoneNumber, 64) && text(d.displayName, 300)
+        && d.relationshipType in [
+          'BUSINESS_CUSTOMER', 'BUSINESS_LEAD', 'FRIEND', 'FAMILY',
+          'PROFESSIONAL', 'UNKNOWN', 'BLOCKED', 'MANUAL_ONLY'
+        ]
+        && d.autoReplyEnabled is bool
+        && d.replyMode in ['FULL_AUTO', 'SMART', 'MANUAL_ONLY']
+        && text(d.preferredLanguage, 64) && text(d.customNotes, 10000)
+        && d.allowBusinessContext is bool && d.allowPersonalContext is bool
+        && d.detectedAsCompany is bool && text(d.companyName, 300)
+        && d.allowCompanyReplies is bool
+        && d.companyReplyMode in ['NO_REPLY', 'MANUAL_ONLY', 'SMART_APPROVAL']
+        && millis(d.createdAt) && millis(d.updatedAt) && d.updatedAt >= d.createdAt;
+    }
+    function conversation(d, cid) {
+      return d.keys().hasOnly([
+          'contactId', 'lastIntent', 'conversationSummary', 'lastIncomingMessage',
+          'lastOutgoingMessage', 'lastReplyTimestamp', 'consecutiveBotReplies',
+          'unansweredBotMessage', 'updatedAt'
+        ])
+        && d.contactId == cid && id(d.contactId) && intent(d.lastIntent)
+        && text(d.conversationSummary, 10000)
+        && text(d.lastIncomingMessage, 10000)
+        && text(d.lastOutgoingMessage, 10000)
+        && millis(d.lastReplyTimestamp)
+        && d.consecutiveBotReplies is int
+        && d.consecutiveBotReplies >= 0 && d.consecutiveBotReplies <= 10000
+        && d.unansweredBotMessage is bool && millis(d.updatedAt);
+    }
+    function message(d, cid, mid) {
+      return d.keys().hasOnly([
+          'messageId', 'contactId', 'direction', 'messageText', 'timestamp',
+          'intent', 'language', 'replyText', 'notificationHash',
+          'deliveryStatus', 'requiresReview'
+        ])
+        && d.messageId == mid && d.contactId == cid && id(d.messageId) && id(d.contactId)
+        && d.direction in ['incoming', 'outgoing'] && text(d.messageText, 10000)
+        && millis(d.timestamp) && intent(d.intent) && text(d.language, 64)
+        && text(d.replyText, 10000) && text(d.notificationHash, 128)
+        && d.deliveryStatus in [
+          'dispatching', 'sent', 'approval_pending', 'no_reply', 'approved_sent'
+        ]
+        && d.requiresReview is bool;
+    }
+    function approval(d, aid) {
+      return d.keys().hasOnly([
+          'approvalId', 'contactId', 'incomingMessage', 'suggestedReply',
+          'intent', 'reasonCode', 'status', 'createdAt', 'updatedAt'
+        ])
+        && d.approvalId == aid && id(d.approvalId) && id(d.contactId)
+        && text(d.incomingMessage, 10000) && text(d.suggestedReply, 10000)
+        && intent(d.intent) && text(d.reasonCode, 128)
+        && d.status in ['PENDING', 'SENDING', 'SENT', 'IGNORED', 'EXPIRED']
+        && millis(d.createdAt) && millis(d.updatedAt) && d.updatedAt >= d.createdAt;
+    }
+    function approvalTransition(a, b) {
+      return (a.status == b.status && a.status == 'PENDING')
+          || (a.status == 'PENDING' && b.status in ['SENDING', 'IGNORED', 'EXPIRED'])
+          || (a.status == 'SENDING' && b.status in ['SENT', 'EXPIRED']);
+    }
+    function event(d, eid) {
+      return d.keys().hasOnly([
+          'eventId', 'contactId', 'incomingMessage', 'replyText', 'action',
+          'intent', 'confidence', 'reasonCode', 'approvalStatus', 'timestamp',
+          'senderCategory', 'sensitiveContentRedacted', 'processedAt'
+        ])
+        && d.eventId == eid && id(d.eventId) && id(d.contactId)
+        && text(d.incomingMessage, 10000) && text(d.replyText, 10000)
+        && d.action in ['SEND_REPLY', 'REQUIRE_APPROVAL', 'NO_REPLY']
+        && intent(d.intent) && d.confidence is number
+        && d.confidence >= 0 && d.confidence <= 1 && text(d.reasonCode, 128)
+        && d.approvalStatus in ['pending', 'sent', 'not_required']
+        && d.senderCategory in [
+          'PERSONAL_HUMAN', 'COMPANY', 'BANK', 'ECOMMERCE', 'DELIVERY_SERVICE',
+          'PAYMENT_SERVICE', 'TELECOM', 'PROMOTIONAL_SENDER', 'AUTOMATED_SYSTEM',
+          'VERIFIED_BUSINESS', 'OTP_SENDER', 'TRANSACTION_ALERT', 'UNKNOWN_BUSINESS'
+        ]
+        && d.sensitiveContentRedacted is bool && millis(d.processedAt)
+        && millis(d.timestamp);
+    }
+    function metrics(d, day) {
+      return d.keys().hasOnly([
+          'day', 'processedMessages', 'autoSentReplies', 'approvedReplies',
+          'approvalPending', 'duplicatesBlocked', 'sensitiveBlocked'
+        ])
+        && d.day == day && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.get('processedMessages', 0) is int && d.get('processedMessages', 0) >= 0
+        && d.get('autoSentReplies', 0) is int && d.get('autoSentReplies', 0) >= 0
+        && d.get('approvedReplies', 0) is int && d.get('approvedReplies', 0) >= 0
+        && d.get('approvalPending', 0) is int && d.get('approvalPending', 0) >= 0
+        && d.get('duplicatesBlocked', 0) is int && d.get('duplicatesBlocked', 0) >= 0
+        && d.get('sensitiveBlocked', 0) is int && d.get('sensitiveBlocked', 0) >= 0;
+    }
+    function countersIncrease(a, b) {
+      return b.get('processedMessages', 0) >= a.get('processedMessages', 0)
+          && b.get('autoSentReplies', 0) >= a.get('autoSentReplies', 0)
+          && b.get('approvedReplies', 0) >= a.get('approvedReplies', 0)
+          && b.get('approvalPending', 0) >= a.get('approvalPending', 0)
+          && b.get('duplicatesBlocked', 0) >= a.get('duplicatesBlocked', 0)
+          && b.get('sensitiveBlocked', 0) >= a.get('sensitiveBlocked', 0);
+    }
+
+    match /users/{uid}/autoReplySettings/config {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && config(request.resource.data);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/autoReplySettings/facebookSchedule {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && schedule(request.resource.data)
+          && !request.resource.data.keys().hasAny(['lastAutoPostDay'])
+          && request.resource.data.get('updatedAt', request.time) == request.time;
+      allow update: if owner(uid) && schedule(request.resource.data)
+          && request.resource.data.get('lastAutoPostDay', '')
+              == resource.data.get('lastAutoPostDay', '')
+          && request.resource.data.get('updatedAt', request.time) == request.time;
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/contacts/{cid} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && contact(request.resource.data, cid);
+      allow update: if owner(uid) && contact(request.resource.data, cid)
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt >= resource.data.updatedAt;
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/conversations/{cid} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && conversation(request.resource.data, cid);
+      allow update: if owner(uid) && conversation(request.resource.data, cid)
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.updatedAt >= resource.data.updatedAt;
+      allow delete: if owner(uid);
+      match /messages/{mid} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && message(request.resource.data, cid, mid);
+        allow update: if owner(uid) && message(request.resource.data, cid, mid)
+            && request.resource.data.messageId == resource.data.messageId
+            && request.resource.data.contactId == resource.data.contactId
+            && request.resource.data.timestamp == resource.data.timestamp;
+        allow delete: if owner(uid);
+      }
+    }
+    match /users/{uid}/pendingApprovals/{aid} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && approval(request.resource.data, aid)
+          && request.resource.data.status == 'PENDING';
+      allow update: if owner(uid) && approval(request.resource.data, aid)
+          && request.resource.data.approvalId == resource.data.approvalId
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt >= resource.data.updatedAt
+          && approvalTransition(resource.data, request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'suggestedReply', 'status', 'updatedAt'
+          ]);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/replyHistory/{eid} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && event(request.resource.data, eid);
+      allow update: if owner(uid) && event(request.resource.data, eid)
+          && request.resource.data.eventId == resource.data.eventId
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.incomingMessage == resource.data.incomingMessage
+          && request.resource.data.intent == resource.data.intent
+          && request.resource.data.timestamp >= resource.data.timestamp
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'replyText', 'action', 'confidence', 'reasonCode',
+            'approvalStatus', 'timestamp'
+          ]);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/metrics/{day} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && metrics(request.resource.data, day);
+      allow update: if owner(uid) && metrics(request.resource.data, day)
+          && countersIncrease(resource.data, request.resource.data);
+      allow delete: if owner(uid);
+    }
+
+    function remoteDevice(d, deviceId) {
+      return d.keys().hasAll([
+          'deviceId', 'deviceName', 'deviceModel', 'manufacturer', 'androidVersion',
+          'appVersion', 'createdAt', 'lastSeenAt', 'online', 'batteryLevel',
+          'isCharging', 'networkType', 'fcmToken', 'cameraAvailable',
+          'microphoneAvailable', 'flashlightAvailable', 'revoked', 'ownerUid',
+          'remoteControlEnabled'
+        ])
+        && d.deviceId == deviceId && id(d.deviceId) && d.ownerUid == uid
+        && text(d.deviceName, 120) && text(d.deviceModel, 120)
+        && text(d.manufacturer, 120) && text(d.androidVersion, 40)
+        && text(d.appVersion, 40) && millis(d.createdAt) && millis(d.lastSeenAt)
+        && d.online is bool && d.batteryLevel is int
+        && d.batteryLevel >= 0 && d.batteryLevel <= 100
+        && d.isCharging is bool && text(d.networkType, 40)
+        && text(d.fcmToken, 4096)
+        && d.cameraAvailable is bool && d.microphoneAvailable is bool
+        && d.flashlightAvailable is bool && d.revoked is bool
+        && d.remoteControlEnabled is bool;
+    }
+    function trustedClient(d, clientId) {
+      return d.keys().hasAll([
+          'clientId', 'clientName', 'browser', 'platform', 'createdAt',
+          'lastUsedAt', 'revoked', 'ownerUid'
+        ])
+        && d.clientId == clientId && id(d.clientId) && d.ownerUid == uid
+        && text(d.clientName, 120) && text(d.browser, 120) && text(d.platform, 120)
+        && millis(d.createdAt) && millis(d.lastUsedAt) && d.revoked is bool;
+    }
+    function sessionRequest(d, requestId) {
+      return d.keys().hasAll([
+          'requestId', 'deviceId', 'clientId', 'requestedCapabilities',
+          'status', 'createdAt', 'expiresAt', 'ownerUid'
+        ])
+        && d.requestId == requestId && id(d.requestId) && id(d.deviceId)
+        && id(d.clientId) && d.ownerUid == uid
+        && d.status in ['pending', 'approved', 'rejected', 'expired', 'cancelled']
+        && millis(d.createdAt) && millis(d.expiresAt) && d.expiresAt >= d.createdAt;
+    }
+    function remoteSession(d, sessionId) {
+      return d.keys().hasAll([
+          'sessionId', 'deviceId', 'clientId', 'status', 'startedAt',
+          'ownerUid', 'selectedCamera', 'microphoneEnabled', 'flashlightEnabled', 'quality'
+        ])
+        && d.sessionId == sessionId && id(d.sessionId) && id(d.deviceId)
+        && id(d.clientId) && d.ownerUid == uid
+        && d.status in ['requesting', 'connecting', 'connected', 'reconnecting', 'ended', 'failed']
+        && millis(d.startedAt) && text(d.selectedCamera, 40)
+        && d.microphoneEnabled is bool && d.flashlightEnabled is bool
+        && text(d.quality, 40);
+    }
+    function remoteSignal(d, signalId) {
+      return d.keys().hasAll([
+          'signalId', 'type', 'sender', 'payload', 'createdAt', 'expiresAt'
+        ])
+        && d.signalId == signalId && id(d.signalId)
+        && d.type in ['offer', 'answer', 'ice']
+        && d.sender in ['device', 'client']
+        && text(d.payload, 200000) && millis(d.createdAt) && millis(d.expiresAt);
+    }
+    function remoteCommandAction(v) {
+      return v in [
+        'END_SESSION', 'SWITCH_CAMERA', 'SET_CAMERA_FRONT', 'SET_CAMERA_BACK',
+        'TORCH_ON', 'TORCH_OFF', 'MIC_MUTE', 'MIC_UNMUTE', 'CAPTURE_PHOTO',
+        'START_VIDEO_RECORDING', 'STOP_VIDEO_RECORDING',
+        'START_AUDIO_RECORDING', 'STOP_AUDIO_RECORDING',
+        'SET_QUALITY', 'SET_ZOOM', 'PING_DEVICE'
+      ];
+    }
+    function remoteCommand(d, commandId) {
+      return d.keys().hasAll([
+          'commandId', 'sessionId', 'deviceId', 'action', 'createdAt',
+          'expiresAt', 'status', 'ownerUid'
+        ])
+        && d.commandId == commandId && id(d.commandId) && id(d.sessionId)
+        && id(d.deviceId) && d.ownerUid == uid
+        && remoteCommandAction(d.action)
+        && millis(d.createdAt) && millis(d.expiresAt)
+        && d.status in ['pending', 'acked', 'failed', 'ignored', 'expired'];
+    }
+    function auditLog(d, logId) {
+      return d.keys().hasAll(['logId', 'action', 'timestamp', 'result', 'ownerUid'])
+        && d.logId == logId && id(d.logId) && d.ownerUid == uid
+        && text(d.action, 80) && millis(d.timestamp) && text(d.result, 40);
+    }
+
+    match /users/{uid}/devices/{deviceId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && remoteDevice(request.resource.data, deviceId);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/trustedClients/{clientId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && trustedClient(request.resource.data, clientId);
+      allow delete: if owner(uid);
+    }
+    // Pairing codes store only hashes; Admin SDK writes via API — deny all clients.
+    match /users/{uid}/pairingCodes/{codeId} {
+      allow read, write: if false;
+    }
+    match /users/{uid}/sessionRequests/{requestId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && sessionRequest(request.resource.data, requestId);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/sessions/{sessionId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && remoteSession(request.resource.data, sessionId);
+      allow delete: if owner(uid);
+      match /signals/{signalId} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && remoteSignal(request.resource.data, signalId);
+        allow update, delete: if owner(uid);
+      }
+    }
+    match /users/{uid}/commands/{commandId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && remoteCommand(request.resource.data, commandId);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/auditLogs/{logId} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && auditLog(request.resource.data, logId);
+      allow update, delete: if false;
+    }
+
+    match /users/{uid}/integrations/{doc} {
+      allow read, write: if false;
+    }
+    match /{doc=**} {
+      allow read, write: if false;
+    }
+  }
+}
