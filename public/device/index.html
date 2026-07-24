@@ -130,6 +130,7 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="location">Location</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="info">Device Information</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery">Gallery</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications">Notifications</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files">File Manager</button>
           </div>
 
@@ -173,6 +174,18 @@
             </div>
             <select id="gallery-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="gallery-list" class="media-gallery muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Phone notifications mirrored after you enable Notification Sharing and grant Notification Access on Android.</p>
+              <div class="page-actions">
+                <button id="btn-notif-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-notif-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="notifications-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="notifications-list" class="notif-list muted">Select a device.</div>
           </div>
 
           <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>

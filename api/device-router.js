@@ -62,6 +62,8 @@ export default async function handler(req, res) {
   if (path === "gallery") return handleGalleryList(req, res);
   if (path === "gallery/index") return handleGalleryIndex(req, res);
   if (path === "gallery/transfer") return handleGalleryTransfer(req, res);
+  if (path === "notifications") return handleNotificationsList(req, res);
+  if (path === "notifications/sync") return handleNotificationsSync(req, res);
   if (path === "files") return handleFilesList(req, res);
   if (path === "files/command") return handleFilesCommand(req, res);
   if (path === "transfers") return handleTransfersList(req, res);
@@ -105,6 +107,7 @@ function sanitizeDevice(id, data) {
     locationSharingEnabled: Boolean(data.locationSharingEnabled),
     locationSharingMode: String(data.locationSharingMode || "disabled"),
     galleryAccessEnabled: Boolean(data.galleryAccessEnabled),
+    notificationMirrorEnabled: Boolean(data.notificationMirrorEnabled),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
     storageUsedBytes: Number(data.storageUsedBytes || 0),
     storageTotalBytes: Number(data.storageTotalBytes || 0),
@@ -1104,6 +1107,90 @@ async function handleGalleryTransfer(req, res) {
     return res.status(200).json({ ok: true, transfer, command: cmd });
   } catch (e) {
     return clientError(res, e, "GALLERY_TRANSFER_FAILED");
+  }
+}
+
+async function handleNotificationsList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit || 50)));
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_NOTIFICATION_ITEMS)
+      .orderBy("postedAt", "desc")
+      .limit(limit)
+      .get();
+    const items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        itemId: d.id,
+        title: String(data.title || ""),
+        message: String(data.message || ""),
+        packageName: String(data.packageName || ""),
+        appLabel: String(data.appLabel || ""),
+        postedAt: Number(data.postedAt || 0),
+        syncedAt: Number(data.syncedAt || 0),
+        category: String(data.category || ""),
+        ongoing: Boolean(data.ongoing),
+      };
+    });
+    return res.status(200).json({ ok: true, items });
+  } catch (e) {
+    return clientError(res, e, "NOTIFICATIONS_LIST_FAILED");
+  }
+}
+
+async function handleNotificationsSync(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    if (!(deviceSnap.data() || {}).notificationMirrorEnabled) {
+      return res.status(403).json({
+        error: "Notification sharing is disabled on the phone.",
+        code: "NOTIFICATIONS_DISABLED",
+      });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "NOTIFICATIONS_SYNC",
+      {},
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_NOTIFICATIONS_SYNC,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "NOTIFICATIONS_SYNC_FAILED");
   }
 }
 

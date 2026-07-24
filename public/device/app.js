@@ -109,6 +109,7 @@ function syncHiddenDeviceSelects(deviceId) {
     "location-device-select",
     "info-device-select",
     "gallery-device-select",
+    "notifications-device-select",
     "files-device-select",
   ]) {
     const el = document.getElementById(id);
@@ -177,6 +178,7 @@ function setPhoneTab(tabId) {
   if (activePhoneTab === "location") refreshLocationPanel().catch(() => {});
   if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
   if (activePhoneTab === "gallery") refreshGalleryPanel().catch(() => {});
+  if (activePhoneTab === "notifications") refreshNotificationsPanel().catch(() => {});
   if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
 }
 
@@ -2160,6 +2162,62 @@ async function refreshGalleryPanel() {
   }
 }
 
+function formatNotifDate(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return String(n);
+  }
+}
+
+async function refreshNotificationsPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("notifications-device-select")?.value;
+  const list = document.getElementById("notifications-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  list.textContent = "Loading notifications…";
+  try {
+    const data = await api(
+      `/api/device/notifications?deviceId=${encodeURIComponent(deviceId)}&limit=80`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No notifications yet. On the phone: Remote Control → Device Management → Notification Sharing → enable, grant Notification Access, then Sync from phone.";
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = `<div class="notif-grid">${items
+      .map((it) => {
+        const title = escapeHtml(it.title || "(No title)");
+        const message = escapeHtml(it.message || "");
+        const app = escapeHtml(it.appLabel || it.packageName || "App");
+        const when = escapeHtml(formatNotifDate(it.postedAt));
+        return `<article class="notif-card">
+          <div class="notif-card-head">
+            <strong class="notif-title">${title}</strong>
+            <time class="notif-time" datetime="">${when}</time>
+          </div>
+          <p class="notif-message">${message || "<span class=\"muted\">(No message text)</span>"}</p>
+          <div class="notif-meta"><span>${app}</span></div>
+        </article>`;
+      })
+      .join("")}</div>`;
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
 async function refreshFilesPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillWorkspaceDeviceSelect();
@@ -2309,6 +2367,31 @@ document.getElementById("btn-gallery-index")?.addEventListener("click", async ()
     setTimeout(() => refreshGalleryPanel(), 3000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-notif-refresh")?.addEventListener("click", () => refreshNotificationsPanel());
+document.getElementById("btn-notif-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId =
+      selectedWorkspaceDeviceId || document.getElementById("notifications-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/notifications/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshNotificationsPanel(), 2500);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/notificationsList|CAPABILITY_DENIED|NOTIFICATIONS_DISABLED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot sync notifications yet.\n\n" +
+          "1) On the phone: Remote Control → Device Management → Notification Sharing → enable and grant Notification Access.\n" +
+          "2) Trusted browsers → Permissions → enable “Allow reading mirrored notifications”.\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
   }
 });
 document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());

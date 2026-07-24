@@ -937,6 +937,54 @@ button, input, select, textarea {
   padding: 16px 18px;
 }
 
+.notif-list {
+  min-height: 120px;
+}
+
+.notif-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notif-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.notif-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.notif-title {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.notif-time {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--muted, #9aa3b5);
+  white-space: nowrap;
+}
+
+.notif-message {
+  margin: 8px 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.notif-meta {
+  font-size: 0.82rem;
+  color: var(--muted, #9aa3b5);
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
