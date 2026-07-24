@@ -223,9 +223,22 @@
   text-align: left;
 }
 
-.pair-error {
-  margin-top: 12px;
-  color: #cf222e;
+.pair-already {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+.pair-ok {
+  margin: 0 0 8px;
+  color: #065f46;
+}
+
+.home-status {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
 }
 
 #pair-qr {

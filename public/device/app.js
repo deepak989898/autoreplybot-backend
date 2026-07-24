@@ -42,6 +42,15 @@ const pairExpires = document.getElementById("pair-expires");
 const pairPayload = document.getElementById("pair-payload");
 const pairQr = document.getElementById("pair-qr");
 const pairError = document.getElementById("pair-error");
+const pairAlready = document.getElementById("pair-already");
+const pairCreateBlock = document.getElementById("pair-create-block");
+const btnShowNewPair = document.getElementById("btn-show-new-pair");
+const homeStatus = document.getElementById("home-status");
+const btnHomePair = document.getElementById("btn-home-pair");
+const btnHomePhones = document.getElementById("btn-home-phones");
+
+/** @type {boolean} */
+let browserPaired = false;
 
 function showPanel(panelId) {
   const id = String(panelId || "home");
@@ -931,6 +940,8 @@ async function refreshClients() {
   if (!idToken) {
     clientList.textContent = "Sign in to load trusted browsers.";
     clientList.classList.add("muted");
+    cachedClients = [];
+    updatePairingUi(false);
     return;
   }
   clientList.textContent = "Loading…";
@@ -938,10 +949,33 @@ async function refreshClients() {
     const data = await api("/api/pair/clients");
     cachedClients = data.clients || [];
     renderClients(cachedClients);
+    const clientId = preferredClientId(cachedClients);
+    updatePairingUi(Boolean(clientId));
   } catch (e) {
     clientList.textContent = e instanceof Error ? e.message : String(e);
     clientList.classList.add("muted");
+    updatePairingUi(false);
   }
+}
+
+function updatePairingUi(isPaired) {
+  browserPaired = Boolean(isPaired);
+  if (homeStatus) {
+    homeStatus.textContent = browserPaired
+      ? "This browser is paired. Open My phones and tap Connect again when you want a live session."
+      : "This browser is not paired yet. Create a pairing code, then scan the QR on your phone.";
+  }
+  if (btnHomePair) btnHomePair.hidden = browserPaired;
+  if (btnHomePhones) btnHomePhones.hidden = !browserPaired;
+
+  if (pairAlready) pairAlready.hidden = !browserPaired;
+  if (pairCreateBlock) {
+    pairCreateBlock.hidden = browserPaired;
+  }
+  if (browserPaired && pairResult) {
+    pairResult.hidden = true;
+  }
+  showPairError("");
 }
 
 async function refreshSessions() {
@@ -1078,6 +1112,12 @@ async function main() {
     btnRefreshSessions.addEventListener("click", () => refreshSessions());
   }
   if (btnCreatePair) btnCreatePair.addEventListener("click", () => createPairing());
+  if (btnShowNewPair) {
+    btnShowNewPair.addEventListener("click", () => {
+      if (pairCreateBlock) pairCreateBlock.hidden = false;
+      if (pairAlready) pairAlready.hidden = true;
+    });
+  }
 
   document.querySelectorAll(".nav-item, .nav-jump").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1108,6 +1148,7 @@ async function main() {
       }
       if (pairResult) pairResult.hidden = true;
       showPairError("");
+      updatePairingUi(false);
       return;
     }
     idToken = await user.getIdToken();

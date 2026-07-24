@@ -58,35 +58,46 @@
 
       <main class="app-main">
         <section class="card panel" id="panel-home" data-panel="home">
-          <h2>How to use (simple flow)</h2>
-          <ol class="flow-steps">
-            <li><strong>Pair this browser</strong> — create a code, enter it in the Android app.</li>
+          <h2 id="home-title">How to use</h2>
+          <p id="home-status" class="home-status muted">Checking pairing status…</p>
+          <ol id="home-steps" class="flow-steps">
+            <li><strong>Pair this browser</strong> — create a code, scan QR or enter it in the Android app.</li>
             <li><strong>My phones</strong> — open your phone, choose camera/mic, tap Connect.</li>
             <li><strong>Approve on phone</strong> — tap Approve in the notification / app screen.</li>
             <li><strong>Live view</strong> — watch and control from this website.</li>
             <li><strong>End anytime</strong> — End on website, or Stop / Disconnect on the phone.</li>
           </ol>
-          <div class="row">
-            <button type="button" class="nav-jump" data-panel="pair">Start: Pair browser</button>
-            <button type="button" class="secondary nav-jump" data-panel="devices">Go to My phones</button>
+          <div class="row" id="home-actions">
+            <button type="button" id="btn-home-pair" class="nav-jump" data-panel="pair">Start: Pair browser</button>
+            <button type="button" id="btn-home-phones" class="secondary nav-jump" data-panel="devices" hidden>Connect again — My phones</button>
           </div>
         </section>
 
         <section class="card panel" id="panel-pair" data-panel="pair" hidden>
           <h2>Pair this browser</h2>
-          <p class="muted">Step 1 — Creates a 5-minute, one-time code. On the phone open <strong>Remote Camera &amp; Voice → Pair Website</strong> and enter the code (or scan QR).</p>
-          <div class="row">
-            <button id="btn-create-pair" type="button">Create pairing code</button>
+          <div id="pair-already" class="pair-already" hidden>
+            <p class="pair-ok"><strong>This browser is already paired.</strong></p>
+            <p class="muted">You do not need a new pairing code. Go to <strong>My phones</strong> and tap Connect. Create a new code only if you revoked this browser or want to pair another device.</p>
+            <div class="row">
+              <button type="button" class="nav-jump" data-panel="devices">Connect again — My phones</button>
+              <button type="button" id="btn-show-new-pair" class="secondary">Pair again (new code)</button>
+            </div>
           </div>
-          <div id="pair-result" class="pair-result" hidden>
-            <p class="pair-code-label">6-digit code</p>
-            <p id="pair-code" class="pair-code" aria-live="polite">------</p>
-            <p id="pair-expires" class="muted"></p>
-            <canvas id="pair-qr" width="180" height="180" aria-label="Pairing QR code"></canvas>
-            <p class="muted pair-payload-wrap">Deep link (optional paste):</p>
-            <code id="pair-payload" class="pair-payload"></code>
-            <div class="row" style="justify-content:center;margin-top:12px">
-              <button type="button" class="nav-jump" data-panel="devices">Next: My phones →</button>
+          <div id="pair-create-block">
+            <p class="muted">Creates a 5-minute, one-time code + QR. On the phone open <strong>Remote Camera &amp; Voice → Pair Website → Scan QR code</strong> (or enter the 6-digit code).</p>
+            <div class="row">
+              <button id="btn-create-pair" type="button">Create pairing code</button>
+            </div>
+            <div id="pair-result" class="pair-result" hidden>
+              <p class="pair-code-label">6-digit code</p>
+              <p id="pair-code" class="pair-code" aria-live="polite">------</p>
+              <p id="pair-expires" class="muted"></p>
+              <canvas id="pair-qr" width="180" height="180" aria-label="Pairing QR code"></canvas>
+              <p class="muted pair-payload-wrap">Deep link (optional paste):</p>
+              <code id="pair-payload" class="pair-payload"></code>
+              <div class="row" style="justify-content:center;margin-top:12px">
+                <button type="button" class="nav-jump" data-panel="devices">Next: My phones →</button>
+              </div>
             </div>
           </div>
           <p id="pair-error" class="pair-error" hidden></p>
