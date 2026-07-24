@@ -24,10 +24,23 @@
 
     <section class="card" id="section-auth">
       <h2>Account</h2>
+      <p class="muted">Sign in with the same email and password as the Android app.</p>
+      <div class="auth-form">
+        <label>Email
+          <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
+        </label>
+        <label>Password
+          <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password" />
+        </label>
+      </div>
       <div class="row">
-        <button id="btn-login">Login with Google</button>
-        <button id="btn-logout" class="secondary">Logout</button>
-        <button id="btn-refresh" class="secondary">Refresh devices</button>
+        <button id="btn-login-email" type="button">Sign in</button>
+        <button id="btn-register-email" class="secondary" type="button">Register</button>
+        <button id="btn-logout" class="secondary" type="button">Logout</button>
+        <button id="btn-refresh" class="secondary" type="button">Refresh devices</button>
+      </div>
+      <div class="row">
+        <button id="btn-login" class="secondary" type="button">Login with Google</button>
       </div>
       <p id="auth-status" class="muted">Not logged in</p>
     </section>

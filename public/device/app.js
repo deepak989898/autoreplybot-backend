@@ -4,6 +4,8 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
 import {
@@ -22,6 +24,10 @@ const deviceList = document.getElementById("device-list");
 const clientList = document.getElementById("client-list");
 const sessionList = document.getElementById("session-list");
 const btnLogin = document.getElementById("btn-login");
+const btnLoginEmail = document.getElementById("btn-login-email");
+const btnRegisterEmail = document.getElementById("btn-register-email");
+const authEmail = document.getElementById("auth-email");
+const authPassword = document.getElementById("auth-password");
 const btnLogout = document.getElementById("btn-logout");
 const btnRefresh = document.getElementById("btn-refresh");
 const btnCreatePair = document.getElementById("btn-create-pair");
@@ -882,6 +888,36 @@ async function createPairing() {
   }
 }
 
+function friendlyAuthError(e) {
+  const code = e && typeof e.code === "string" ? e.code : "";
+  const msg = e instanceof Error ? e.message : String(e || "Auth failed");
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "Wrong email or password";
+  }
+  if (code === "auth/email-already-in-use") {
+    return "This email is already registered — use Sign in";
+  }
+  if (code === "auth/weak-password") {
+    return "Password must be at least 6 characters";
+  }
+  if (code === "auth/invalid-email") {
+    return "Invalid email address";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "Email/Password sign-in is disabled in Firebase Console";
+  }
+  return msg;
+}
+
+function authFormCredentials() {
+  const email = String(authEmail?.value || "").trim();
+  const password = String(authPassword?.value || "");
+  if (!email || !password) {
+    throw new Error("Enter email and password (same as Android app)");
+  }
+  return { email, password };
+}
+
 async function main() {
   const cfg = await loadConfig();
   if (!cfg.firebase?.apiKey) {
@@ -896,7 +932,36 @@ async function main() {
   db = getFirestore(app);
   const provider = new GoogleAuthProvider();
 
-  btnLogin.addEventListener("click", () => signInWithPopup(auth, provider));
+  if (btnLoginEmail) {
+    btnLoginEmail.addEventListener("click", () => {
+      Promise.resolve()
+        .then(() => authFormCredentials())
+        .then(({ email, password }) => signInWithEmailAndPassword(auth, email, password))
+        .catch((e) => {
+          authStatus.textContent = friendlyAuthError(e);
+        });
+    });
+  }
+  if (btnRegisterEmail) {
+    btnRegisterEmail.addEventListener("click", () => {
+      Promise.resolve()
+        .then(() => authFormCredentials())
+        .then(({ email, password }) => {
+          if (password.length < 6) {
+            throw new Error("Password must be at least 6 characters");
+          }
+          return createUserWithEmailAndPassword(auth, email, password);
+        })
+        .catch((e) => {
+          authStatus.textContent = friendlyAuthError(e);
+        });
+    });
+  }
+  btnLogin.addEventListener("click", () =>
+    signInWithPopup(auth, provider).catch((e) => {
+      authStatus.textContent = friendlyAuthError(e);
+    })
+  );
   btnLogout.addEventListener("click", () => signOut(auth));
   btnRefresh.addEventListener("click", () => refreshDevices());
   btnRefreshClients.addEventListener("click", () => refreshClients());

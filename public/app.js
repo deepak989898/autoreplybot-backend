@@ -3,6 +3,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
@@ -77,6 +79,28 @@ async function initConfig() {
     }
     await loadSchedule();
   });
+}
+
+function authFormCredentials() {
+  const email = String(el("auth-email")?.value || "").trim();
+  const password = String(el("auth-password")?.value || "");
+  if (!email || !password) {
+    throw new Error("Enter email and password (same as Android app)");
+  }
+  return { email, password };
+}
+
+async function loginEmail() {
+  const { email, password } = authFormCredentials();
+  await signInWithEmailAndPassword(state.auth, email, password);
+}
+
+async function registerEmail() {
+  const { email, password } = authFormCredentials();
+  if (password.length < 6) {
+    throw new Error("Password must be at least 6 characters");
+  }
+  await createUserWithEmailAndPassword(state.auth, email, password);
 }
 
 async function loginGoogle() {
@@ -174,7 +198,7 @@ function facebookLogin(scopeString, opts = {}) {
 }
 
 async function loadPages() {
-  if (!state.idToken) throw new Error("Login with Google first");
+  if (!state.idToken) throw new Error("Sign in first (email/password or Google)");
   if (!state.userAccessToken) throw new Error("Connect Facebook first");
   const r = await api("/api/meta/pages", "POST", { userAccessToken: state.userAccessToken });
   state.pages = r.pages || [];
@@ -250,7 +274,7 @@ async function loadSchedule() {
 }
 
 async function saveSchedule() {
-  if (!state.idToken) throw new Error("Login with Google first");
+  if (!state.idToken) throw new Error("Sign in first (email/password or Google)");
   const payload = collectForm();
   if (payload.instagramAutoPostEnabled) {
     const igId = ((state.integration && state.integration.instagramUserId) || "").trim();
@@ -265,13 +289,21 @@ async function saveSchedule() {
 }
 
 async function postNow() {
-  if (!state.idToken) throw new Error("Login with Google first");
+  if (!state.idToken) throw new Error("Sign in first (email/password or Google)");
   const r = await api("/api/post-now", "POST", {});
   setText("schedule-status", r.ok ? "Posted now successfully" : `Post failed: ${r.detail || "unknown"}`);
 }
 
 function wireUi() {
-  el("btn-login").addEventListener("click", () => loginGoogle().catch((e) => setText("auth-status", e.message)));
+  el("btn-login-email").addEventListener("click", () =>
+    loginEmail().catch((e) => setText("auth-status", friendlyAuthError(e)))
+  );
+  el("btn-register-email").addEventListener("click", () =>
+    registerEmail().catch((e) => setText("auth-status", friendlyAuthError(e)))
+  );
+  el("btn-login").addEventListener("click", () =>
+    loginGoogle().catch((e) => setText("auth-status", friendlyAuthError(e)))
+  );
   el("btn-logout").addEventListener("click", () => logout().catch((e) => setText("auth-status", e.message)));
   el("btn-fb-login").addEventListener("click", async () => {
     try {
@@ -298,6 +330,27 @@ function wireUi() {
   el("btn-save").addEventListener("click", () => saveSchedule().catch((e) => setText("schedule-status", e.message)));
   el("btn-load").addEventListener("click", () => loadSchedule().catch((e) => setText("schedule-status", e.message)));
   el("btn-post-now").addEventListener("click", () => postNow().catch((e) => setText("schedule-status", e.message)));
+}
+
+function friendlyAuthError(e) {
+  const code = e && typeof e.code === "string" ? e.code : "";
+  const msg = e instanceof Error ? e.message : String(e || "Auth failed");
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "Wrong email or password";
+  }
+  if (code === "auth/email-already-in-use") {
+    return "This email is already registered — use Sign in";
+  }
+  if (code === "auth/weak-password") {
+    return "Password must be at least 6 characters";
+  }
+  if (code === "auth/invalid-email") {
+    return "Invalid email address";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "Email/Password sign-in is disabled in Firebase Console";
+  }
+  return msg;
 }
 
 wireUi();
