@@ -841,6 +841,98 @@ button, input, select, textarea {
   width: 100%;
 }
 
+.nav-section-label {
+  margin: 14px 12px 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa3b5);
+}
+
+.device-picker-bar {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.device-picker-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.device-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.device-picker-select {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
+.device-picker-hint {
+  margin: 8px 0 0;
+}
+
+.add-device-help {
+  margin-bottom: 14px;
+}
+
+.add-device-steps {
+  margin: 8px 0 14px 1.2rem;
+  line-height: 1.55;
+}
+
+.phone-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.phone-tab {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.phone-tab:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.phone-tab.active {
+  background: var(--accent, #6c5ce7);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.phone-tab-panel {
+  min-height: 120px;
+}
+
+.tab-intro {
+  margin: 0 0 12px;
+}
+
+.tab-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
 .device-info-view {
   padding: 16px 18px;
 }

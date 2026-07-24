@@ -45,7 +45,7 @@
           </p>
           <p id="auth-status" class="auth-status">Not logged in</p>
           <p class="login-fb-link">
-            After sign-in, open <strong>Facebook &amp; Instagram</strong> from the sidebar.
+            After sign-in, open <strong>Facebook &amp; Instagram</strong> from More in the sidebar.
           </p>
         </div>
       </section>
@@ -61,38 +61,24 @@
           <span>Remote Camera &amp; Voice</span>
         </div>
         <nav class="sidebar-nav">
-          <button type="button" class="nav-item active" data-panel="home">
-            <span class="nav-ico">▣</span> Dashboard
+          <button type="button" class="nav-item active" data-panel="phone">
+            <span class="nav-ico">📱</span> My Phone
           </button>
-          <button type="button" class="nav-item" data-panel="devices">
-            <span class="nav-ico">📱</span> My Phones
-          </button>
-          <button type="button" class="nav-item" data-panel="multiview">
-            <span class="nav-ico">▦</span> Multi Device View
-          </button>
+          <p class="nav-section-label">More</p>
           <button type="button" class="nav-item" data-panel="pair">
-            <span class="nav-ico">⬚</span> Pair New Browser
+            <span class="nav-ico">⬚</span> Pair Browser
+          </button>
+          <button type="button" class="nav-item" data-panel="security">
+            <span class="nav-ico">🛡</span> Trusted Browsers
           </button>
           <button type="button" class="nav-item" data-panel="sessions">
             <span class="nav-ico">⏱</span> Sessions
           </button>
-          <button type="button" class="nav-item" data-panel="location">
-            <span class="nav-ico">📍</span> Location
-          </button>
-          <button type="button" class="nav-item" data-panel="info">
-            <span class="nav-ico">ℹ</span> Device Information
-          </button>
-          <button type="button" class="nav-item" data-panel="gallery">
-            <span class="nav-ico">🖼</span> Gallery
-          </button>
-          <button type="button" class="nav-item" data-panel="files">
-            <span class="nav-ico">📁</span> File Manager
+          <button type="button" class="nav-item" data-panel="multiview">
+            <span class="nav-ico">▦</span> Multi Device View
           </button>
           <button type="button" class="nav-item" data-panel="transfers">
             <span class="nav-ico">⇄</span> Transfers
-          </button>
-          <button type="button" class="nav-item" data-panel="security">
-            <span class="nav-ico">🛡</span> Trusted Browsers
           </button>
           <button type="button" class="nav-item" data-panel="media">
             <span class="nav-ico">🎞</span> Media Files
@@ -108,77 +94,114 @@
       </aside>
 
       <main class="app-main">
-        <!-- DASHBOARD -->
-        <section class="panel" id="panel-home" data-panel="home">
+        <!-- PRIMARY: device picker + feature tabs -->
+        <section class="panel" id="panel-phone" data-panel="phone">
           <header class="page-head">
             <div>
-              <h1>Dashboard</h1>
-              <p id="home-status" class="page-sub">Checking pairing status…</p>
-            </div>
-            <div class="page-actions" id="home-actions">
-              <button type="button" id="btn-home-pair" class="btn-primary nav-jump" data-panel="pair">Pair browser</button>
-              <button type="button" id="btn-home-phones" class="btn-secondary nav-jump" data-panel="devices" hidden>Connect to phone</button>
-            </div>
-          </header>
-
-          <div class="stat-grid" id="dash-stats">
-            <article class="stat-card"><p class="stat-label">My Phones</p><p class="stat-value" id="stat-phones">0</p></article>
-            <article class="stat-card"><p class="stat-label">Online now</p><p class="stat-value" id="stat-online">0</p></article>
-            <article class="stat-card"><p class="stat-label">Total Sessions</p><p class="stat-value" id="stat-sessions">0</p></article>
-            <article class="stat-card"><p class="stat-label">Trusted Browsers</p><p class="stat-value" id="stat-clients">0</p></article>
-          </div>
-
-          <div class="dash-grid">
-            <article class="surface">
-              <div class="surface-head">
-                <h2>Recent sessions</h2>
-                <button type="button" class="btn-text nav-jump" data-panel="sessions">View all</button>
-              </div>
-              <div id="dash-session-list" class="table-wrap muted">Loading…</div>
-            </article>
-            <aside class="dash-side">
-              <article class="surface">
-                <h2>Quick actions</h2>
-                <div class="quick-actions">
-                  <button type="button" class="btn-primary nav-jump" data-panel="devices">Connect to Phone</button>
-                  <button type="button" class="btn-secondary nav-jump" data-panel="pair">Pair New Browser</button>
-                  <button type="button" class="btn-secondary nav-jump" data-panel="security">Trusted Browsers</button>
-                </div>
-              </article>
-              <article class="surface security-card">
-                <h2>Security status</h2>
-                <p id="dash-security" class="muted">Approve every session on your phone. Camera never starts silently.</p>
-              </article>
-            </aside>
-          </div>
-        </section>
-
-        <!-- MY PHONES -->
-        <section class="panel" id="panel-devices" data-panel="devices" hidden>
-          <header class="page-head">
-            <div>
-              <h1>My Phones</h1>
-              <p class="page-sub">Online phones you own. Connect sends a request — approve on the phone to start live view.</p>
+              <h1>My Phone</h1>
+              <p class="page-sub">Choose a phone, then open a tab below to use Camera, Location, Gallery, and more.</p>
             </div>
             <button id="btn-refresh" class="btn-secondary" type="button">Refresh</button>
           </header>
-          <div id="device-list" class="device-list muted">Loading phones…</div>
+
+          <div class="device-picker-bar surface">
+            <label class="device-picker-label" for="workspace-device-select">Connected device</label>
+            <div class="device-picker-row">
+              <select id="workspace-device-select" class="input device-picker-select" aria-label="Select device"></select>
+              <button id="btn-add-device" class="btn-primary" type="button">Connect new device</button>
+            </div>
+            <p id="workspace-device-hint" class="muted device-picker-hint">Loading devices…</p>
+          </div>
+
+          <div id="add-device-help" class="surface add-device-help" hidden>
+            <h2>Add another phone</h2>
+            <ol class="add-device-steps">
+              <li>Install AutoReplyBot on the new phone.</li>
+              <li>Sign in with the <strong>same account</strong> as this website.</li>
+              <li>Open <strong>Remote Camera &amp; Voice</strong> and turn Remote Control <strong>ON</strong>.</li>
+              <li>Come back here and tap <strong>Refresh</strong> — the new phone appears in the dropdown.</li>
+            </ol>
+            <p class="muted">If Connect asks to pair this browser, use <strong>Pair Browser</strong> in the sidebar once.</p>
+            <button type="button" id="btn-add-device-close" class="btn-secondary">Got it</button>
+          </div>
+
+          <div class="phone-tabs" role="tablist" aria-label="Phone features">
+            <button type="button" class="phone-tab active" role="tab" aria-selected="true" data-phone-tab="camera">Camera &amp; Voice</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="location">Location</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="info">Device Information</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery">Gallery</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files">File Manager</button>
+          </div>
+
+          <div id="phone-tab-camera" class="phone-tab-panel" data-phone-panel="camera">
+            <p class="page-sub tab-intro">Connect sends a request — approve on the phone to start live view.</p>
+            <div id="device-list" class="device-list muted">Select a device above.</div>
+          </div>
+
+          <div id="phone-tab-location" class="phone-tab-panel" data-phone-panel="location" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Phone must enable Location Sharing and allow this browser.</p>
+              <div class="page-actions">
+                <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh</button>
+                <button id="btn-loc-current" class="btn-primary" type="button">Request current</button>
+                <button id="btn-loc-live" class="btn-secondary" type="button">Live 15m</button>
+                <button id="btn-loc-stop" class="btn-secondary" type="button">Stop</button>
+              </div>
+            </div>
+            <select id="location-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="location-panel-body" class="surface muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-info" class="phone-tab-panel" data-phone-panel="info" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Safe device details without restricted identifiers.</p>
+              <div class="page-actions">
+                <button id="btn-info-refresh" class="btn-primary" type="button">Refresh Information</button>
+              </div>
+            </div>
+            <select id="info-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="info-panel-body" class="surface device-info-view">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-gallery" class="phone-tab-panel" data-phone-panel="gallery" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Authorized MediaStore index from your phone.</p>
+              <div class="page-actions">
+                <button id="btn-gallery-index" class="btn-secondary" type="button">Request index</button>
+                <button id="btn-gallery-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="gallery-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="gallery-list" class="media-gallery muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Only folders authorized on the phone via the system folder picker.</p>
+              <div class="page-actions">
+                <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
+                <button id="btn-files-list" class="btn-secondary" type="button">List folder</button>
+              </div>
+            </div>
+            <select id="files-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="files-panel-body" class="surface muted">Select a device.</div>
+          </div>
         </section>
 
         <!-- PAIR -->
         <section class="panel" id="panel-pair" data-panel="pair" hidden>
           <header class="page-head">
             <div>
-              <h1>Pair New Browser</h1>
+              <h1>Pair Browser</h1>
               <p class="page-sub">Scan the QR on Android (Pair Website → Scan QR) or enter the 6-digit code.</p>
             </div>
           </header>
 
           <div id="pair-already" class="surface pair-already" hidden>
             <p class="pair-ok"><strong>This browser is already paired.</strong></p>
-            <p id="pair-already-detail" class="muted">Go to My Phones and tap Connect. Generate a new code only if you revoked this browser.</p>
+            <p id="pair-already-detail" class="muted">Go to My Phone and tap Connect. Generate a new code only if you revoked this browser.</p>
             <div class="row-gap">
-              <button type="button" class="btn-primary nav-jump" data-panel="devices">Connect again</button>
+              <button type="button" class="btn-primary nav-jump" data-panel="phone">Open My Phone</button>
               <button type="button" id="btn-pair-disconnect" class="btn-danger">Disconnect</button>
               <button type="button" id="btn-show-new-pair" class="btn-secondary">Generate new code</button>
             </div>
@@ -198,7 +221,7 @@
                   <code id="pair-payload" class="pair-payload"></code>
                 </div>
                 <button id="btn-create-pair" class="btn-primary" type="button">Generate New Code</button>
-                <button type="button" class="btn-secondary nav-jump" data-panel="devices">Go to My Phones</button>
+                <button type="button" class="btn-secondary nav-jump" data-panel="phone">Go to My Phone</button>
               </div>
             </div>
           </div>
@@ -232,12 +255,12 @@
           <div id="client-list" class="surface table-wrap muted">Loading trusted browsers…</div>
         </section>
 
-        <!-- FACEBOOK & INSTAGRAM (embedded posting dashboard — keeps sidebar) -->
+        <!-- FACEBOOK & INSTAGRAM -->
         <section class="panel panel-embed" id="panel-social" data-panel="social" hidden>
           <header class="page-head page-head-compact">
             <div>
               <h1>Facebook &amp; Instagram</h1>
-              <p class="page-sub">Posting dashboard stays inside this admin panel — use the sidebar to switch pages anytime.</p>
+              <p class="page-sub">Posting dashboard stays inside this admin panel.</p>
             </div>
           </header>
           <iframe
@@ -268,67 +291,6 @@
           </dialog>
         </section>
 
-        <section class="panel" id="panel-location" data-panel="location" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Location</h1>
-              <p class="page-sub">View authorized device location. Phone must enable sharing first.</p>
-            </div>
-            <div class="page-actions">
-              <select id="location-device-select" class="input"></select>
-              <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh</button>
-              <button id="btn-loc-current" class="btn-primary" type="button">Request current</button>
-              <button id="btn-loc-live" class="btn-secondary" type="button">Live 15m</button>
-              <button id="btn-loc-stop" class="btn-secondary" type="button">Stop</button>
-            </div>
-          </header>
-          <div id="location-panel-body" class="surface muted">Select a device.</div>
-        </section>
-
-        <section class="panel" id="panel-info" data-panel="info" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Device Information</h1>
-              <p class="page-sub">Safe device details without restricted identifiers.</p>
-            </div>
-            <div class="page-actions">
-              <select id="info-device-select" class="input"></select>
-              <button id="btn-info-refresh" class="btn-primary" type="button">Refresh Information</button>
-            </div>
-          </header>
-          <div id="info-panel-body" class="surface device-info-view">Select a device.</div>
-        </section>
-
-        <section class="panel" id="panel-gallery" data-panel="gallery" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Gallery</h1>
-              <p class="page-sub">Authorized MediaStore index from your phone.</p>
-            </div>
-            <div class="page-actions">
-              <select id="gallery-device-select" class="input"></select>
-              <button id="btn-gallery-index" class="btn-secondary" type="button">Request index</button>
-              <button id="btn-gallery-refresh" class="btn-primary" type="button">Refresh</button>
-            </div>
-          </header>
-          <div id="gallery-list" class="media-gallery muted">Select a device.</div>
-        </section>
-
-        <section class="panel" id="panel-files" data-panel="files" hidden>
-          <header class="page-head">
-            <div>
-              <h1>File Manager</h1>
-              <p class="page-sub">Only folders authorized on the phone via SAF.</p>
-            </div>
-            <div class="page-actions">
-              <select id="files-device-select" class="input"></select>
-              <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
-              <button id="btn-files-list" class="btn-secondary" type="button">List folder</button>
-            </div>
-          </header>
-          <div id="files-panel-body" class="surface muted">Select a device.</div>
-        </section>
-
         <section class="panel" id="panel-transfers" data-panel="transfers" hidden>
           <header class="page-head">
             <div>
@@ -351,6 +313,19 @@
           <div id="multiview-picker" class="surface"></div>
           <div id="multiview-grid" class="device-list" style="margin-top:1rem"></div>
         </section>
+
+        <!-- Hidden legacy dashboard hooks used by existing JS stats -->
+        <div id="panel-home" data-panel="home" hidden aria-hidden="true">
+          <p id="home-status"></p>
+          <button type="button" id="btn-home-pair" class="nav-jump" data-panel="pair" hidden></button>
+          <button type="button" id="btn-home-phones" class="nav-jump" data-panel="phone" hidden></button>
+          <span id="stat-phones"></span>
+          <span id="stat-online"></span>
+          <span id="stat-sessions"></span>
+          <span id="stat-clients"></span>
+          <div id="dash-session-list"></div>
+          <p id="dash-security"></p>
+        </div>
       </main>
     </div>
   </div>

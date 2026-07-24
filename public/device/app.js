@@ -73,9 +73,17 @@ let browserPaired = false;
 let cachedDevices = [];
 /** @type {object[]} */
 let cachedSessions = [];
+/** @type {string} */
+let selectedWorkspaceDeviceId = "";
+/** @type {string} */
+let activePhoneTab = "camera";
 
 function showPanel(panelId) {
-  const id = String(panelId || "home");
+  let id = String(panelId || "phone");
+  if (id === "home" || id === "devices" || id === "location" || id === "info"
+      || id === "gallery" || id === "files") {
+    id = "phone";
+  }
   document.querySelectorAll(".panel").forEach((el) => {
     el.hidden = el.dataset.panel !== id;
   });
@@ -83,18 +91,105 @@ function showPanel(panelId) {
     btn.classList.toggle("active", btn.dataset.panel === id);
   });
   const hasLive = [...liveByDevice.values()].some((l) => l.pc);
-  if (id === "home") refreshDashboard().catch(() => {});
-  if (id === "devices" && !hasLive) refreshDevices().catch(() => {});
+  if (id === "phone") {
+    refreshDashboard().catch(() => {});
+    if (!hasLive) refreshDevices().catch(() => {});
+    setPhoneTab(activePhoneTab);
+  }
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "security") refreshClients().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "social") ensureSocialFrame();
-  if (id === "location") refreshLocationPanel().catch(() => {});
-  if (id === "info") refreshInfoPanel().catch(() => {});
-  if (id === "gallery") refreshGalleryPanel().catch(() => {});
-  if (id === "files") refreshFilesPanel().catch(() => {});
   if (id === "transfers") refreshTransfersPanel().catch(() => {});
   if (id === "multiview") refreshMultiViewPanel().catch(() => {});
+}
+
+function syncHiddenDeviceSelects(deviceId) {
+  for (const id of [
+    "location-device-select",
+    "info-device-select",
+    "gallery-device-select",
+    "files-device-select",
+  ]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (deviceId && ![...el.options].some((o) => o.value === deviceId)) {
+      const opt = document.createElement("option");
+      opt.value = deviceId;
+      el.appendChild(opt);
+    }
+    if (deviceId) el.value = deviceId;
+  }
+}
+
+function fillWorkspaceDeviceSelect() {
+  const select = document.getElementById("workspace-device-select");
+  const hint = document.getElementById("workspace-device-hint");
+  if (!select) return;
+  const prev = selectedWorkspaceDeviceId || select.value;
+  select.innerHTML = "";
+  const devices = (cachedDevices || []).filter((d) => d && !d.revoked);
+  if (!devices.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No phones yet — connect a new device";
+    select.appendChild(opt);
+    selectedWorkspaceDeviceId = "";
+    if (hint) {
+      hint.textContent = "Install the app on a phone, sign in with this account, enable Remote Control, then Refresh.";
+    }
+    syncHiddenDeviceSelects("");
+    return;
+  }
+  for (const d of devices) {
+    const opt = document.createElement("option");
+    opt.value = d.deviceId;
+    const label = d.deviceName || d.deviceModel || "Device";
+    opt.textContent = `${label} (${d.online ? "online" : "offline"})`;
+    select.appendChild(opt);
+  }
+  const pick = devices.some((d) => d.deviceId === prev)
+    ? prev
+    : (devices.find((d) => d.online)?.deviceId || devices[0].deviceId);
+  select.value = pick;
+  selectedWorkspaceDeviceId = pick;
+  syncHiddenDeviceSelects(pick);
+  const chosen = devices.find((d) => d.deviceId === pick);
+  if (hint && chosen) {
+    hint.textContent = `${chosen.manufacturer || ""} ${chosen.deviceModel || ""} · Android ${chosen.androidVersion || "?"} · battery ${chosen.batteryLevel ?? "—"}%`.trim();
+  }
+}
+
+function setPhoneTab(tabId) {
+  activePhoneTab = String(tabId || "camera");
+  document.querySelectorAll(".phone-tab").forEach((btn) => {
+    const on = btn.dataset.phoneTab === activePhoneTab;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  document.querySelectorAll(".phone-tab-panel").forEach((panel) => {
+    panel.hidden = panel.dataset.phonePanel !== activePhoneTab;
+  });
+  if (activePhoneTab === "camera") {
+    // ensure device card visible for selection
+    if (cachedDevices.length) renderDevices(cachedDevices, cachedClients);
+  }
+  if (activePhoneTab === "location") refreshLocationPanel().catch(() => {});
+  if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
+  if (activePhoneTab === "gallery") refreshGalleryPanel().catch(() => {});
+  if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
+}
+
+function onWorkspaceDeviceChanged() {
+  const select = document.getElementById("workspace-device-select");
+  selectedWorkspaceDeviceId = String(select?.value || "");
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const chosen = (cachedDevices || []).find((d) => d.deviceId === selectedWorkspaceDeviceId);
+  const hint = document.getElementById("workspace-device-hint");
+  if (hint && chosen) {
+    hint.textContent = `${chosen.manufacturer || ""} ${chosen.deviceModel || ""} · Android ${chosen.androidVersion || "?"} · battery ${chosen.batteryLevel ?? "—"}%`.trim();
+  }
+  setPhoneTab(activePhoneTab);
 }
 
 function ensureSocialFrame() {
@@ -141,7 +236,7 @@ function setLoggedOutUi() {
   }
   if (headerUser) headerUser.textContent = "";
   if (authStatus) authStatus.textContent = "Not logged in";
-  showPanel("home");
+  showPanel("phone");
 }
 
 const CLIENT_ID_KEY = "autoreplybot_remote_client_id";
@@ -264,9 +359,19 @@ async function ensureBrowserIdentity() {
 
 function renderDevices(devices, clients) {
   deviceById = new Map((devices || []).map((d) => [d.deviceId, d]));
-  if (!devices.length) {
+  if (!deviceList) return;
+  const all = (devices || []).filter((d) => d && !d.revoked);
+  const focused = selectedWorkspaceDeviceId
+    ? all.filter((d) => d.deviceId === selectedWorkspaceDeviceId)
+    : all.slice(0, 1);
+  if (!all.length) {
     deviceList.textContent =
-      "No devices yet. Open the Android app → Remote Camera & Voice → enable the feature.";
+      "No devices yet. Tap “Connect new device” above, or open the Android app → Remote Camera & Voice → enable Remote Control.";
+    deviceList.classList.add("muted");
+    return;
+  }
+  if (!focused.length) {
+    deviceList.textContent = "Select a device from the dropdown above.";
     deviceList.classList.add("muted");
     return;
   }
@@ -274,7 +379,7 @@ function renderDevices(devices, clients) {
   const client = preferredClient(clients);
   const clientId = client?.clientId || "";
   const autoApprove = Boolean(client?.autoApproveSessions);
-  deviceList.innerHTML = devices
+  deviceList.innerHTML = focused
     .map((d) => {
       const online = Boolean(d.online);
       const id = escapeHtml(d.deviceId);
@@ -1323,21 +1428,26 @@ let cachedClients = [];
 
 async function refreshDevices() {
   if (!idToken) {
-    deviceList.textContent = "Sign in to load devices.";
-    deviceList.classList.add("muted");
+    if (deviceList) {
+      deviceList.textContent = "Sign in to load devices.";
+      deviceList.classList.add("muted");
+    }
     updateStatPhones(0, 0);
     return;
   }
-  deviceList.textContent = "Loading…";
+  if (deviceList) deviceList.textContent = "Loading…";
   try {
     const data = await api("/api/device/list");
     cachedDevices = data.devices || [];
     const online = cachedDevices.filter((d) => d.online).length;
     updateStatPhones(cachedDevices.length, online);
+    fillWorkspaceDeviceSelect();
     renderDevices(cachedDevices, cachedClients);
   } catch (e) {
-    deviceList.textContent = e instanceof Error ? e.message : String(e);
-    deviceList.classList.add("muted");
+    if (deviceList) {
+      deviceList.textContent = e instanceof Error ? e.message : String(e);
+      deviceList.classList.add("muted");
+    }
   }
 }
 
@@ -1373,7 +1483,7 @@ function updatePairingUi(isPaired) {
     homeStatus.textContent = browserPaired
       ? hasLive
         ? "This browser is paired and has a live session. Use Disconnect on Pair New Browser to end it."
-        : "This browser is paired. Open My Phones and tap Connect when you want a live session."
+        : "This browser is paired. Open My Phone and tap Connect when you want a live session."
       : "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
   }
   if (btnHomePair) btnHomePair.hidden = browserPaired;
@@ -1513,7 +1623,7 @@ function renderMedia(items) {
     mediaList.innerHTML = `<article class="surface empty-media">
       <p>No uploaded media yet.</p>
       <p class="muted">During a live session on My Phones, use Capture photo / Record video / Record audio file. Files upload to Firebase automatically.</p>
-      <button type="button" class="btn-primary nav-jump" data-panel="devices">Open My Phones</button>
+      <button type="button" class="btn-primary nav-jump" data-panel="phone">Open My Phone</button>
     </article>`;
     mediaList.querySelectorAll(".nav-jump").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1700,6 +1810,23 @@ async function main() {
   );
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
+  document.getElementById("workspace-device-select")?.addEventListener("change", () => {
+    onWorkspaceDeviceChanged();
+  });
+  document.getElementById("btn-add-device")?.addEventListener("click", () => {
+    const help = document.getElementById("add-device-help");
+    if (help) help.hidden = false;
+  });
+  document.getElementById("btn-add-device-close")?.addEventListener("click", () => {
+    const help = document.getElementById("add-device-help");
+    if (help) help.hidden = true;
+  });
+  document.querySelectorAll(".phone-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.phoneTab;
+      if (tab) setPhoneTab(tab);
+    });
+  });
   if (btnRefreshClients) btnRefreshClients.addEventListener("click", () => refreshClients());
   if (btnRefreshSessions) {
     btnRefreshSessions.addEventListener("click", () => refreshSessions());
@@ -1753,7 +1880,7 @@ async function main() {
     idToken = await user.getIdToken();
     firebaseUid = user.uid;
     setLoggedInUi(user);
-    showPanel("home");
+    showPanel("phone");
     await refreshDashboard();
   });
 }
@@ -1783,8 +1910,9 @@ function requireClientId() {
 
 async function refreshLocationPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
-  fillDeviceSelect(document.getElementById("location-device-select"));
-  const deviceId = document.getElementById("location-device-select")?.value;
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("location-device-select")?.value;
   const body = document.getElementById("location-panel-body");
   if (!body) return;
   if (!deviceId) {
@@ -1956,8 +2084,9 @@ function renderDeviceInfoHuman(info) {
 
 async function refreshInfoPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
-  fillDeviceSelect(document.getElementById("info-device-select"));
-  const deviceId = document.getElementById("info-device-select")?.value;
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
   const body = document.getElementById("info-panel-body");
   if (!body) return;
   if (!deviceId) {
@@ -1977,8 +2106,9 @@ async function refreshInfoPanel() {
 
 async function refreshGalleryPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
-  fillDeviceSelect(document.getElementById("gallery-device-select"));
-  const deviceId = document.getElementById("gallery-device-select")?.value;
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("gallery-device-select")?.value;
   const list = document.getElementById("gallery-list");
   if (!list) return;
   if (!deviceId) {
@@ -2032,8 +2162,9 @@ async function refreshGalleryPanel() {
 
 async function refreshFilesPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
-  fillDeviceSelect(document.getElementById("files-device-select"));
-  const deviceId = document.getElementById("files-device-select")?.value;
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("files-device-select")?.value;
   const body = document.getElementById("files-panel-body");
   if (!body) return;
   if (!deviceId) {
@@ -2108,7 +2239,7 @@ async function refreshMultiViewPanel() {
 document.getElementById("btn-loc-refresh")?.addEventListener("click", () => refreshLocationPanel());
 document.getElementById("btn-loc-current")?.addEventListener("click", async () => {
   try {
-    const deviceId = document.getElementById("location-device-select")?.value;
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("location-device-select")?.value;
     const clientId = requireClientId();
     await api("/api/device/location/request", {
       method: "POST",
@@ -2130,7 +2261,7 @@ document.getElementById("btn-loc-current")?.addEventListener("click", async () =
 });
 document.getElementById("btn-loc-live")?.addEventListener("click", async () => {
   try {
-    const deviceId = document.getElementById("location-device-select")?.value;
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("location-device-select")?.value;
     const clientId = requireClientId();
     await api("/api/device/location/live", {
       method: "POST",
@@ -2143,7 +2274,7 @@ document.getElementById("btn-loc-live")?.addEventListener("click", async () => {
 });
 document.getElementById("btn-loc-stop")?.addEventListener("click", async () => {
   try {
-    const deviceId = document.getElementById("location-device-select")?.value;
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("location-device-select")?.value;
     const clientId = requireClientId();
     await api("/api/device/location/stop", {
       method: "POST",
@@ -2155,7 +2286,7 @@ document.getElementById("btn-loc-stop")?.addEventListener("click", async () => {
 });
 document.getElementById("btn-info-refresh")?.addEventListener("click", async () => {
   try {
-    const deviceId = document.getElementById("info-device-select")?.value;
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
     const clientId = requireClientId();
     await api("/api/device/info/refresh", {
       method: "POST",
@@ -2169,7 +2300,7 @@ document.getElementById("btn-info-refresh")?.addEventListener("click", async () 
 document.getElementById("btn-gallery-refresh")?.addEventListener("click", () => refreshGalleryPanel());
 document.getElementById("btn-gallery-index")?.addEventListener("click", async () => {
   try {
-    const deviceId = document.getElementById("gallery-device-select")?.value;
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("gallery-device-select")?.value;
     const clientId = requireClientId();
     await api("/api/device/gallery/index", {
       method: "POST",
@@ -2183,7 +2314,7 @@ document.getElementById("btn-gallery-index")?.addEventListener("click", async ()
 document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());
 document.getElementById("btn-files-list")?.addEventListener("click", async () => {
   try {
-    const deviceId = document.getElementById("files-device-select")?.value;
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("files-device-select")?.value;
     const clientId = requireClientId();
     const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
     const grantId = (data.folders || [])[0]?.grantId;
@@ -2205,7 +2336,3 @@ document.getElementById("btn-files-list")?.addEventListener("click", async () =>
 });
 document.getElementById("btn-transfers-refresh")?.addEventListener("click", () => refreshTransfersPanel());
 document.getElementById("btn-multiview-refresh")?.addEventListener("click", () => refreshMultiViewPanel());
-document.getElementById("location-device-select")?.addEventListener("change", () => refreshLocationPanel());
-document.getElementById("info-device-select")?.addEventListener("change", () => refreshInfoPanel());
-document.getElementById("gallery-device-select")?.addEventListener("change", () => refreshGalleryPanel());
-document.getElementById("files-device-select")?.addEventListener("change", () => refreshFilesPanel());
