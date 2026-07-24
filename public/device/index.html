@@ -3,28 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Remote Devices — AutoReplyBot</title>
+  <title>Remote Camera &amp; Voice — AutoReplyBot</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/device/styles.css" />
 </head>
-<body>
-  <main class="container">
-    <p class="muted"><a href="/">← Facebook dashboard</a></p>
-    <h1>Remote Camera &amp; Voice</h1>
-    <p class="muted">Register phones in the Android app, pair this browser, then Connect for a live WebRTC view (phone must Approve).</p>
+<body class="device-app">
+  <!-- LOGIN ONLY (logged out) -->
+  <div id="view-login" class="login-shell">
+    <div class="login-card card">
+      <p class="muted login-back"><a href="/">← Facebook dashboard</a></p>
+      <h1>Remote Camera &amp; Voice</h1>
+      <p class="muted">Sign in with the <strong>same email and password</strong> as the Android app.</p>
 
-    <nav class="section-nav" aria-label="Remote sections">
-      <a href="#section-auth">Account</a>
-      <a href="#section-devices">Devices</a>
-      <a href="#section-pair">Pair</a>
-      <a href="#section-sessions">Sessions</a>
-      <a href="#section-security">Security</a>
-      <a href="#section-settings">Settings</a>
-    </nav>
-
-    <section class="card" id="section-auth">
-      <h2>Account</h2>
-      <p class="muted">Sign in with the same email and password as the Android app.</p>
       <div class="auth-form">
         <label>Email
           <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
@@ -35,69 +25,115 @@
       </div>
       <div class="row">
         <button id="btn-login-email" type="button">Sign in</button>
-        <button id="btn-register-email" class="secondary" type="button">Register</button>
-        <button id="btn-logout" class="secondary" type="button">Logout</button>
-        <button id="btn-refresh" class="secondary" type="button">Refresh devices</button>
+        <button id="btn-register-email" class="secondary" type="button">Create account</button>
       </div>
       <div class="row">
-        <button id="btn-login" class="secondary" type="button">Login with Google</button>
+        <button id="btn-login" class="secondary" type="button">Continue with Google</button>
       </div>
       <p id="auth-status" class="muted">Not logged in</p>
-    </section>
+    </div>
+  </div>
 
-    <section class="card" id="section-devices">
-      <h2>Devices</h2>
-      <p class="muted">Online phones you own. Connect starts a request; live viewer and remote controls appear after Approve.</p>
-      <div id="device-list" class="device-list muted">Sign in to load devices.</div>
-    </section>
-
-    <section class="card" id="section-pair">
-      <h2>Pair this browser</h2>
-      <p class="muted">Creates a 5-minute, single-use code. Open Pair website on your phone and enter the code (or scan the QR).</p>
-      <div class="row">
-        <button id="btn-create-pair" type="button">Create pairing code</button>
+  <!-- APP SHELL (logged in) -->
+  <div id="view-app" class="app-shell" hidden>
+    <header class="app-header">
+      <div class="app-brand">
+        <strong>Remote Camera &amp; Voice</strong>
+        <span id="header-user" class="muted header-user"></span>
       </div>
-      <div id="pair-result" class="pair-result" hidden>
-        <p class="pair-code-label">6-digit code</p>
-        <p id="pair-code" class="pair-code" aria-live="polite">------</p>
-        <p id="pair-expires" class="muted"></p>
-        <canvas id="pair-qr" width="180" height="180" aria-label="Pairing QR code"></canvas>
-        <p class="muted pair-payload-wrap">Deep link (for paste):</p>
-        <code id="pair-payload" class="pair-payload"></code>
-      </div>
-      <p id="pair-error" class="pair-error" hidden></p>
-    </section>
+      <button id="btn-logout" class="secondary" type="button">Logout</button>
+    </header>
 
-    <section class="card" id="section-sessions">
-      <h2>Sessions history</h2>
-      <p class="muted">Recent remote sessions for your account (metadata only — no media).</p>
-      <div class="row">
-        <button id="btn-refresh-sessions" class="secondary" type="button">Refresh sessions</button>
-      </div>
-      <div id="session-list" class="device-list muted">Sign in to load sessions.</div>
-    </section>
+    <div class="app-layout">
+      <aside class="app-nav" aria-label="Main menu">
+        <p class="nav-label">Menu</p>
+        <button type="button" class="nav-item active" data-panel="home">1. Home / How to use</button>
+        <button type="button" class="nav-item" data-panel="pair">2. Pair this browser</button>
+        <button type="button" class="nav-item" data-panel="devices">3. My phones</button>
+        <button type="button" class="nav-item" data-panel="sessions">4. Session history</button>
+        <button type="button" class="nav-item" data-panel="security">5. Trusted browsers</button>
+        <button type="button" class="nav-item" data-panel="help">Help &amp; safety</button>
+        <p class="muted nav-fb"><a href="/">Facebook posting dashboard</a></p>
+      </aside>
 
-    <section class="card" id="section-security">
-      <h2>Security — trusted browsers</h2>
-      <p class="muted">Revoke a browser to block new Connect requests from that client.</p>
-      <div class="row">
-        <button id="btn-refresh-clients" class="secondary" type="button">Refresh browsers</button>
-      </div>
-      <div id="client-list" class="device-list muted">Sign in to load trusted browsers.</div>
-    </section>
+      <main class="app-main">
+        <section class="card panel" id="panel-home" data-panel="home">
+          <h2>How to use (simple flow)</h2>
+          <ol class="flow-steps">
+            <li><strong>Pair this browser</strong> — create a code, enter it in the Android app.</li>
+            <li><strong>My phones</strong> — open your phone, choose camera/mic, tap Connect.</li>
+            <li><strong>Approve on phone</strong> — tap Approve in the notification / app screen.</li>
+            <li><strong>Live view</strong> — watch and control from this website.</li>
+            <li><strong>End anytime</strong> — End on website, or Stop / Disconnect on the phone.</li>
+          </ol>
+          <div class="row">
+            <button type="button" class="nav-jump" data-panel="pair">Start: Pair browser</button>
+            <button type="button" class="secondary nav-jump" data-panel="devices">Go to My phones</button>
+          </div>
+        </section>
 
-    <section class="card" id="section-settings">
-      <h2>Settings notes</h2>
-      <ul class="settings-notes muted">
-        <li>Camera/mic never start until you tap <strong>Approve</strong> on the phone.</li>
-        <li>Live video uses WebRTC (STUN; optional TURN via server env). Frames are not stored in Firestore.</li>
-        <li>Photos/recordings are saved on the phone only when you explicitly capture/record.</li>
-        <li>Pairing codes are hashed server-side; clients cannot read <code>pairingCodes</code>.</li>
-        <li>Session requests expire in about 2 minutes if not approved.</li>
-        <li>Deploy TURN credentials with <code>TURN_URL</code>, <code>TURN_USERNAME</code>, <code>TURN_CREDENTIAL</code> for restrictive NAT.</li>
-      </ul>
-    </section>
-  </main>
+        <section class="card panel" id="panel-pair" data-panel="pair" hidden>
+          <h2>Pair this browser</h2>
+          <p class="muted">Step 1 — Creates a 5-minute, one-time code. On the phone open <strong>Remote Camera &amp; Voice → Pair Website</strong> and enter the code (or scan QR).</p>
+          <div class="row">
+            <button id="btn-create-pair" type="button">Create pairing code</button>
+          </div>
+          <div id="pair-result" class="pair-result" hidden>
+            <p class="pair-code-label">6-digit code</p>
+            <p id="pair-code" class="pair-code" aria-live="polite">------</p>
+            <p id="pair-expires" class="muted"></p>
+            <canvas id="pair-qr" width="180" height="180" aria-label="Pairing QR code"></canvas>
+            <p class="muted pair-payload-wrap">Deep link (optional paste):</p>
+            <code id="pair-payload" class="pair-payload"></code>
+            <div class="row" style="justify-content:center;margin-top:12px">
+              <button type="button" class="nav-jump" data-panel="devices">Next: My phones →</button>
+            </div>
+          </div>
+          <p id="pair-error" class="pair-error" hidden></p>
+        </section>
+
+        <section class="card panel" id="panel-devices" data-panel="devices" hidden>
+          <h2>My phones</h2>
+          <p class="muted">Step 2 — Online phones you own. Connect sends a request; live viewer appears after you <strong>Approve</strong> on the phone.</p>
+          <div class="row">
+            <button id="btn-refresh" class="secondary" type="button">Refresh phones</button>
+          </div>
+          <div id="device-list" class="device-list muted">Loading phones…</div>
+        </section>
+
+        <section class="card panel" id="panel-sessions" data-panel="sessions" hidden>
+          <h2>Session history</h2>
+          <p class="muted">Recent remote sessions (metadata only — no video/audio stored here).</p>
+          <div class="row">
+            <button id="btn-refresh-sessions" class="secondary" type="button">Refresh sessions</button>
+          </div>
+          <div id="session-list" class="device-list muted">Loading sessions…</div>
+        </section>
+
+        <section class="card panel" id="panel-security" data-panel="security" hidden>
+          <h2>Trusted browsers</h2>
+          <p class="muted">Revoke a browser to block new Connect requests from that browser.</p>
+          <div class="row">
+            <button id="btn-refresh-clients" class="secondary" type="button">Refresh browsers</button>
+          </div>
+          <div id="client-list" class="device-list muted">Loading trusted browsers…</div>
+        </section>
+
+        <section class="card panel" id="panel-help" data-panel="help" hidden>
+          <h2>Help &amp; safety</h2>
+          <ul class="settings-notes muted">
+            <li>Camera/mic never start until you tap <strong>Approve</strong> on the phone.</li>
+            <li>Live video uses WebRTC. Frames are not stored in Firestore.</li>
+            <li>Photos/recordings save on the phone only when you capture/record on purpose.</li>
+            <li>Pairing codes expire in 5 minutes and can be used once.</li>
+            <li>Session requests expire in about 2 minutes if not approved.</li>
+            <li>If live video fails on some networks, configure TURN on the server.</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </div>
+
   <script type="module" src="/device/app.js"></script>
 </body>
 </html>

@@ -11,10 +11,10 @@ import {
   sanitizeTrustedClient,
   trustedClientsRef,
   writeAuditLog,
-} from "../../lib/pairing.js";
-import { verifyFirebaseIdToken } from "../../lib/auth.js";
-import { checkRateLimit } from "../../lib/rate-limit.js";
-import * as R from "../../lib/remote-constants.js";
+} from "../lib/pairing.js";
+import { verifyFirebaseIdToken } from "../lib/auth.js";
+import { checkRateLimit } from "../lib/rate-limit.js";
+import * as R from "../lib/remote-constants.js";
 import { randomBytes } from "crypto";
 
 const PAIR_CREATE_LIMIT = 10;
@@ -28,9 +28,13 @@ const PAIR_CREATE_WINDOW_MS = 60 * 60 * 1000;
  * GET  /api/pair/clients
  */
 export default async function handler(req, res) {
-  const action = String(req.query?.action || "")
+  let action = String(req.query?.action || "")
     .trim()
     .toLowerCase();
+  if (!action && typeof req.url === "string") {
+    const m = req.url.match(/\/api\/pair\/([A-Za-z0-9_-]+)/i);
+    if (m) action = m[1].toLowerCase();
+  }
 
   if (action === "create") return handleCreate(req, res);
   if (action === "complete") return handleComplete(req, res);

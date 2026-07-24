@@ -20,6 +20,9 @@ import {
 import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm";
 
 const authStatus = document.getElementById("auth-status");
+const headerUser = document.getElementById("header-user");
+const viewLogin = document.getElementById("view-login");
+const viewApp = document.getElementById("view-app");
 const deviceList = document.getElementById("device-list");
 const clientList = document.getElementById("client-list");
 const sessionList = document.getElementById("session-list");
@@ -39,6 +42,40 @@ const pairExpires = document.getElementById("pair-expires");
 const pairPayload = document.getElementById("pair-payload");
 const pairQr = document.getElementById("pair-qr");
 const pairError = document.getElementById("pair-error");
+
+function showPanel(panelId) {
+  const id = String(panelId || "home");
+  document.querySelectorAll(".panel").forEach((el) => {
+    el.hidden = el.dataset.panel !== id;
+  });
+  document.querySelectorAll(".nav-item").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.panel === id);
+  });
+  if (id === "devices") refreshDevices().catch(() => {});
+  if (id === "sessions") refreshSessions().catch(() => {});
+  if (id === "security") refreshClients().catch(() => {});
+}
+
+function setLoggedInUi(user) {
+  if (viewLogin) viewLogin.hidden = true;
+  if (viewApp) viewApp.hidden = false;
+  if (headerUser) {
+    headerUser.textContent = user?.email || user?.uid || "";
+  }
+  if (authStatus) {
+    authStatus.textContent = user
+      ? `Signed in as ${user.email || user.uid}`
+      : "Not logged in";
+  }
+}
+
+function setLoggedOutUi() {
+  if (viewLogin) viewLogin.hidden = false;
+  if (viewApp) viewApp.hidden = true;
+  if (headerUser) headerUser.textContent = "";
+  if (authStatus) authStatus.textContent = "Not logged in";
+  showPanel("home");
+}
 
 const CLIENT_ID_KEY = "autoreplybot_remote_client_id";
 const SIGNAL_TTL_MS = 5 * 60 * 1000;
@@ -98,7 +135,11 @@ async function api(path, options = {}) {
     },
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new Error(
+      body.error || body.message || body.code || `HTTP ${res.status}`
+    );
+  }
   return body;
 }
 
@@ -963,12 +1004,19 @@ async function main() {
     })
   );
   btnLogout.addEventListener("click", () => signOut(auth));
-  btnRefresh.addEventListener("click", () => refreshDevices());
-  btnRefreshClients.addEventListener("click", () => refreshClients());
+  if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
+  if (btnRefreshClients) btnRefreshClients.addEventListener("click", () => refreshClients());
   if (btnRefreshSessions) {
     btnRefreshSessions.addEventListener("click", () => refreshSessions());
   }
-  btnCreatePair.addEventListener("click", () => createPairing());
+  if (btnCreatePair) btnCreatePair.addEventListener("click", () => createPairing());
+
+  document.querySelectorAll(".nav-item, .nav-jump").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const panel = btn.dataset.panel;
+      if (panel) showPanel(panel);
+    });
+  });
 
   onAuthStateChanged(auth, async (user) => {
     for (const deviceId of [...liveByDevice.keys()]) {
@@ -977,22 +1025,27 @@ async function main() {
     if (!user) {
       idToken = null;
       firebaseUid = null;
-      authStatus.textContent = "Not logged in";
-      deviceList.textContent = "Sign in to load devices.";
-      deviceList.classList.add("muted");
-      clientList.textContent = "Sign in to load trusted browsers.";
-      clientList.classList.add("muted");
+      setLoggedOutUi();
+      if (deviceList) {
+        deviceList.textContent = "Sign in to load devices.";
+        deviceList.classList.add("muted");
+      }
+      if (clientList) {
+        clientList.textContent = "Sign in to load trusted browsers.";
+        clientList.classList.add("muted");
+      }
       if (sessionList) {
         sessionList.textContent = "Sign in to load sessions.";
         sessionList.classList.add("muted");
       }
-      pairResult.hidden = true;
+      if (pairResult) pairResult.hidden = true;
       showPairError("");
       return;
     }
     idToken = await user.getIdToken();
     firebaseUid = user.uid;
-    authStatus.textContent = `Signed in as ${user.email || user.uid}`;
+    setLoggedInUi(user);
+    showPanel("home");
     await refreshClients();
     await refreshDevices();
     await refreshSessions();

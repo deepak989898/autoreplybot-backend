@@ -1,14 +1,14 @@
 import { randomBytes } from "crypto";
 import { getMessaging } from "firebase-admin/messaging";
-import { verifyFirebaseIdToken } from "../../lib/auth.js";
-import { db } from "../../lib/firebase.js";
-import { buildIceServers } from "../../lib/ice-servers.js";
+import { verifyFirebaseIdToken } from "../lib/auth.js";
+import { db } from "../lib/firebase.js";
+import { buildIceServers } from "../lib/ice-servers.js";
 import {
   endActiveSessionsForDevice,
   parseBody,
   writeAuditLog,
-} from "../../lib/pairing.js";
-import * as R from "../../lib/remote-constants.js";
+} from "../lib/pairing.js";
+import * as R from "../lib/remote-constants.js";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -22,13 +22,17 @@ const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
  * POST /api/device/session/end
  */
 export default async function handler(req, res) {
+  let path = "";
   const slug = req.query?.slug;
-  const parts = Array.isArray(slug)
-    ? slug.map((s) => String(s))
-    : String(slug || "")
-        .split("/")
-        .filter(Boolean);
-  const path = parts.join("/");
+  if (Array.isArray(slug)) {
+    path = slug.map((s) => String(s)).join("/");
+  } else if (slug != null && String(slug).trim()) {
+    path = String(slug).trim();
+  } else if (typeof req.url === "string") {
+    const m = req.url.match(/\/api\/device\/([^?]+)/i);
+    if (m) path = decodeURIComponent(m[1]).replace(/\/+$/, "");
+  }
+  path = path.replace(/^\/+/, "").replace(/\/+$/, "");
 
   if (path === "list") return handleList(req, res);
   if (path === "sessions") return handleSessions(req, res);
@@ -36,7 +40,7 @@ export default async function handler(req, res) {
   if (path === "session/request") return handleSessionRequest(req, res);
   if (path === "session/end") return handleSessionEnd(req, res);
 
-  return res.status(404).json({ error: "Unknown device route", code: "NOT_FOUND" });
+  return res.status(404).json({ error: "Unknown device route", code: "NOT_FOUND", path });
 }
 
 function sanitizeDevice(id, data) {

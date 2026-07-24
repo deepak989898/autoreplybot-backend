@@ -1,3 +1,146 @@
+.device-app {
+  margin: 0;
+  min-height: 100vh;
+  background: #eef2f7;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 14px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  margin: 0;
+}
+
+.login-back {
+  margin-top: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.app-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.header-user {
+  color: #94a3b8 !important;
+  font-size: 0.85rem;
+}
+
+.app-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 0;
+  max-width: 1100px;
+  margin: 0 auto;
+  min-height: calc(100vh - 64px);
+}
+
+.app-nav {
+  background: #fff;
+  border-right: 1px solid #e2e8f0;
+  padding: 16px 12px;
+}
+
+.nav-label {
+  margin: 0 8px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #0f172a;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+
+.nav-item:hover {
+  background: #f1f5f9;
+}
+
+.nav-item.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.nav-fb {
+  margin: 16px 8px 0;
+  font-size: 0.85rem;
+}
+
+.app-main {
+  padding: 16px;
+}
+
+.app-main .panel {
+  margin-top: 0;
+}
+
+.flow-steps {
+  margin: 0 0 16px;
+  padding-left: 1.2rem;
+  line-height: 1.6;
+  color: #334155;
+}
+
+.flow-steps li {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 800px) {
+  .app-layout {
+    grid-template-columns: 1fr;
+  }
+  .app-nav {
+    border-right: 0;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+  }
+  .nav-label,
+  .nav-fb {
+    width: 100%;
+  }
+  .nav-item {
+    width: auto;
+    margin-bottom: 0;
+  }
+}
+
 .device-list {
   display: grid;
   gap: 12px;
@@ -154,23 +297,6 @@
   color: #cf222e;
   font-size: 0.9rem;
   margin: 0;
-}
-
-.section-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  margin: 0 0 16px;
-  font-size: 0.9rem;
-}
-
-.section-nav a {
-  color: #0969da;
-  text-decoration: none;
-}
-
-.section-nav a:hover {
-  text-decoration: underline;
 }
 
 .live-controls {
