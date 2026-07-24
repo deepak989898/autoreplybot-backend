@@ -21,8 +21,8 @@
       "destination": "/api/device-router?slug=session/:op"
     },
     {
-      "source": "/api/device/:op",
-      "destination": "/api/device-router?slug=:op"
+      "source": "/api/device/:path*",
+      "destination": "/api/device-router?slug=:path*"
     },
     {
       "source": "/",

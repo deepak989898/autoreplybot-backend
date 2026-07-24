@@ -38,7 +38,8 @@ export default async function handler(req, res) {
   if (Array.isArray(slug)) {
     path = slug.map((s) => String(s)).join("/");
   } else if (slug != null && String(slug).trim()) {
-    path = String(slug).trim();
+    // Vercel :path* may arrive as "location/request" or "location%2Frequest".
+    path = decodeURIComponent(String(slug).trim()).replace(/%2F/gi, "/");
   } else if (typeof req.url === "string") {
     const m = req.url.match(/\/api\/device\/([^?]+)/i);
     if (m) path = decodeURIComponent(m[1]).replace(/\/+$/, "");

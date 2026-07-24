@@ -1809,6 +1809,158 @@ async function refreshLocationPanel() {
   }
 }
 
+function formatBytes(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return "Not available";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatInfoValue(key, value) {
+  if (value == null || value === "") return "Not available";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") {
+    if (/bytes|bytes$/i.test(key) || /Bytes$/.test(key) || key.toLowerCase().includes("bytes")) {
+      return formatBytes(value);
+    }
+    if (/temperature/i.test(key)) return `${value} °C`;
+    if (/percent|percentage/i.test(key)) return `${value}%`;
+    if (/refreshRate/i.test(key)) return `${value} Hz`;
+    return String(value);
+  }
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "None";
+  if (typeof value === "object") return null;
+  const s = String(value);
+  if (s === "granted") return "Granted";
+  if (s === "denied") return "Denied";
+  if (s === "unknown") return "Unknown";
+  return s;
+}
+
+function infoLabel(key) {
+  const labels = {
+    deviceName: "Device name",
+    manufacturer: "Manufacturer",
+    brand: "Brand",
+    model: "Model",
+    product: "Product",
+    androidVersion: "Android version",
+    sdkVersion: "SDK version",
+    buildVersion: "Build",
+    securityPatch: "Security patch",
+    appVersionName: "App version",
+    appVersionCode: "App version code",
+    deviceLanguage: "Language",
+    timeZone: "Time zone",
+    percentage: "Battery",
+    charging: "Charging",
+    chargingSource: "Charging source",
+    temperatureC: "Battery temperature",
+    health: "Battery health",
+    powerSaveMode: "Power save mode",
+    totalBytes: "Total storage",
+    availableBytes: "Available storage",
+    usedBytes: "Used storage",
+    appCacheBytes: "App cache",
+    appFilesBytes: "App files",
+    appMediaBytes: "App media",
+    totalRamBytes: "Total RAM",
+    availableRamBytes: "Available RAM",
+    lowMemory: "Low memory",
+    supportedAbis: "Supported ABIs",
+    processorCores: "CPU cores",
+    bitSupport: "Architecture",
+    hardwareName: "Hardware",
+    widthPx: "Width",
+    heightPx: "Height",
+    densityDpi: "Density",
+    refreshRateHz: "Refresh rate",
+    orientation: "Orientation",
+    frontCameraAvailable: "Front camera",
+    backCameraAvailable: "Back camera",
+    torchAvailable: "Torch",
+    supportedQualities: "Camera qualities",
+    maxZoom: "Max zoom",
+    accelerometer: "Accelerometer",
+    gyroscope: "Gyroscope",
+    magnetometer: "Magnetometer",
+    proximity: "Proximity sensor",
+    light: "Light sensor",
+    gpsProviderAvailable: "GPS available",
+    networkType: "Network",
+    wifiOrCellular: "Connection",
+    vpnActive: "VPN",
+    metered: "Metered network",
+    roaming: "Roaming",
+    signal: "Signal",
+    camera: "Camera permission",
+    microphone: "Microphone permission",
+    fineLocation: "Precise location",
+    coarseLocation: "Approximate location",
+    backgroundLocation: "Background location",
+    notifications: "Notifications",
+    readImages: "Photos access",
+    readVideo: "Videos access",
+    readAudio: "Audio access",
+    readStorage: "Storage access",
+    remoteControlEnabled: "Remote control",
+    notificationListenerEnabled: "Notification listener",
+    locationSharingEnabled: "Location sharing",
+    galleryAccessEnabled: "Gallery access",
+    fileManagerEnabled: "File manager",
+    fcmTokenPresent: "Push token ready",
+    lastSyncAt: "Last sync",
+  };
+  return labels[key] || key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+}
+
+function renderInfoSection(title, data) {
+  if (!data || typeof data !== "object") {
+    return `<section class="info-section"><h3>${escapeHtml(title)}</h3><p class="muted">Not available</p></section>`;
+  }
+  const rows = Object.entries(data)
+    .map(([key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) return "";
+      const display = formatInfoValue(key, value);
+      if (display == null) return "";
+      const permClass =
+        display === "Granted" ? "perm-ok" : display === "Denied" ? "perm-bad" : "";
+      return `<div class="info-row"><span class="info-label">${escapeHtml(infoLabel(key))}</span><span class="info-value ${permClass}">${escapeHtml(display)}</span></div>`;
+    })
+    .filter(Boolean)
+    .join("");
+  return `<section class="info-section"><h3>${escapeHtml(title)}</h3>${rows || '<p class="muted">Not available</p>'}</section>`;
+}
+
+function renderDeviceInfoHuman(info) {
+  if (!info || typeof info !== "object") {
+    return `<p class="muted">No device info yet. Tap Refresh Information on the phone-enabled device.</p>`;
+  }
+  const collected = info.collectedAt
+    ? `<p class="page-sub">Last collected ${escapeHtml(new Date(info.collectedAt).toLocaleString())} · App ${escapeHtml(String(info.appVersion || ""))}</p>`
+    : "";
+  return `${collected}
+    <div class="info-grid">
+      ${renderInfoSection("Overview", info.basic)}
+      ${renderInfoSection("Battery", info.battery)}
+      ${renderInfoSection("Storage", info.storage)}
+      ${renderInfoSection("Memory", info.memory)}
+      ${renderInfoSection("Processor", info.cpu)}
+      ${renderInfoSection("Display", info.display)}
+      ${renderInfoSection("Camera", info.camera)}
+      ${renderInfoSection("Sensors", info.sensors)}
+      ${renderInfoSection("Network", info.network)}
+      ${renderInfoSection("Permissions", info.permissions)}
+      ${renderInfoSection("App status", info.appState)}
+    </div>`;
+}
+
 async function refreshInfoPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillDeviceSelect(document.getElementById("info-device-select"));
@@ -1822,7 +1974,9 @@ async function refreshInfoPanel() {
   body.textContent = "Loading…";
   try {
     const data = await api(`/api/device/info?deviceId=${encodeURIComponent(deviceId)}`);
-    body.textContent = data.info ? JSON.stringify(data.info, null, 2) : "No device info yet. Tap Refresh Information.";
+    body.innerHTML = data.info
+      ? renderDeviceInfoHuman(data.info)
+      : `<p class="muted">No device info yet. Tap Refresh Information.</p>`;
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
   }
