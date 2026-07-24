@@ -316,6 +316,133 @@ service cloud.firestore {
           && countersIncrease(resource.data, request.resource.data);
       allow delete: if owner(uid);
     }
+
+    function remoteDevice(d, deviceId) {
+      return d.keys().hasAll([
+          'deviceId', 'deviceName', 'deviceModel', 'manufacturer', 'androidVersion',
+          'appVersion', 'createdAt', 'lastSeenAt', 'online', 'batteryLevel',
+          'isCharging', 'networkType', 'fcmToken', 'cameraAvailable',
+          'microphoneAvailable', 'flashlightAvailable', 'revoked', 'ownerUid',
+          'remoteControlEnabled'
+        ])
+        && d.deviceId == deviceId && id(d.deviceId) && d.ownerUid == uid
+        && text(d.deviceName, 120) && text(d.deviceModel, 120)
+        && text(d.manufacturer, 120) && text(d.androidVersion, 40)
+        && text(d.appVersion, 40) && millis(d.createdAt) && millis(d.lastSeenAt)
+        && d.online is bool && d.batteryLevel is int
+        && d.batteryLevel >= 0 && d.batteryLevel <= 100
+        && d.isCharging is bool && text(d.networkType, 40)
+        && text(d.fcmToken, 4096)
+        && d.cameraAvailable is bool && d.microphoneAvailable is bool
+        && d.flashlightAvailable is bool && d.revoked is bool
+        && d.remoteControlEnabled is bool;
+    }
+    function trustedClient(d, clientId) {
+      return d.keys().hasAll([
+          'clientId', 'clientName', 'browser', 'platform', 'createdAt',
+          'lastUsedAt', 'revoked', 'ownerUid'
+        ])
+        && d.clientId == clientId && id(d.clientId) && d.ownerUid == uid
+        && text(d.clientName, 120) && text(d.browser, 120) && text(d.platform, 120)
+        && millis(d.createdAt) && millis(d.lastUsedAt) && d.revoked is bool;
+    }
+    function sessionRequest(d, requestId) {
+      return d.keys().hasAll([
+          'requestId', 'deviceId', 'clientId', 'requestedCapabilities',
+          'status', 'createdAt', 'expiresAt', 'ownerUid'
+        ])
+        && d.requestId == requestId && id(d.requestId) && id(d.deviceId)
+        && id(d.clientId) && d.ownerUid == uid
+        && d.status in ['pending', 'approved', 'rejected', 'expired', 'cancelled']
+        && millis(d.createdAt) && millis(d.expiresAt) && d.expiresAt >= d.createdAt;
+    }
+    function remoteSession(d, sessionId) {
+      return d.keys().hasAll([
+          'sessionId', 'deviceId', 'clientId', 'status', 'startedAt',
+          'ownerUid', 'selectedCamera', 'microphoneEnabled', 'flashlightEnabled', 'quality'
+        ])
+        && d.sessionId == sessionId && id(d.sessionId) && id(d.deviceId)
+        && id(d.clientId) && d.ownerUid == uid
+        && d.status in ['requesting', 'connecting', 'connected', 'reconnecting', 'ended', 'failed']
+        && millis(d.startedAt) && text(d.selectedCamera, 40)
+        && d.microphoneEnabled is bool && d.flashlightEnabled is bool
+        && text(d.quality, 40);
+    }
+    function remoteSignal(d, signalId) {
+      return d.keys().hasAll([
+          'signalId', 'type', 'sender', 'payload', 'createdAt', 'expiresAt'
+        ])
+        && d.signalId == signalId && id(d.signalId)
+        && d.type in ['offer', 'answer', 'ice']
+        && d.sender in ['device', 'client']
+        && text(d.payload, 200000) && millis(d.createdAt) && millis(d.expiresAt);
+    }
+    function remoteCommandAction(v) {
+      return v in [
+        'END_SESSION', 'SWITCH_CAMERA', 'SET_CAMERA_FRONT', 'SET_CAMERA_BACK',
+        'TORCH_ON', 'TORCH_OFF', 'MIC_MUTE', 'MIC_UNMUTE', 'CAPTURE_PHOTO',
+        'START_VIDEO_RECORDING', 'STOP_VIDEO_RECORDING',
+        'START_AUDIO_RECORDING', 'STOP_AUDIO_RECORDING',
+        'SET_QUALITY', 'SET_ZOOM', 'PING_DEVICE'
+      ];
+    }
+    function remoteCommand(d, commandId) {
+      return d.keys().hasAll([
+          'commandId', 'sessionId', 'deviceId', 'action', 'createdAt',
+          'expiresAt', 'status', 'ownerUid'
+        ])
+        && d.commandId == commandId && id(d.commandId) && id(d.sessionId)
+        && id(d.deviceId) && d.ownerUid == uid
+        && remoteCommandAction(d.action)
+        && millis(d.createdAt) && millis(d.expiresAt)
+        && d.status in ['pending', 'acked', 'failed', 'ignored', 'expired'];
+    }
+    function auditLog(d, logId) {
+      return d.keys().hasAll(['logId', 'action', 'timestamp', 'result', 'ownerUid'])
+        && d.logId == logId && id(d.logId) && d.ownerUid == uid
+        && text(d.action, 80) && millis(d.timestamp) && text(d.result, 40);
+    }
+
+    match /users/{uid}/devices/{deviceId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && remoteDevice(request.resource.data, deviceId);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/trustedClients/{clientId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && trustedClient(request.resource.data, clientId);
+      allow delete: if owner(uid);
+    }
+    // Pairing codes store only hashes; Admin SDK writes via API — deny all clients.
+    match /users/{uid}/pairingCodes/{codeId} {
+      allow read, write: if false;
+    }
+    match /users/{uid}/sessionRequests/{requestId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && sessionRequest(request.resource.data, requestId);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/sessions/{sessionId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && remoteSession(request.resource.data, sessionId);
+      allow delete: if owner(uid);
+      match /signals/{signalId} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && remoteSignal(request.resource.data, signalId);
+        allow update, delete: if owner(uid);
+      }
+    }
+    match /users/{uid}/commands/{commandId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && remoteCommand(request.resource.data, commandId);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/auditLogs/{logId} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && auditLog(request.resource.data, logId);
+      allow update, delete: if false;
+    }
+
     match /users/{uid}/integrations/{doc} {
       allow read, write: if false;
     }

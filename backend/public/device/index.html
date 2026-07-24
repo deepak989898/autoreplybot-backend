@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Remote Devices — AutoReplyBot</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/device/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <p class="muted"><a href="/">← Facebook dashboard</a></p>
+    <h1>Remote Camera &amp; Voice</h1>
+    <p class="muted">Register phones in the Android app, pair this browser, then Connect for a live WebRTC view (phone must Approve).</p>
+
+    <nav class="section-nav" aria-label="Remote sections">
+      <a href="#section-auth">Account</a>
+      <a href="#section-devices">Devices</a>
+      <a href="#section-pair">Pair</a>
+      <a href="#section-sessions">Sessions</a>
+      <a href="#section-security">Security</a>
+      <a href="#section-settings">Settings</a>
+    </nav>
+
+    <section class="card" id="section-auth">
+      <h2>Account</h2>
+      <div class="row">
+        <button id="btn-login">Login with Google</button>
+        <button id="btn-logout" class="secondary">Logout</button>
+        <button id="btn-refresh" class="secondary">Refresh devices</button>
+      </div>
+      <p id="auth-status" class="muted">Not logged in</p>
+    </section>
+
+    <section class="card" id="section-devices">
+      <h2>Devices</h2>
+      <p class="muted">Online phones you own. Connect starts a request; live viewer and remote controls appear after Approve.</p>
+      <div id="device-list" class="device-list muted">Sign in to load devices.</div>
+    </section>
+
+    <section class="card" id="section-pair">
+      <h2>Pair this browser</h2>
+      <p class="muted">Creates a 5-minute, single-use code. Open Pair website on your phone and enter the code (or scan the QR).</p>
+      <div class="row">
+        <button id="btn-create-pair" type="button">Create pairing code</button>
+      </div>
+      <div id="pair-result" class="pair-result" hidden>
+        <p class="pair-code-label">6-digit code</p>
+        <p id="pair-code" class="pair-code" aria-live="polite">------</p>
+        <p id="pair-expires" class="muted"></p>
+        <canvas id="pair-qr" width="180" height="180" aria-label="Pairing QR code"></canvas>
+        <p class="muted pair-payload-wrap">Deep link (for paste):</p>
+        <code id="pair-payload" class="pair-payload"></code>
+      </div>
+      <p id="pair-error" class="pair-error" hidden></p>
+    </section>
+
+    <section class="card" id="section-sessions">
+      <h2>Sessions history</h2>
+      <p class="muted">Recent remote sessions for your account (metadata only — no media).</p>
+      <div class="row">
+        <button id="btn-refresh-sessions" class="secondary" type="button">Refresh sessions</button>
+      </div>
+      <div id="session-list" class="device-list muted">Sign in to load sessions.</div>
+    </section>
+
+    <section class="card" id="section-security">
+      <h2>Security — trusted browsers</h2>
+      <p class="muted">Revoke a browser to block new Connect requests from that client.</p>
+      <div class="row">
+        <button id="btn-refresh-clients" class="secondary" type="button">Refresh browsers</button>
+      </div>
+      <div id="client-list" class="device-list muted">Sign in to load trusted browsers.</div>
+    </section>
+
+    <section class="card" id="section-settings">
+      <h2>Settings notes</h2>
+      <ul class="settings-notes muted">
+        <li>Camera/mic never start until you tap <strong>Approve</strong> on the phone.</li>
+        <li>Live video uses WebRTC (STUN; optional TURN via server env). Frames are not stored in Firestore.</li>
+        <li>Photos/recordings are saved on the phone only when you explicitly capture/record.</li>
+        <li>Pairing codes are hashed server-side; clients cannot read <code>pairingCodes</code>.</li>
+        <li>Session requests expire in about 2 minutes if not approved.</li>
+        <li>Deploy TURN credentials with <code>TURN_URL</code>, <code>TURN_USERNAME</code>, <code>TURN_CREDENTIAL</code> for restrictive NAT.</li>
+      </ul>
+    </section>
+  </main>
+  <script type="module" src="/device/app.js"></script>
+</body>
+</html>

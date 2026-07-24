@@ -1,18 +1,19 @@
 {
+  "framework": null,
+  "buildCommand": null,
+  "installCommand": "npm install",
   "functions": {
     "api/**/*.js": {
       "memory": 1024,
       "maxDuration": 60
     }
   },
-
   "crons": [
     {
       "path": "/api/cron/daily-post",
       "schedule": "0 9 * * *"
     }
   ],
-
   "routes": [
     { "handle": "filesystem" },
     { "src": "/", "dest": "/public/index.html" },

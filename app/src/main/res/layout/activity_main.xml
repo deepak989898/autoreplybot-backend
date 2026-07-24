@@ -315,6 +315,15 @@
                 app:cornerRadius="12dp" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_remote_control"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/open_remote_control"
+                app:cornerRadius="12dp" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/button_notification_access"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"

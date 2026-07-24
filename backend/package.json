@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vercel dev",
     "start": "vercel dev",
+    "build": "node -e \"console.log('No Next.js build — static public/ + serverless api/')\"",
     "lint": "node --check api/cron/daily-post.js"
   },
   "devDependencies": {

@@ -23,6 +23,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 
+import com.autoreplybot.remote.RemoteControlHomeActivity;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.switchmaterial.SwitchMaterial;
@@ -72,6 +73,7 @@ public class MainActivity extends AppCompatActivity {
 
         MaterialButton buttonSettings = findViewById(R.id.button_settings);
         MaterialButton buttonFacebookPosting = findViewById(R.id.button_facebook_posting);
+        MaterialButton buttonRemoteControl = findViewById(R.id.button_remote_control);
         MaterialButton buttonNotificationAccess = findViewById(R.id.button_notification_access);
         MaterialButton buttonSignOut = findViewById(R.id.button_sign_out);
         MaterialButton buttonContacts = findViewById(R.id.button_contacts);
@@ -92,6 +94,8 @@ public class MainActivity extends AppCompatActivity {
                 startActivity(new Intent(this, SettingsActivity.class)));
         buttonFacebookPosting.setOnClickListener(v ->
                 startActivity(new Intent(this, FacebookPostingActivity.class)));
+        buttonRemoteControl.setOnClickListener(v ->
+                startActivity(new Intent(this, RemoteControlHomeActivity.class)));
         buttonNotificationAccess.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         buttonContacts.setOnClickListener(v -> startActivity(new Intent(this, ContactsActivity.class)));

@@ -76,6 +76,25 @@ public final class AppConstants {
     /** Schedule + content prefs for Facebook auto-post (no secrets — tokens stay on device). */
     public static final String FIRESTORE_DOCUMENT_FACEBOOK_SCHEDULE = "facebookSchedule";
 
+    /** Remote Camera & Voice — users/{uid}/devices/{deviceId} */
+    public static final String FIRESTORE_DEVICES = "devices";
+    /** Remote Camera & Voice — users/{uid}/trustedClients/{clientId} */
+    public static final String FIRESTORE_TRUSTED_CLIENTS = "trustedClients";
+    /** Remote Camera & Voice — users/{uid}/pairingCodes/{codeId} (Admin-only via API). */
+    public static final String FIRESTORE_PAIRING_CODES = "pairingCodes";
+    /** Remote Camera & Voice — users/{uid}/sessionRequests/{requestId} */
+    public static final String FIRESTORE_SESSION_REQUESTS = "sessionRequests";
+    /** Remote Camera & Voice — users/{uid}/sessions/{sessionId} */
+    public static final String FIRESTORE_SESSIONS = "sessions";
+    /** Remote Camera & Voice — users/{uid}/sessions/{sessionId}/signals/{signalId} (SDP/ICE only). */
+    public static final String FIRESTORE_SIGNALS = "signals";
+    /** Remote Camera & Voice — users/{uid}/commands/{commandId} */
+    public static final String FIRESTORE_COMMANDS = "commands";
+    /** Remote Camera & Voice — users/{uid}/auditLogs/{logId} */
+    public static final String FIRESTORE_AUDIT_LOGS = "auditLogs";
+    /** Encrypted local prefs for remote control enablement + stable device id. */
+    public static final String PREFS_REMOTE_CONTROL = "remote_control_secure_prefs";
+
     public static final String PREFS_FACEBOOK_POST_SCHEDULE = "facebook_post_schedule";
     public static final String PREFS_ENCRYPTED_FACEBOOK = "facebook_post_secure_prefs";
 

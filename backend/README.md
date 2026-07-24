@@ -20,6 +20,20 @@ Without this, Vercel builds from the Android tree, finds **no `/api`** at the re
 
 After fixing Root Directory, open **`https://YOUR_PROJECT.vercel.app/`** — you should see the API landing page, and **`/api/health`** should return JSON.
 
+### Vercel error: `No Next.js version detected` / `next build`
+
+This backend is **not** Next.js (it is `api/` serverless + `public/` static). If Vercel runs `next build`, fix the project settings:
+
+1. Vercel → **Project → Settings → General → Framework Preset** → set to **Other** (not Next.js) → Save.
+2. **Build & Development Settings**:
+   - **Build Command**: leave empty (or override with the `build` script in `package.json`, which only logs).
+   - **Output Directory**: leave empty (do **not** set `.next`).
+   - **Install Command**: `npm install`
+3. Ensure `vercel.json` has `"framework": null` and `"buildCommand": null` (already in this repo).
+4. Redeploy.
+
+If you deploy from the separate GitHub repo `autoreplybot-backend`, push the latest `backend/` files (including updated `vercel.json` + `package.json`) to that repo’s `main` before redeploying.
+
 ## Deploy to Vercel
 
 1. Create a Firebase **service account** JSON (Project settings → Service accounts → Generate new private key).
@@ -124,6 +138,91 @@ npm run dev
 ```
 
 On macOS/Linux use `export` as usual. The `dev` script runs **`vercel dev`**, which serves `/api/*` locally (installs the Vercel CLI via `devDependencies`). Link the project once with `npx vercel login` and `npx vercel link` if prompted.
+
+---
+
+## Remote Camera & Voice
+
+Secure phone ↔ website live camera/mic after **explicit Approve** on Android. Lives alongside the Facebook dashboard (separate UI at `/device/`).
+
+### Setup
+
+1. Deploy this `backend/` folder on Vercel (Root Directory = `backend`).
+2. Enable Firebase Auth (Google), Firestore, and FCM on the Android app.
+3. Set env vars below (pairing secret is required for `/api/pair/*`).
+4. Deploy Firestore rules (`backend/firestore.rules` — keep in sync with root `firestore.rules`). Clients must **never** read `pairingCodes`.
+5. On the phone: sign in → Remote Camera & Voice → enable → register device.
+6. On the web: open `/device/` → Login → **Create pairing code** → enter/scan on phone.
+7. **Connect** → Approve on phone → live WebRTC viewer + remote controls.
+
+### Environment variables
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `PAIRING_TOKEN_SECRET` | **Yes** | Server pepper for hashing pairing code/token (never ship to clients) |
+| `STUN_URLS` | No | Comma-separated STUN URLs (default Google STUN); also exposed via `/api/config` |
+| `TURN_URL` | No | TURN URI for restrictive NAT |
+| `TURN_USERNAME` | No | TURN username (only via authenticated `/api/device/ice-servers`) |
+| `TURN_CREDENTIAL` | No | TURN credential |
+| Firebase web + Admin vars | Yes | Same as dashboard (`FIREBASE_WEB_*`, `FIREBASE_SERVICE_ACCOUNT_JSON`) |
+
+Do **not** commit real secrets. See `.env.example`.
+
+### API routes (remote)
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/api/device/list` | Firebase ID token | Owner’s registered phones (no FCM tokens) |
+| GET | `/api/device/sessions` | Firebase ID token | Recent session history (metadata only) |
+| GET | `/api/device/ice-servers` | Firebase ID token | STUN + optional TURN for WebRTC |
+| POST | `/api/device/session/request` | Firebase ID token | Create pending request + FCM ping (~2 min TTL) |
+| POST | `/api/device/session/end` | Firebase ID token | End session + delete signalling docs |
+| POST | `/api/pair/create` | Firebase ID token | Create 6-digit code (rate limit **10/hour/uid**) |
+| POST | `/api/pair/complete` | Firebase ID token (device) | Consume code → trusted client |
+| GET | `/api/pair/clients` | Firebase ID token | List trusted browsers |
+| POST | `/api/pair/revoke` | Firebase ID token | Revoke trusted client + end its sessions |
+
+### Deploy checklist
+
+1. Vercel Root Directory = `backend`
+2. Set `PAIRING_TOKEN_SECRET` + Firebase Admin/web config
+3. Deploy rules: `firebase deploy --only firestore:rules` from `backend/` (or copy rules to your Firebase project)
+4. Confirm `pairingCodes` deny-all in rules
+5. Optional: set TURN for cellular/symmetric NAT
+
+### Testing
+
+```bash
+# Android
+.\gradlew.bat assembleDebug testDebugUnitTest
+
+# Backend syntax + pure helpers
+cd backend
+node --check api/device/sessions.js
+node --check api/pair/create.js
+node --check lib/remote-commands.js
+node --check lib/rate-limit.js
+node lib/remote-commands.test.js
+```
+
+Manual: pair browser → Connect → Approve → verify live video/audio → remote torch/mute/photo → End session from web and phone → revoke browser.
+
+### TURN
+
+Public STUN is enough for many home networks. If ICE fails (`Failed` / ICE failed in the live status):
+
+1. Provision a TURN server (coturn, Twilio, etc.).
+2. Set `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` on Vercel.
+3. Browser fetches ICE via authenticated `GET /api/device/ice-servers` (credentials never in `/api/config`).
+
+### Limitations
+
+- Live media is WebRTC P2P (or via TURN); not stored in Firestore/Storage.
+- Photos/recordings stay on the phone unless you add an intentional upload path later.
+- Pairing rate limit is in-memory per serverless isolate (best-effort).
+- One active session per device is preferred; a new request ends prior live sessions.
+- Camera/mic never start from boot or without Approve + runtime permissions + FGS notification.
+- Quality changes after Connect apply mainly to local CameraX; live WebRTC capturer uses session-start quality.
 
 ---
 
