@@ -317,7 +317,7 @@ service cloud.firestore {
       allow delete: if owner(uid);
     }
 
-    function remoteDevice(d, deviceId) {
+    function remoteDevice(d, deviceId, ownerUid) {
       return d.keys().hasAll([
           'deviceId', 'deviceName', 'deviceModel', 'manufacturer', 'androidVersion',
           'appVersion', 'createdAt', 'lastSeenAt', 'online', 'batteryLevel',
@@ -325,7 +325,7 @@ service cloud.firestore {
           'microphoneAvailable', 'flashlightAvailable', 'revoked', 'ownerUid',
           'remoteControlEnabled'
         ])
-        && d.deviceId == deviceId && id(d.deviceId) && d.ownerUid == uid
+        && d.deviceId == deviceId && id(d.deviceId) && d.ownerUid == ownerUid
         && text(d.deviceName, 120) && text(d.deviceModel, 120)
         && text(d.manufacturer, 120) && text(d.androidVersion, 40)
         && text(d.appVersion, 40) && millis(d.createdAt) && millis(d.lastSeenAt)
@@ -337,32 +337,32 @@ service cloud.firestore {
         && d.flashlightAvailable is bool && d.revoked is bool
         && d.remoteControlEnabled is bool;
     }
-    function trustedClient(d, clientId) {
+    function trustedClient(d, clientId, ownerUid) {
       return d.keys().hasAll([
           'clientId', 'clientName', 'browser', 'platform', 'createdAt',
           'lastUsedAt', 'revoked', 'ownerUid'
         ])
-        && d.clientId == clientId && id(d.clientId) && d.ownerUid == uid
+        && d.clientId == clientId && id(d.clientId) && d.ownerUid == ownerUid
         && text(d.clientName, 120) && text(d.browser, 120) && text(d.platform, 120)
         && millis(d.createdAt) && millis(d.lastUsedAt) && d.revoked is bool;
     }
-    function sessionRequest(d, requestId) {
+    function sessionRequest(d, requestId, ownerUid) {
       return d.keys().hasAll([
           'requestId', 'deviceId', 'clientId', 'requestedCapabilities',
           'status', 'createdAt', 'expiresAt', 'ownerUid'
         ])
         && d.requestId == requestId && id(d.requestId) && id(d.deviceId)
-        && id(d.clientId) && d.ownerUid == uid
+        && id(d.clientId) && d.ownerUid == ownerUid
         && d.status in ['pending', 'approved', 'rejected', 'expired', 'cancelled']
         && millis(d.createdAt) && millis(d.expiresAt) && d.expiresAt >= d.createdAt;
     }
-    function remoteSession(d, sessionId) {
+    function remoteSession(d, sessionId, ownerUid) {
       return d.keys().hasAll([
           'sessionId', 'deviceId', 'clientId', 'status', 'startedAt',
           'ownerUid', 'selectedCamera', 'microphoneEnabled', 'flashlightEnabled', 'quality'
         ])
         && d.sessionId == sessionId && id(d.sessionId) && id(d.deviceId)
-        && id(d.clientId) && d.ownerUid == uid
+        && id(d.clientId) && d.ownerUid == ownerUid
         && d.status in ['requesting', 'connecting', 'connected', 'reconnecting', 'ended', 'failed']
         && millis(d.startedAt) && text(d.selectedCamera, 40)
         && d.microphoneEnabled is bool && d.flashlightEnabled is bool
@@ -386,31 +386,56 @@ service cloud.firestore {
         'SET_QUALITY', 'SET_ZOOM', 'PING_DEVICE'
       ];
     }
-    function remoteCommand(d, commandId) {
+    function remoteCommand(d, commandId, ownerUid) {
       return d.keys().hasAll([
           'commandId', 'sessionId', 'deviceId', 'action', 'createdAt',
           'expiresAt', 'status', 'ownerUid'
         ])
         && d.commandId == commandId && id(d.commandId) && id(d.sessionId)
-        && id(d.deviceId) && d.ownerUid == uid
+        && id(d.deviceId) && d.ownerUid == ownerUid
         && remoteCommandAction(d.action)
         && millis(d.createdAt) && millis(d.expiresAt)
         && d.status in ['pending', 'acked', 'failed', 'ignored', 'expired'];
     }
-    function auditLog(d, logId) {
+    function auditLog(d, logId, ownerUid) {
       return d.keys().hasAll(['logId', 'action', 'timestamp', 'result', 'ownerUid'])
-        && d.logId == logId && id(d.logId) && d.ownerUid == uid
+        && d.logId == logId && id(d.logId) && d.ownerUid == ownerUid
         && text(d.action, 80) && millis(d.timestamp) && text(d.result, 40);
     }
 
     match /users/{uid}/devices/{deviceId} {
       allow read: if owner(uid);
-      allow create, update: if owner(uid) && remoteDevice(request.resource.data, deviceId);
+      // Full profile required on create (phone registration).
+      allow create: if owner(uid) && remoteDevice(request.resource.data, deviceId, uid);
+      // Heartbeats / name / FCM may patch a subset; merged doc must stay owned.
+      allow update: if owner(uid)
+          && resource.data.ownerUid == uid
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.deviceId == deviceId
+          && id(deviceId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'deviceName', 'deviceModel', 'manufacturer', 'androidVersion', 'appVersion',
+            'createdAt', 'lastSeenAt', 'online', 'batteryLevel', 'isCharging', 'networkType',
+            'fcmToken', 'cameraAvailable', 'microphoneAvailable', 'flashlightAvailable',
+            'revoked', 'remoteControlEnabled'
+          ])
+          && (!('batteryLevel' in request.resource.data.diff(resource.data).affectedKeys())
+              || (request.resource.data.batteryLevel is int
+                  && request.resource.data.batteryLevel >= 0
+                  && request.resource.data.batteryLevel <= 100))
+          && (!('lastSeenAt' in request.resource.data.diff(resource.data).affectedKeys())
+              || millis(request.resource.data.lastSeenAt))
+          && (!('deviceName' in request.resource.data.diff(resource.data).affectedKeys())
+              || text(request.resource.data.deviceName, 120))
+          && (!('fcmToken' in request.resource.data.diff(resource.data).affectedKeys())
+              || text(request.resource.data.fcmToken, 4096))
+          && (!('networkType' in request.resource.data.diff(resource.data).affectedKeys())
+              || text(request.resource.data.networkType, 40));
       allow delete: if owner(uid);
     }
     match /users/{uid}/trustedClients/{clientId} {
       allow read: if owner(uid);
-      allow create, update: if owner(uid) && trustedClient(request.resource.data, clientId);
+      allow create, update: if owner(uid) && trustedClient(request.resource.data, clientId, uid);
       allow delete: if owner(uid);
     }
     // Pairing codes store only hashes; Admin SDK writes via API — deny all clients.
@@ -419,12 +444,12 @@ service cloud.firestore {
     }
     match /users/{uid}/sessionRequests/{requestId} {
       allow read: if owner(uid);
-      allow create, update: if owner(uid) && sessionRequest(request.resource.data, requestId);
+      allow create, update: if owner(uid) && sessionRequest(request.resource.data, requestId, uid);
       allow delete: if owner(uid);
     }
     match /users/{uid}/sessions/{sessionId} {
       allow read: if owner(uid);
-      allow create, update: if owner(uid) && remoteSession(request.resource.data, sessionId);
+      allow create, update: if owner(uid) && remoteSession(request.resource.data, sessionId, uid);
       allow delete: if owner(uid);
       match /signals/{signalId} {
         allow read: if owner(uid);
@@ -434,12 +459,12 @@ service cloud.firestore {
     }
     match /users/{uid}/commands/{commandId} {
       allow read: if owner(uid);
-      allow create, update: if owner(uid) && remoteCommand(request.resource.data, commandId);
+      allow create, update: if owner(uid) && remoteCommand(request.resource.data, commandId, uid);
       allow delete: if owner(uid);
     }
     match /users/{uid}/auditLogs/{logId} {
       allow read: if owner(uid);
-      allow create: if owner(uid) && auditLog(request.resource.data, logId);
+      allow create: if owner(uid) && auditLog(request.resource.data, logId, uid);
       allow update, delete: if false;
     }
 
