@@ -67,3 +67,23 @@ button.warn { background: #dc2626; }
   gap: 10px 12px;
   margin: 8px 0 4px;
 }
+
+.embed-only[hidden] {
+  display: none !important;
+}
+
+html.embed-mode body,
+body.embed-mode {
+  background: #fff;
+}
+
+body.embed-mode .container {
+  max-width: none;
+  margin: 0;
+  padding: 12px 14px 24px;
+}
+
+body.embed-mode #fb-title {
+  font-size: 1.35rem;
+  margin: 0 0 6px;
+}

@@ -44,7 +44,9 @@
             <button id="btn-register-email" class="link-btn" type="button">Register</button>
           </p>
           <p id="auth-status" class="auth-status">Not logged in</p>
-          <p class="login-fb-link"><a href="/">Facebook &amp; Instagram posting →</a></p>
+          <p class="login-fb-link">
+            After sign-in, open <strong>Facebook &amp; Instagram</strong> from the sidebar.
+          </p>
         </div>
       </section>
     </div>
@@ -77,14 +79,8 @@
           <button type="button" class="nav-item" data-panel="media">
             <span class="nav-ico">🖼</span> Media Files
           </button>
-          <a class="nav-item nav-link" href="/">
+          <button type="button" class="nav-item" data-panel="social">
             <span class="nav-ico">📣</span> Facebook &amp; Instagram
-          </a>
-          <button type="button" class="nav-item" data-panel="settings">
-            <span class="nav-ico">⚙</span> Settings
-          </button>
-          <button type="button" class="nav-item" data-panel="help">
-            <span class="nav-ico">?</span> Help &amp; Safety
           </button>
         </nav>
         <div class="sidebar-foot">
@@ -162,9 +158,10 @@
 
           <div id="pair-already" class="surface pair-already" hidden>
             <p class="pair-ok"><strong>This browser is already paired.</strong></p>
-            <p class="muted">Go to My Phones and tap Connect. Generate a new code only if you revoked this browser.</p>
+            <p id="pair-already-detail" class="muted">Go to My Phones and tap Connect. Generate a new code only if you revoked this browser.</p>
             <div class="row-gap">
               <button type="button" class="btn-primary nav-jump" data-panel="devices">Connect again</button>
+              <button type="button" id="btn-pair-disconnect" class="btn-danger">Disconnect</button>
               <button type="button" id="btn-show-new-pair" class="btn-secondary">Generate new code</button>
             </div>
           </div>
@@ -217,67 +214,40 @@
           <div id="client-list" class="surface table-wrap muted">Loading trusted browsers…</div>
         </section>
 
-        <!-- MEDIA (info — files stay on phone) -->
+        <!-- FACEBOOK & INSTAGRAM (embedded posting dashboard — keeps sidebar) -->
+        <section class="panel panel-embed" id="panel-social" data-panel="social" hidden>
+          <header class="page-head page-head-compact">
+            <div>
+              <h1>Facebook &amp; Instagram</h1>
+              <p class="page-sub">Posting dashboard stays inside this admin panel — use the sidebar to switch pages anytime.</p>
+            </div>
+          </header>
+          <iframe
+            id="social-frame"
+            class="social-frame"
+            title="Facebook and Instagram posting"
+            data-src="/?embed=1"
+            src="about:blank"
+          ></iframe>
+        </section>
+
+        <!-- MEDIA -->
         <section class="panel" id="panel-media" data-panel="media" hidden>
           <header class="page-head">
             <div>
               <h1>Media Files</h1>
-              <p class="page-sub">Photos and recordings are saved on the phone when you capture/record during a live session.</p>
+              <p class="page-sub">Photos and recordings uploaded from your phone during remote sessions.</p>
             </div>
+            <button id="btn-refresh-media" class="btn-secondary" type="button">Refresh</button>
           </header>
-          <article class="surface empty-media">
-            <p>Captured media is stored on the Android device (app storage / MediaStore), not uploaded to this dashboard by default.</p>
-            <p class="muted">Use Capture / Record controls during a live session on <strong>My Phones</strong>.</p>
-            <button type="button" class="btn-primary nav-jump" data-panel="devices">Open My Phones</button>
-          </article>
-        </section>
-
-        <!-- SETTINGS -->
-        <section class="panel" id="panel-settings" data-panel="settings" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Settings</h1>
-              <p class="page-sub">Account and remote-session preferences.</p>
-            </div>
-          </header>
-          <div class="settings-grid">
-            <article class="surface">
-              <h2>Account</h2>
-              <p class="muted">Signed in as <strong id="settings-email">—</strong></p>
-              <p class="muted">Use the same Firebase account on Android and this website.</p>
-              <button id="btn-logout-settings" class="btn-secondary" type="button">Logout</button>
-            </article>
-            <article class="surface">
-              <h2>Session defaults</h2>
-              <ul class="settings-notes">
-                <li>Default quality on Connect: 720p (change per device before Connect).</li>
-                <li>Session requests expire in ~2 minutes if not approved.</li>
-                <li>Pairing codes expire in 5 minutes and are single-use.</li>
-                <li>Optional TURN improves connectivity on hard NAT networks.</li>
-              </ul>
-            </article>
-          </div>
-        </section>
-
-        <!-- HELP -->
-        <section class="panel" id="panel-help" data-panel="help" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Help &amp; Safety</h1>
-              <p class="page-sub">Privacy rules for remote camera and microphone.</p>
-            </div>
-          </header>
-          <article class="surface">
-            <ul class="settings-notes">
-              <li>Camera/mic never start silently without Android permissions and a visible foreground notification.</li>
-              <li>Trusted browsers with auto-approve skip the app Approve/Reject dialog — but Android 14+ often still requires tapping the “tap to start” notification before camera/mic can start.</li>
-              <li>A foreground notification stays visible while sharing, with Stop Sharing.</li>
-              <li>Live video uses WebRTC — frames are not stored in Firestore.</li>
-              <li>Photos/recordings save on the phone only when you capture/record on purpose.</li>
-              <li>Revoke trusted browsers anytime to block reconnects. Browser identity uses a cryptographic key (not just localStorage).</li>
-              <li>If live video fails on some networks, configure TURN on the server.</li>
-            </ul>
-          </article>
+          <div id="media-list" class="media-gallery muted">Loading media…</div>
+          <dialog id="media-viewer" class="media-viewer">
+            <form method="dialog" class="media-viewer-bar">
+              <strong id="media-viewer-title">Preview</strong>
+              <button type="submit" class="btn-secondary" value="close">Close</button>
+            </form>
+            <div id="media-viewer-body" class="media-viewer-body"></div>
+          </dialog>
         </section>
       </main>
     </div>

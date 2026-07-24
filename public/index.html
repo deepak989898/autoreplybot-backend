@@ -7,9 +7,15 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <main class="container">
-    <h1>AutoReplyBot Dashboard</h1>
-    <p class="muted">Firebase login + Facebook/Instagram connect + schedule + post now · <a href="/device/">Remote devices</a></p>
+  <main class="container" id="fb-dashboard">
+    <h1 id="fb-title">AutoReplyBot Dashboard</h1>
+    <p class="muted" id="fb-nav-line">
+      Firebase login + Facebook/Instagram connect + schedule + post now ·
+      <a href="/device/">Remote devices</a>
+    </p>
+    <p class="muted embed-only" id="fb-embed-hint" hidden>
+      Embedded in Remote admin — use the left sidebar to open My Phones, Media Files, and other pages.
+    </p>
     <section class="card">
       <h2>Account</h2>
       <p class="muted">Use the same email and password as the Android app (Firebase Email/Password).</p>

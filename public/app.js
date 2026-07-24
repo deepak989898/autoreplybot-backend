@@ -353,7 +353,22 @@ function friendlyAuthError(e) {
   return msg;
 }
 
+function applyEmbedMode() {
+  const params = new URLSearchParams(window.location.search);
+  const embedded = params.get("embed") === "1" || window.self !== window.top;
+  if (!embedded) return;
+  document.documentElement.classList.add("embed-mode");
+  document.body.classList.add("embed-mode");
+  const nav = el("fb-nav-line");
+  const hint = el("fb-embed-hint");
+  const title = el("fb-title");
+  if (nav) nav.hidden = true;
+  if (hint) hint.hidden = false;
+  if (title) title.textContent = "Facebook & Instagram posting";
+}
+
 wireUi();
+applyEmbedMode();
 initConfig()
   .then(() => setupFacebookSdk(state.fbAppId))
   .catch((e) => setText("auth-status", e.message));

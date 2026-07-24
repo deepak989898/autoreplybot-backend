@@ -25,6 +25,7 @@ const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
  * Single Hobby-friendly catch-all for:
  * GET  /api/device/list
  * GET  /api/device/sessions
+ * GET  /api/device/media
  * GET  /api/device/ice-servers
  * POST /api/device/session/request
  * POST /api/device/session/end
@@ -44,6 +45,7 @@ export default async function handler(req, res) {
 
   if (path === "list") return handleList(req, res);
   if (path === "sessions") return handleSessions(req, res);
+  if (path === "media") return handleMediaList(req, res);
   if (path === "ice-servers") return handleIceServers(req, res);
   if (path === "session/request") return handleSessionRequest(req, res);
   if (path === "session/end") return handleSessionEnd(req, res);
@@ -185,6 +187,57 @@ async function handleSessions(req, res) {
     return res.status(code).json({
       error: code === 401 ? "Unauthorized" : "Session list failed",
       code: code === 401 ? "AUTH_FAILED" : "SESSION_LIST_FAILED",
+    });
+  }
+}
+
+function sanitizeMedia(id, data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.revoked === true) return null;
+  return {
+    mediaId: data.mediaId || id,
+    kind: String(data.kind || ""),
+    fileName: String(data.fileName || ""),
+    contentType: String(data.contentType || ""),
+    downloadUrl: String(data.downloadUrl || ""),
+    storagePath: String(data.storagePath || ""),
+    sizeBytes: Number(data.sizeBytes || 0),
+    createdAt: Number(data.createdAt || 0),
+    deviceId: String(data.deviceId || ""),
+    sessionId: String(data.sessionId || ""),
+    clientId: String(data.clientId || ""),
+  };
+}
+
+async function handleMediaList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const limitRaw = Number(req.query?.limit || 80);
+    const limit = Number.isFinite(limitRaw)
+      ? Math.min(200, Math.max(1, Math.floor(limitRaw)))
+      : 80;
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_REMOTE_MEDIA)
+      .get();
+    const items = [];
+    snap.forEach((doc) => {
+      const item = sanitizeMedia(doc.id, doc.data());
+      if (item && item.downloadUrl) items.push(item);
+    });
+    items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return res.status(200).json({ ok: true, media: items.slice(0, limit) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const code = msg.includes("Authorization") ? 401 : 500;
+    return res.status(code).json({
+      error: code === 401 ? "Unauthorized" : "Media list failed",
+      code: code === 401 ? "AUTH_FAILED" : "MEDIA_LIST_FAILED",
     });
   }
 }

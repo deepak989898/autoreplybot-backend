@@ -41,6 +41,11 @@ const btnRefresh = document.getElementById("btn-refresh");
 const btnCreatePair = document.getElementById("btn-create-pair");
 const btnRefreshClients = document.getElementById("btn-refresh-clients");
 const btnRefreshSessions = document.getElementById("btn-refresh-sessions");
+const btnRefreshMedia = document.getElementById("btn-refresh-media");
+const mediaList = document.getElementById("media-list");
+const mediaViewer = document.getElementById("media-viewer");
+const mediaViewerBody = document.getElementById("media-viewer-body");
+const mediaViewerTitle = document.getElementById("media-viewer-title");
 const pairResult = document.getElementById("pair-result");
 const pairCode = document.getElementById("pair-code");
 const pairExpires = document.getElementById("pair-expires");
@@ -48,15 +53,15 @@ const pairPayload = document.getElementById("pair-payload");
 const pairQr = document.getElementById("pair-qr");
 const pairError = document.getElementById("pair-error");
 const pairAlready = document.getElementById("pair-already");
+const pairAlreadyDetail = document.getElementById("pair-already-detail");
 const pairCreateBlock = document.getElementById("pair-create-block");
 const btnShowNewPair = document.getElementById("btn-show-new-pair");
+const btnPairDisconnect = document.getElementById("btn-pair-disconnect");
 const homeStatus = document.getElementById("home-status");
 const btnHomePair = document.getElementById("btn-home-pair");
 const btnHomePhones = document.getElementById("btn-home-phones");
 const dashSessionList = document.getElementById("dash-session-list");
 const dashSecurity = document.getElementById("dash-security");
-const settingsEmail = document.getElementById("settings-email");
-const btnLogoutSettings = document.getElementById("btn-logout-settings");
 const statPhones = document.getElementById("stat-phones");
 const statOnline = document.getElementById("stat-online");
 const statSessions = document.getElementById("stat-sessions");
@@ -82,6 +87,18 @@ function showPanel(panelId) {
   if (id === "devices" && !hasLive) refreshDevices().catch(() => {});
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "security") refreshClients().catch(() => {});
+  if (id === "media") refreshMedia().catch(() => {});
+  if (id === "social") ensureSocialFrame();
+}
+
+function ensureSocialFrame() {
+  const frame = document.getElementById("social-frame");
+  if (!frame) return;
+  const target = frame.getAttribute("data-src") || "/?embed=1";
+  const current = frame.getAttribute("src") || "";
+  if (!current || current === "about:blank" || current === "about:blank#") {
+    frame.setAttribute("src", target);
+  }
 }
 
 function setLoggedInUi(user) {
@@ -97,9 +114,6 @@ function setLoggedInUi(user) {
   }
   if (headerUser) {
     headerUser.textContent = user?.email || user?.uid || "";
-  }
-  if (settingsEmail) {
-    settingsEmail.textContent = user?.email || user?.uid || "—";
   }
   if (authStatus) {
     authStatus.textContent = user
@@ -407,6 +421,7 @@ function setConnectUi(deviceId, { connecting, live }) {
   if (connectBtn) connectBtn.disabled = Boolean(connecting || live);
   if (endBtn) endBtn.hidden = !live;
   if (livePanel) livePanel.hidden = !live;
+  if (browserPaired) updatePairingUi(true);
 }
 
 /**
@@ -1330,9 +1345,14 @@ async function refreshClients() {
 
 function updatePairingUi(isPaired) {
   browserPaired = Boolean(isPaired);
+  const hasLive = [...liveByDevice.values()].some(
+    (l) => l && (l.pc || l.sessionId || l.requestId)
+  );
   if (homeStatus) {
     homeStatus.textContent = browserPaired
-      ? "This browser is paired. Open My Phones and tap Connect when you want a live session."
+      ? hasLive
+        ? "This browser is paired and has a live session. Use Disconnect on Pair New Browser to end it."
+        : "This browser is paired. Open My Phones and tap Connect when you want a live session."
       : "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
   }
   if (btnHomePair) btnHomePair.hidden = browserPaired;
@@ -1345,7 +1365,58 @@ function updatePairingUi(isPaired) {
   if (browserPaired && pairResult) {
     pairResult.hidden = true;
   }
+  if (pairAlreadyDetail) {
+    pairAlreadyDetail.textContent = hasLive
+      ? "A live session is active. Disconnect ends the session and unpairs this browser."
+      : "Go to My Phones and tap Connect. Disconnect unpairs this browser (you can pair again later).";
+  }
+  if (btnPairDisconnect) {
+    btnPairDisconnect.hidden = !browserPaired;
+    btnPairDisconnect.textContent = hasLive ? "Disconnect session" : "Disconnect";
+  }
   showPairError("");
+}
+
+/**
+ * End any live session from this browser, then revoke/unpair this trusted client.
+ */
+async function disconnectThisBrowser() {
+  if (!idToken) {
+    showPairError("Sign in first.");
+    return;
+  }
+  const clientId = preferredClientId(cachedClients);
+  if (!clientId) {
+    showPairError("No paired browser to disconnect.");
+    return;
+  }
+  const hasLive = [...liveByDevice.keys()].length > 0;
+  const msg = hasLive
+    ? "End the live session and unpair this browser? You will need to pair again to Connect."
+    : "Unpair this browser from your account? You will need to scan a new QR code to Connect again.";
+  if (!window.confirm(msg)) return;
+
+  if (btnPairDisconnect) btnPairDisconnect.disabled = true;
+  showPairError("");
+  try {
+    for (const deviceId of [...liveByDevice.keys()]) {
+      await endLiveSession(deviceId, "browser_disconnected");
+    }
+    await api("/api/pair/revoke", {
+      method: "POST",
+      body: JSON.stringify({ clientId }),
+    });
+    if (localStorage.getItem(CLIENT_ID_KEY) === clientId) {
+      localStorage.removeItem(CLIENT_ID_KEY);
+    }
+    await refreshClients();
+    await refreshDevices();
+    showPanel("pair");
+  } catch (e) {
+    showPairError(e instanceof Error ? e.message : String(e));
+  } finally {
+    if (btnPairDisconnect) btnPairDisconnect.disabled = false;
+  }
 }
 
 async function refreshSessions() {
@@ -1363,6 +1434,122 @@ async function refreshSessions() {
   } catch (e) {
     sessionList.textContent = e instanceof Error ? e.message : String(e);
     sessionList.classList.add("muted");
+  }
+}
+
+function formatBytes(n) {
+  const v = Number(n || 0);
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function openMediaViewer(item) {
+  if (!mediaViewer || !mediaViewerBody) return;
+  const kind = String(item.kind || "");
+  const url = String(item.downloadUrl || "");
+  const title = `${kind || "file"} · ${item.fileName || item.mediaId || ""}`;
+  if (mediaViewerTitle) mediaViewerTitle.textContent = title;
+  mediaViewerBody.innerHTML = "";
+  if (!url) {
+    mediaViewerBody.textContent = "No download URL";
+  } else if (kind === "photo" || String(item.contentType || "").startsWith("image/")) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = title;
+    img.className = "media-viewer-img";
+    mediaViewerBody.appendChild(img);
+  } else if (kind === "video" || String(item.contentType || "").startsWith("video/")) {
+    const video = document.createElement("video");
+    video.src = url;
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.className = "media-viewer-av";
+    mediaViewerBody.appendChild(video);
+  } else {
+    const audio = document.createElement("audio");
+    audio.src = url;
+    audio.controls = true;
+    audio.autoplay = true;
+    audio.className = "media-viewer-av";
+    mediaViewerBody.appendChild(audio);
+  }
+  if (typeof mediaViewer.showModal === "function") mediaViewer.showModal();
+  else mediaViewer.setAttribute("open", "");
+}
+
+function renderMedia(items) {
+  if (!mediaList) return;
+  if (!items.length) {
+    mediaList.classList.add("muted");
+    mediaList.innerHTML = `<article class="surface empty-media">
+      <p>No uploaded media yet.</p>
+      <p class="muted">During a live session on My Phones, use Capture photo / Record video / Record audio file. Files upload to Firebase automatically.</p>
+      <button type="button" class="btn-primary nav-jump" data-panel="devices">Open My Phones</button>
+    </article>`;
+    mediaList.querySelectorAll(".nav-jump").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const panel = btn.dataset.panel;
+        if (panel) showPanel(panel);
+      });
+    });
+    return;
+  }
+  mediaList.classList.remove("muted");
+  mediaList.innerHTML = `<div class="media-grid">${items
+    .map((m) => {
+      const kind = escapeHtml(m.kind || "file");
+      const name = escapeHtml(m.fileName || m.mediaId || "");
+      const when = escapeHtml(formatSeen(m.createdAt));
+      const size = escapeHtml(formatBytes(m.sizeBytes));
+      const url = String(m.downloadUrl || "");
+      const thumb =
+        m.kind === "photo" || String(m.contentType || "").startsWith("image/")
+          ? `<img src="${escapeHtml(url)}" alt="" loading="lazy" />`
+          : m.kind === "video"
+            ? `<div class="media-thumb-icon">▶ Video</div>`
+            : `<div class="media-thumb-icon">♪ Audio</div>`;
+      return `<article class="media-card" data-media-id="${escapeHtml(m.mediaId)}">
+        <button type="button" class="media-thumb btn-open-media" data-media-id="${escapeHtml(m.mediaId)}">${thumb}</button>
+        <div class="media-meta">
+          <strong>${kind}</strong>
+          <span class="muted">${name}</span>
+          <span class="muted">${when} · ${size}</span>
+          <div class="media-card-actions">
+            <button type="button" class="btn-secondary btn-open-media" data-media-id="${escapeHtml(m.mediaId)}">View / Play</button>
+            <a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open</a>
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("")}</div>`;
+
+  const byId = new Map(items.map((m) => [m.mediaId, m]));
+  mediaList.querySelectorAll(".btn-open-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-media-id");
+      const item = id ? byId.get(id) : null;
+      if (item) openMediaViewer(item);
+    });
+  });
+}
+
+async function refreshMedia() {
+  if (!mediaList) return;
+  if (!idToken) {
+    mediaList.classList.add("muted");
+    mediaList.textContent = "Sign in to load media.";
+    return;
+  }
+  mediaList.classList.add("muted");
+  mediaList.textContent = "Loading media…";
+  try {
+    const data = await api("/api/device/media");
+    renderMedia(data.media || []);
+  } catch (e) {
+    mediaList.classList.add("muted");
+    mediaList.textContent = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -1485,15 +1672,18 @@ async function main() {
     })
   );
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
-  if (btnLogoutSettings) {
-    btnLogoutSettings.addEventListener("click", () => signOut(auth));
-  }
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   if (btnRefreshClients) btnRefreshClients.addEventListener("click", () => refreshClients());
   if (btnRefreshSessions) {
     btnRefreshSessions.addEventListener("click", () => refreshSessions());
   }
+  if (btnRefreshMedia) {
+    btnRefreshMedia.addEventListener("click", () => refreshMedia());
+  }
   if (btnCreatePair) btnCreatePair.addEventListener("click", () => createPairing());
+  if (btnPairDisconnect) {
+    btnPairDisconnect.addEventListener("click", () => disconnectThisBrowser());
+  }
   if (btnShowNewPair) {
     btnShowNewPair.addEventListener("click", () => {
       if (pairCreateBlock) pairCreateBlock.hidden = false;

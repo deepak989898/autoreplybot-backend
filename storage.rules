@@ -20,6 +20,18 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
+    function validRemoteMedia() {
+      return request.resource.size > 0
+          && request.resource.size <= 500 * 1024 * 1024
+          && request.resource.contentType.matches('image/.*|video/.*|audio/.*');
+    }
+
+    match /remote_media/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validRemoteMedia();
+      allow delete: if isOwner(userId);
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

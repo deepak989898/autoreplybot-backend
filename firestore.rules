@@ -471,6 +471,18 @@ service cloud.firestore {
       allow create: if owner(uid) && auditLog(request.resource.data, logId, uid);
       allow update, delete: if false;
     }
+    match /users/{uid}/remoteMedia/{mediaId} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid)
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.mediaId == mediaId
+          && id(mediaId)
+          && text(request.resource.data.kind, 20)
+          && text(request.resource.data.downloadUrl, 4096)
+          && text(request.resource.data.storagePath, 512)
+          && millis(request.resource.data.createdAt);
+      allow delete: if owner(uid);
+    }
 
     match /users/{uid}/integrations/{doc} {
       allow read, write: if false;
