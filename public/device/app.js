@@ -48,21 +48,32 @@ const btnShowNewPair = document.getElementById("btn-show-new-pair");
 const homeStatus = document.getElementById("home-status");
 const btnHomePair = document.getElementById("btn-home-pair");
 const btnHomePhones = document.getElementById("btn-home-phones");
+const dashSessionList = document.getElementById("dash-session-list");
+const dashSecurity = document.getElementById("dash-security");
+const settingsEmail = document.getElementById("settings-email");
+const btnLogoutSettings = document.getElementById("btn-logout-settings");
+const statPhones = document.getElementById("stat-phones");
+const statOnline = document.getElementById("stat-online");
+const statSessions = document.getElementById("stat-sessions");
+const statClients = document.getElementById("stat-clients");
 
 /** @type {boolean} */
 let browserPaired = false;
+/** @type {object[]} */
+let cachedDevices = [];
+/** @type {object[]} */
+let cachedSessions = [];
 
 function showPanel(panelId) {
   const id = String(panelId || "home");
   document.querySelectorAll(".panel").forEach((el) => {
     el.hidden = el.dataset.panel !== id;
   });
-  document.querySelectorAll(".nav-item").forEach((btn) => {
+  document.querySelectorAll(".nav-item[data-panel]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.panel === id);
   });
-  // Do not rebuild the devices DOM while a live WebRTC session is attached —
-  // that destroys the <video> element and leaves a black player.
   const hasLive = [...liveByDevice.values()].some((l) => l.pc);
+  if (id === "home") refreshDashboard().catch(() => {});
   if (id === "devices" && !hasLive) refreshDevices().catch(() => {});
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "security") refreshClients().catch(() => {});
@@ -81,6 +92,9 @@ function setLoggedInUi(user) {
   }
   if (headerUser) {
     headerUser.textContent = user?.email || user?.uid || "";
+  }
+  if (settingsEmail) {
+    settingsEmail.textContent = user?.email || user?.uid || "—";
   }
   if (authStatus) {
     authStatus.textContent = user
@@ -240,11 +254,11 @@ function renderDevices(devices, clients) {
             </select>
           </label>
           <div class="connect-actions">
-            <button type="button" class="btn-connect" data-device-id="${id}" ${clientId ? "" : "disabled"}>
+            <button type="button" class="btn-primary btn-connect" data-device-id="${id}" ${clientId ? "" : "disabled"}>
               Connect
             </button>
-            <button type="button" class="secondary btn-end-session" data-device-id="${id}" hidden>
-              End session
+            <button type="button" class="btn-danger btn-end-session" data-device-id="${id}" hidden>
+              End Session
             </button>
           </div>
           <p class="live-status" data-status-for="${id}">${
@@ -836,30 +850,33 @@ function cleanupLive(deviceId, endOnServer) {
 
 function renderClients(clients) {
   if (!clients.length) {
-    clientList.textContent = "No trusted browsers yet. Create a pairing code above.";
+    clientList.innerHTML = `<p class="muted">No trusted browsers yet. Use Pair New Browser to add one.</p>`;
     clientList.classList.add("muted");
+    updateStatClients(0);
     return;
   }
   clientList.classList.remove("muted");
-  clientList.innerHTML = clients
+  const activeCount = clients.filter((c) => !c.revoked).length;
+  updateStatClients(activeCount);
+  clientList.innerHTML = `<table class="admin-table"><thead><tr>
+    <th>Browser</th><th>Platform</th><th>Paired</th><th>Last used</th><th>Status</th><th></th>
+  </tr></thead><tbody>${clients
     .map((c) => {
       const revoked = Boolean(c.revoked);
-      return `<article class="device-card" data-client-id="${escapeHtml(c.clientId)}">
-        <h3>${escapeHtml(c.clientName || c.clientId)}</h3>
-        <div class="device-meta">
-          <span class="pill ${revoked ? "offline" : "online"}">${revoked ? "Revoked" : "Trusted"}</span>
-          <span>${escapeHtml(c.browser || "")} · ${escapeHtml(c.platform || "")}</span>
-          <span>Created ${escapeHtml(formatSeen(c.createdAt))}</span>
-          <span>Last used ${escapeHtml(formatSeen(c.lastUsedAt))}</span>
-        </div>
-        ${
+      return `<tr class="client-row" data-client-id="${escapeHtml(c.clientId)}">
+        <td><strong>${escapeHtml(c.clientName || c.clientId)}</strong><div class="muted">${escapeHtml(c.browser || "")}</div></td>
+        <td>${escapeHtml(c.platform || "—")}</td>
+        <td>${escapeHtml(formatSeen(c.createdAt))}</td>
+        <td>${escapeHtml(formatSeen(c.lastUsedAt))}</td>
+        <td><span class="pill ${revoked ? "offline" : "online"}">${revoked ? "Revoked" : "Active"}</span></td>
+        <td>${
           revoked
             ? ""
-            : `<button type="button" class="secondary btn-revoke" data-client-id="${escapeHtml(c.clientId)}">Revoke</button>`
-        }
-      </article>`;
+            : `<button type="button" class="btn-secondary btn-revoke" data-client-id="${escapeHtml(c.clientId)}">Revoke</button>`
+        }</td>
+      </tr>`;
     })
-    .join("");
+    .join("")}</tbody></table>`;
 
   clientList.querySelectorAll(".btn-revoke").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -885,37 +902,96 @@ function renderClients(clients) {
 }
 
 function renderSessions(sessions) {
+  cachedSessions = sessions || [];
+  updateStatSessions(cachedSessions.length);
+  renderDashSessions(cachedSessions);
+  if (!sessionList) return;
   if (!sessions.length) {
-    sessionList.textContent = "No sessions yet.";
+    sessionList.innerHTML = `<p class="muted">No sessions yet.</p>`;
     sessionList.classList.add("muted");
     return;
   }
   sessionList.classList.remove("muted");
-  sessionList.innerHTML = sessions
+  sessionList.innerHTML = `<table class="admin-table"><thead><tr>
+    <th>Device</th><th>Type</th><th>Started</th><th>Ended</th><th>Status</th>
+  </tr></thead><tbody>${sessions
     .map((s) => {
-      return `<article class="device-card session-row">
-        <div class="device-meta">
-          <span class="pill ${
-            s.status === "connected" || s.status === "connecting" ? "online" : "offline"
-          }">${escapeHtml(s.status || "?")}</span>
-          <span>Device ${escapeHtml(s.deviceId || "")}</span>
-          <span>Client ${escapeHtml(s.clientId || "")}</span>
-          <span>Started ${escapeHtml(formatSeen(s.startedAt))}</span>
-          <span>Ended ${escapeHtml(formatSeen(s.endedAt))}</span>
-          <span>Cam ${escapeHtml(s.selectedCamera || "?")} · Mic ${
-            s.microphoneEnabled ? "on" : "off"
-          }</span>
-          <span>Quality ${escapeHtml(s.quality || "auto")}</span>
-          ${
-            s.terminationReason
-              ? `<span>Reason ${escapeHtml(s.terminationReason)}</span>`
-              : ""
-          }
-        </div>
-        <div class="session-id muted">${escapeHtml(s.sessionId || "")}</div>
-      </article>`;
+      const live =
+        s.status === "connected" ||
+        s.status === "connecting" ||
+        s.status === "requesting";
+      const type = [
+        s.selectedCamera ? "Camera" : "",
+        s.microphoneEnabled ? "Mic" : "",
+      ]
+        .filter(Boolean)
+        .join(" + ") || "—";
+      return `<tr class="session-row">
+        <td><strong>${escapeHtml(s.deviceId || "—")}</strong></td>
+        <td>${escapeHtml(type)}</td>
+        <td>${escapeHtml(formatSeen(s.startedAt))}</td>
+        <td>${escapeHtml(formatSeen(s.endedAt))}</td>
+        <td><span class="pill ${live ? "live" : "ended"}">${escapeHtml(
+          s.status || "?"
+        )}</span></td>
+      </tr>`;
     })
-    .join("");
+    .join("")}</tbody></table>`;
+}
+
+function renderDashSessions(sessions) {
+  if (!dashSessionList) return;
+  const rows = (sessions || []).slice(0, 6);
+  if (!rows.length) {
+    dashSessionList.innerHTML = `<p class="muted">No recent sessions.</p>`;
+    dashSessionList.classList.add("muted");
+    return;
+  }
+  dashSessionList.classList.remove("muted");
+  dashSessionList.innerHTML = `<table class="admin-table"><thead><tr>
+    <th>Device</th><th>Started</th><th>Status</th>
+  </tr></thead><tbody>${rows
+    .map((s) => {
+      const live =
+        s.status === "connected" ||
+        s.status === "connecting" ||
+        s.status === "requesting";
+      return `<tr>
+        <td>${escapeHtml(s.deviceId || "—")}</td>
+        <td>${escapeHtml(formatSeen(s.startedAt))}</td>
+        <td><span class="pill ${live ? "live" : "ended"}">${escapeHtml(
+          s.status || "?"
+        )}</span></td>
+      </tr>`;
+    })
+    .join("")}</tbody></table>`;
+}
+
+function updateStatPhones(total, online) {
+  if (statPhones) statPhones.textContent = String(total);
+  if (statOnline) statOnline.textContent = String(online);
+}
+
+function updateStatSessions(n) {
+  if (statSessions) statSessions.textContent = String(n);
+}
+
+function updateStatClients(n) {
+  if (statClients) statClients.textContent = String(n);
+}
+
+async function refreshDashboard() {
+  if (!idToken) return;
+  await Promise.all([
+    refreshDevices().catch(() => {}),
+    refreshSessions().catch(() => {}),
+    refreshClients().catch(() => {}),
+  ]);
+  if (dashSecurity) {
+    dashSecurity.textContent = browserPaired
+      ? "Browser paired. Every live session still requires Approve on the phone."
+      : "Pair this browser first, then connect to a phone. Camera never starts silently.";
+  }
 }
 
 let cachedClients = [];
@@ -924,12 +1000,16 @@ async function refreshDevices() {
   if (!idToken) {
     deviceList.textContent = "Sign in to load devices.";
     deviceList.classList.add("muted");
+    updateStatPhones(0, 0);
     return;
   }
   deviceList.textContent = "Loading…";
   try {
     const data = await api("/api/device/list");
-    renderDevices(data.devices || [], cachedClients);
+    cachedDevices = data.devices || [];
+    const online = cachedDevices.filter((d) => d.online).length;
+    updateStatPhones(cachedDevices.length, online);
+    renderDevices(cachedDevices, cachedClients);
   } catch (e) {
     deviceList.textContent = e instanceof Error ? e.message : String(e);
     deviceList.classList.add("muted");
@@ -962,8 +1042,8 @@ function updatePairingUi(isPaired) {
   browserPaired = Boolean(isPaired);
   if (homeStatus) {
     homeStatus.textContent = browserPaired
-      ? "This browser is paired. Open My phones and tap Connect again when you want a live session."
-      : "This browser is not paired yet. Create a pairing code, then scan the QR on your phone.";
+      ? "This browser is paired. Open My Phones and tap Connect when you want a live session."
+      : "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
   }
   if (btnHomePair) btnHomePair.hidden = browserPaired;
   if (btnHomePhones) btnHomePhones.hidden = !browserPaired;
@@ -1105,7 +1185,10 @@ async function main() {
       authStatus.textContent = friendlyAuthError(e);
     })
   );
-  btnLogout.addEventListener("click", () => signOut(auth));
+  if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
+  if (btnLogoutSettings) {
+    btnLogoutSettings.addEventListener("click", () => signOut(auth));
+  }
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   if (btnRefreshClients) btnRefreshClients.addEventListener("click", () => refreshClients());
   if (btnRefreshSessions) {
@@ -1155,9 +1238,7 @@ async function main() {
     firebaseUid = user.uid;
     setLoggedInUi(user);
     showPanel("home");
-    await refreshClients();
-    await refreshDevices();
-    await refreshSessions();
+    await refreshDashboard();
   });
 }
 
