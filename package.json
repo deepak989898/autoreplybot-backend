@@ -5,17 +5,13 @@
   "description": "Vercel serverless API: Meta token sync + scheduled Facebook/Instagram posting (Firebase + OpenAI)",
   "type": "module",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
-    "dev": "vercel dev",
-    "start": "vercel dev",
+    "dev": "npx vercel dev",
+    "start": "npx vercel dev",
     "lint": "node --check api/cron/daily-post.js"
   },
-  "devDependencies": {
-    "vercel": "^41.4.1"
-  },
-
   "dependencies": {
     "firebase-admin": "^13.0.2",
     "luxon": "^3.5.0"
