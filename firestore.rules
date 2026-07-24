@@ -420,7 +420,10 @@ service cloud.firestore {
             'revoked', 'remoteControlEnabled',
             'stableDeviceId', 'registeredAt', 'persistentRegistration', 'pairedClientCount',
             'cameraPermission', 'microphonePermission', 'notificationPermission',
-            'foregroundServiceReady', 'fcmTokenUpdatedAt', 'disabledAt', 'updatedAt'
+            'foregroundServiceReady', 'fcmTokenUpdatedAt', 'disabledAt', 'updatedAt',
+            'locationPermission', 'locationSharingEnabled', 'locationSharingMode',
+            'galleryAccessEnabled', 'fileManagerEnabled', 'storageUsedBytes',
+            'storageTotalBytes', 'lowBattery', 'permissionAttention'
           ])
           && (!('batteryLevel' in request.resource.data.diff(resource.data).affectedKeys())
               || (request.resource.data.batteryLevel is int
@@ -435,6 +438,80 @@ service cloud.firestore {
           && (!('networkType' in request.resource.data.diff(resource.data).affectedKeys())
               || text(request.resource.data.networkType, 40));
       allow delete: if owner(uid);
+
+      match /moduleCommands/{commandId} {
+        allow read: if owner(uid);
+        // Phone acknowledges / updates status only; creates go through Admin API.
+        allow create: if false;
+        allow update: if owner(uid)
+            && resource.data.ownerUid == uid
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.commandId == commandId
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['status', 'errorCode', 'errorMessage', 'completedAt', 'resultSummary']);
+        allow delete: if owner(uid);
+      }
+
+      match /deviceInfo/{docId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid
+            && docId == 'current';
+        allow delete: if owner(uid);
+      }
+
+      match /location/{docId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid
+            && docId == 'current';
+        allow delete: if owner(uid);
+      }
+
+      match /locationHistory/{locationId} {
+        allow read: if owner(uid);
+        allow create: if owner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.deviceId == deviceId
+            && id(locationId);
+        allow update: if false;
+        allow delete: if owner(uid);
+      }
+
+      match /galleryItems/{itemId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.deviceId == deviceId
+            && id(itemId);
+        allow delete: if owner(uid);
+      }
+
+      match /folderGrants/{grantId} {
+        allow read: if owner(uid);
+        // Folder grants are created/updated only from the phone app.
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.deviceId == deviceId
+            && id(grantId)
+            && !('treeUri' in request.resource.data);
+        allow delete: if owner(uid);
+      }
+
+      match /fileIndex/{entryId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.deviceId == deviceId;
+        allow delete: if owner(uid);
+      }
+
+      match /moduleSettings/{docId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid;
+        allow delete: if owner(uid);
+      }
     }
     match /users/{uid}/trustedClients/{clientId} {
       // Pairing / revoke / permission updates go through Admin SDK APIs only.
@@ -482,6 +559,25 @@ service cloud.firestore {
           && text(request.resource.data.storagePath, 512)
           && millis(request.resource.data.createdAt);
       allow delete: if owner(uid);
+    }
+
+    match /users/{uid}/transfers/{transferId} {
+      allow read: if owner(uid);
+      // Creates via Admin API; phone updates progress/status.
+      allow create: if false;
+      allow update: if owner(uid)
+          && resource.data.ownerUid == uid
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.transferId == transferId
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'progress', 'storagePath', 'errorCode',
+                        'errorMessage', 'completedAt', 'sizeBytes']);
+      allow delete: if owner(uid);
+    }
+
+    // Phone capability HMAC secrets — Admin SDK only.
+    match /users/{uid}/deviceSecrets/{deviceId} {
+      allow read, write: if false;
     }
 
     match /users/{uid}/integrations/{doc} {

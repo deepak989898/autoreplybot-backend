@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+﻿import { randomBytes } from "crypto";
 import { getMessaging } from "firebase-admin/messaging";
 import { verifyFirebaseIdToken } from "../lib/auth.js";
 import { db } from "../lib/firebase.js";
@@ -16,6 +16,8 @@ import {
   writeAuditLog,
 } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
+import { createModuleCommand, createTransfer } from "../lib/module-commands.js";
+import { getStorage } from "firebase-admin/storage";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
 const SIGNATURE_SKEW_MS = 2 * 60 * 1000;
@@ -49,6 +51,25 @@ export default async function handler(req, res) {
   if (path === "ice-servers") return handleIceServers(req, res);
   if (path === "session/request") return handleSessionRequest(req, res);
   if (path === "session/end") return handleSessionEnd(req, res);
+  if (path === "summary") return handleSummary(req, res);
+  if (path === "info") return handleDeviceInfo(req, res);
+  if (path === "info/refresh") return handleInfoRefresh(req, res);
+  if (path === "location") return handleLocationGet(req, res);
+  if (path === "location/request") return handleLocationRequest(req, res);
+  if (path === "location/live") return handleLocationLive(req, res);
+  if (path === "location/stop") return handleLocationStop(req, res);
+  if (path === "gallery") return handleGalleryList(req, res);
+  if (path === "gallery/index") return handleGalleryIndex(req, res);
+  if (path === "gallery/transfer") return handleGalleryTransfer(req, res);
+  if (path === "files") return handleFilesList(req, res);
+  if (path === "files/command") return handleFilesCommand(req, res);
+  if (path === "transfers") return handleTransfersList(req, res);
+  if (path === "transfers/cancel") return handleTransferCancel(req, res);
+  if (path === "command") return handleModuleCommand(req, res);
+  if (path === "capability-secret") return handleCapabilitySecret(req, res);
+  if (path === "phone-capabilities") return handlePhoneCapabilities(req, res);
+  if (path === "export-inventory") return handleExportInventory(req, res);
+  if (path === "bulk") return handleBulk(req, res);
 
   return res.status(404).json({ error: "Unknown device route", code: "NOT_FOUND", path });
 }
@@ -79,6 +100,15 @@ function sanitizeDevice(id, data) {
       data.microphonePermission || (data.microphoneAvailable ? "granted" : "unknown")
     ),
     notificationPermission: String(data.notificationPermission || "unknown"),
+    locationPermission: String(data.locationPermission || "unknown"),
+    locationSharingEnabled: Boolean(data.locationSharingEnabled),
+    locationSharingMode: String(data.locationSharingMode || "disabled"),
+    galleryAccessEnabled: Boolean(data.galleryAccessEnabled),
+    fileManagerEnabled: Boolean(data.fileManagerEnabled),
+    storageUsedBytes: Number(data.storageUsedBytes || 0),
+    storageTotalBytes: Number(data.storageTotalBytes || 0),
+    lowBattery: Boolean(data.lowBattery) || Number(data.batteryLevel || 100) <= 15,
+    permissionAttention: Boolean(data.permissionAttention),
     foregroundServiceReady: Boolean(data.foregroundServiceReady),
     pairedClientCount: Number(data.pairedClientCount || 0),
   };
@@ -389,12 +419,12 @@ async function handleSessionRequest(req, res) {
           metadata: { reason: "bad_signature" },
         });
         return res.status(401).json({
-          error: "Invalid request signature — pair this browser again",
+          error: "Invalid request signature â€” pair this browser again",
           code: "BAD_SIGNATURE",
         });
       }
     } else if (publicKey) {
-      // Client has a registered key but request was not signed → reject auto path.
+      // Client has a registered key but request was not signed â†’ reject auto path.
       await writeAuditLog(uid, {
         action: R.AUDIT_INVALID_SIGNED_REQUEST,
         deviceId,
@@ -687,5 +717,773 @@ async function handleSessionEnd(req, res) {
       error: code === 401 ? "Unauthorized" : "Session end failed",
       code: code === 401 ? "AUTH_FAILED" : "SESSION_END_FAILED",
     });
+  }
+}
+
+async function requireAuthed(req) {
+  const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+  if (!uid) {
+    const err = new Error("Unauthorized");
+    err.code = "AUTH_FAILED";
+    throw err;
+  }
+  return uid;
+}
+
+function clientError(res, e, fallback) {
+  const msg = e instanceof Error ? e.message : String(e);
+  const code = e?.code || fallback || "FAILED";
+  let status = 400;
+  if (code === "AUTH_FAILED" || msg.includes("Authorization")) status = 401;
+  else if (code === "CAPABILITY_DENIED" || code === "CLIENT_REVOKED") status = 403;
+  else if (code === "DEVICE_NOT_FOUND" || code === "CLIENT_NOT_FOUND") status = 404;
+  return res.status(status).json({ error: msg, code });
+}
+
+async function handleSummary(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const [devicesSnap, sessionsSnap, mediaSnap, transfersSnap] = await Promise.all([
+      db().collection(R.COL_USERS).doc(uid).collection(R.COL_DEVICES).get(),
+      db().collection(R.COL_USERS).doc(uid).collection(R.COL_SESSIONS).get(),
+      db().collection(R.COL_USERS).doc(uid).collection(R.COL_REMOTE_MEDIA).limit(500).get(),
+      db().collection(R.COL_USERS).doc(uid).collection(R.COL_TRANSFERS).limit(200).get(),
+    ]);
+    const devices = devicesSnap.docs
+      .map((d) => sanitizeDevice(d.id, d.data()))
+      .filter(Boolean)
+      .filter((d) => !d.revoked);
+    const online = devices.filter((d) => d.online).length;
+    const activeSessions = sessionsSnap.docs.filter((d) =>
+      R.ACTIVE_SESSION_STATUSES.includes(String((d.data() || {}).status || ""))
+    ).length;
+    let locationActive = 0;
+    for (const d of devices) {
+      if (d.locationSharingEnabled && d.locationSharingMode && d.locationSharingMode !== "disabled") {
+        locationActive += 1;
+      }
+    }
+    const lowBattery = devices.filter((d) => d.lowBattery).length;
+    const permissionNeeded = devices.filter(
+      (d) =>
+        d.permissionAttention ||
+        d.cameraPermission === "denied" ||
+        d.microphonePermission === "denied" ||
+        d.locationPermission === "denied"
+    ).length;
+    return res.status(200).json({
+      ok: true,
+      summary: {
+        totalDevices: devices.length,
+        onlineDevices: online,
+        offlineDevices: Math.max(0, devices.length - online),
+        activeCameraSessions: activeSessions,
+        activeLocationSessions: locationActive,
+        totalMediaFiles: mediaSnap.size,
+        lowBatteryDevices: lowBattery,
+        permissionAttention: permissionNeeded,
+        openTransfers: transfersSnap.docs.filter((t) => {
+          const s = String((t.data() || {}).status || "");
+          return !["ready", "downloaded", "expired", "failed", "cancelled"].includes(s);
+        }).length,
+      },
+      devices,
+    });
+  } catch (e) {
+    return clientError(res, e, "SUMMARY_FAILED");
+  }
+}
+
+async function handleDeviceInfo(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_DEVICE_INFO)
+      .doc("current")
+      .get();
+    return res.status(200).json({
+      ok: true,
+      deviceId,
+      info: snap.exists ? snap.data() : null,
+    });
+  } catch (e) {
+    return clientError(res, e, "INFO_FAILED");
+  }
+}
+
+async function handleInfoRefresh(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    if (!deviceId || !clientId) {
+      return res.status(400).json({ error: "deviceId and clientId required", code: "BAD_REQUEST" });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "DEVICE_INFO_REFRESH",
+      { fullScan: Boolean(body.fullScan) },
+      body.idempotencyKey
+    );
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "INFO_REFRESH_FAILED");
+  }
+}
+
+async function handleLocationGet(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    const deviceRef = db().collection(R.COL_USERS).doc(uid).collection(R.COL_DEVICES).doc(deviceId);
+    const [deviceSnap, locSnap, histSnap] = await Promise.all([
+      deviceRef.get(),
+      deviceRef.collection(R.COL_LOCATION).doc("current").get(),
+      deviceRef.collection(R.COL_LOCATION_HISTORY).orderBy("capturedAt", "desc").limit(50).get(),
+    ]);
+    if (!deviceSnap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+    const device = sanitizeDevice(deviceId, deviceSnap.data());
+    return res.status(200).json({
+      ok: true,
+      device,
+      location: locSnap.exists ? locSnap.data() : null,
+      history: histSnap.docs.map((d) => d.data()),
+    });
+  } catch (e) {
+    return clientError(res, e, "LOCATION_GET_FAILED");
+  }
+}
+
+async function handleLocationRequest(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    const device = deviceSnap.data() || {};
+    if (!device.locationSharingEnabled) {
+      return res.status(403).json({
+        error: "Location sharing is disabled on the phone.",
+        code: "LOCATION_DISABLED",
+      });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "LOCATION_GET_CURRENT",
+      {},
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_LOCATION_REQUESTED,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "LOCATION_REQUEST_FAILED");
+  }
+}
+
+async function handleLocationLive(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const durationMs = Math.min(
+      4 * 60 * 60 * 1000,
+      Math.max(15 * 60 * 1000, Number(body.durationMs || 15 * 60 * 1000))
+    );
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    if (!(deviceSnap.data() || {}).locationSharingEnabled) {
+      return res.status(403).json({
+        error: "Location sharing is disabled on the phone.",
+        code: "LOCATION_DISABLED",
+      });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "LOCATION_START_LIVE",
+      { durationMs },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_LOCATION_LIVE_STARTED,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { durationMs, commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "LOCATION_LIVE_FAILED");
+  }
+}
+
+async function handleLocationStop(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const cmd = await createModuleCommand(
+      uid,
+      String(body.deviceId || "").trim(),
+      String(body.clientId || "").trim(),
+      "LOCATION_STOP",
+      {},
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_LOCATION_LIVE_STOPPED,
+      deviceId: String(body.deviceId || ""),
+      clientId: String(body.clientId || ""),
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "LOCATION_STOP_FAILED");
+  }
+}
+
+async function handleGalleryList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    const type = String(req.query?.type || "").trim().toLowerCase();
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit || 40)));
+    let q = db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_GALLERY_ITEMS)
+      .where("deleted", "==", false)
+      .orderBy("dateAdded", "desc")
+      .limit(limit);
+    if (type === "image" || type === "video" || type === "audio") {
+      q = db()
+        .collection(R.COL_USERS)
+        .doc(uid)
+        .collection(R.COL_DEVICES)
+        .doc(deviceId)
+        .collection(R.COL_GALLERY_ITEMS)
+        .where("deleted", "==", false)
+        .where("type", "==", type)
+        .orderBy("dateAdded", "desc")
+        .limit(limit);
+    }
+    const snap = await q.get();
+    return res.status(200).json({
+      ok: true,
+      items: snap.docs.map((d) => {
+        const data = d.data() || {};
+        delete data.contentUri;
+        return { itemId: d.id, ...data };
+      }),
+    });
+  } catch (e) {
+    return clientError(res, e, "GALLERY_LIST_FAILED");
+  }
+}
+
+async function handleGalleryIndex(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const cmd = await createModuleCommand(
+      uid,
+      String(body.deviceId || "").trim(),
+      String(body.clientId || "").trim(),
+      "GALLERY_INDEX",
+      { mediaType: String(body.mediaType || "all").slice(0, 20) },
+      body.idempotencyKey
+    );
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "GALLERY_INDEX_FAILED");
+  }
+}
+
+async function handleGalleryTransfer(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const itemId = String(body.itemId || "").trim();
+    const transfer = await createTransfer(uid, {
+      deviceId,
+      clientId,
+      operation: "gallery_download",
+      sourceType: "gallery",
+      sourceReference: itemId,
+      sizeBytes: Number(body.sizeBytes || 0),
+      mimeType: body.mimeType,
+      displayName: body.displayName,
+      storagePath: `users/${uid}/devices/${deviceId}/gallery-transfers/pending/${itemId}`,
+    });
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "GALLERY_TRANSFER_REQUEST",
+      { itemId, transferId: transfer.transferId },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_GALLERY_TRANSFER,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { itemId, transferId: transfer.transferId },
+    });
+    return res.status(200).json({ ok: true, transfer, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "GALLERY_TRANSFER_FAILED");
+  }
+}
+
+async function handleFilesList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    const grantsSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_FOLDER_GRANTS)
+      .get();
+    const indexSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_FILE_INDEX)
+      .orderBy("name", "asc")
+      .limit(200)
+      .get();
+    return res.status(200).json({
+      ok: true,
+      folders: grantsSnap.docs.map((d) => {
+        const data = d.data() || {};
+        delete data.treeUri;
+        return { grantId: d.id, ...data };
+      }),
+      entries: indexSnap.docs.map((d) => d.data()),
+    });
+  } catch (e) {
+    return clientError(res, e, "FILES_LIST_FAILED");
+  }
+}
+
+async function handleFilesCommand(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const action = String(body.action || "").trim().toUpperCase();
+    const allowed = [
+      "FILE_LIST",
+      "FILE_METADATA",
+      "FILE_DOWNLOAD_REQUEST",
+      "FILE_UPLOAD_PREPARE",
+      "FILE_UPLOAD_COMMIT",
+      "FILE_CREATE_FOLDER",
+      "FILE_RENAME",
+      "FILE_MOVE",
+      "FILE_COPY",
+      "FILE_DELETE",
+      "FILE_PREVIEW",
+      "FILE_CANCEL_TRANSFER",
+    ];
+    if (!allowed.includes(action)) {
+      return res.status(400).json({ error: "Invalid file action", code: "BAD_REQUEST" });
+    }
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    let transfer = null;
+    if (action === "FILE_DOWNLOAD_REQUEST" || action === "FILE_UPLOAD_PREPARE") {
+      transfer = await createTransfer(uid, {
+        deviceId,
+        clientId,
+        operation: action.toLowerCase(),
+        sourceType: "file",
+        sourceReference: String(body.documentId || body.sourceReference || ""),
+        sizeBytes: Number(body.sizeBytes || 0),
+        mimeType: body.mimeType,
+        displayName: body.displayName,
+        storagePath: `users/${uid}/devices/${deviceId}/file-transfers/${randomBytes(8).toString("hex")}/pending`,
+      });
+    }
+    const payload = { ...(body.payload || {}), ...(transfer ? { transferId: transfer.transferId } : {}) };
+    if (body.folderGrantId) payload.folderGrantId = String(body.folderGrantId);
+    if (body.documentId) payload.documentId = String(body.documentId);
+    const cmd = await createModuleCommand(uid, deviceId, clientId, action, payload, body.idempotencyKey);
+    return res.status(200).json({ ok: true, command: cmd, transfer });
+  } catch (e) {
+    return clientError(res, e, "FILES_COMMAND_FAILED");
+  }
+}
+
+async function handleTransfersList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    let q = db().collection(R.COL_USERS).doc(uid).collection(R.COL_TRANSFERS).orderBy("createdAt", "desc").limit(50);
+    const snap = await q.get();
+    let items = snap.docs.map((d) => d.data());
+    if (deviceId) items = items.filter((t) => String(t.deviceId || "") === deviceId);
+    // Attach short-lived download URLs for ready transfers (private).
+    const out = [];
+    for (const t of items) {
+      const copy = { ...t };
+      if (t.status === "ready" && t.storagePath) {
+        try {
+          const bucket = getStorage().bucket();
+          const file = bucket.file(t.storagePath);
+          const [url] = await file.getSignedUrl({
+            action: "read",
+            expires: Date.now() + 10 * 60 * 1000,
+          });
+          copy.downloadUrl = url;
+        } catch {
+          copy.downloadUrl = null;
+        }
+      }
+      out.push(copy);
+    }
+    return res.status(200).json({ ok: true, transfers: out });
+  } catch (e) {
+    return clientError(res, e, "TRANSFERS_FAILED");
+  }
+}
+
+async function handleTransferCancel(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const transferId = String(body.transferId || "").trim();
+    const ref = db().collection(R.COL_USERS).doc(uid).collection(R.COL_TRANSFERS).doc(transferId);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: "Transfer not found", code: "NOT_FOUND" });
+    await ref.set({ status: "cancelled", completedAt: Date.now() }, { merge: true });
+    const data = snap.data() || {};
+    if (data.deviceId && body.clientId) {
+      await createModuleCommand(
+        uid,
+        String(data.deviceId),
+        String(body.clientId),
+        "FILE_CANCEL_TRANSFER",
+        { transferId },
+        body.idempotencyKey
+      );
+    }
+    await writeAuditLog(uid, {
+      action: R.AUDIT_TRANSFER_CANCELLED,
+      deviceId: String(data.deviceId || ""),
+      clientId: String(body.clientId || ""),
+      result: "ok",
+      metadata: { transferId },
+    });
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return clientError(res, e, "TRANSFER_CANCEL_FAILED");
+  }
+}
+
+async function handleModuleCommand(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const cmd = await createModuleCommand(
+      uid,
+      String(body.deviceId || "").trim(),
+      String(body.clientId || "").trim(),
+      String(body.action || "").trim().toUpperCase(),
+      body.payload || {},
+      body.idempotencyKey
+    );
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "COMMAND_FAILED");
+  }
+}
+
+async function handleExportInventory(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const snap = await db().collection(R.COL_USERS).doc(uid).collection(R.COL_DEVICES).get();
+    const devices = snap.docs
+      .map((d) => sanitizeDevice(d.id, d.data()))
+      .filter((d) => d && !d.revoked)
+      .map((d) => ({
+        deviceName: d.deviceName,
+        manufacturer: d.manufacturer,
+        model: d.deviceModel,
+        androidVersion: d.androidVersion,
+        appVersion: d.appVersion,
+        online: d.online,
+        batteryLevel: d.batteryLevel,
+        networkType: d.networkType,
+        lastSeenAt: d.lastSeenAt,
+      }));
+    return res.status(200).json({ ok: true, devices, exportedAt: Date.now() });
+  } catch (e) {
+    return clientError(res, e, "EXPORT_FAILED");
+  }
+}
+
+async function handleBulk(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const action = String(body.action || "").trim().toLowerCase();
+    const deviceIds = Array.isArray(body.deviceIds)
+      ? body.deviceIds.map((x) => String(x).trim()).filter(Boolean).slice(0, 20)
+      : [];
+    const clientId = String(body.clientId || "").trim();
+    const allowed = new Set([
+      "refresh_status",
+      "request_device_info",
+      "end_all_sessions",
+      "stop_live_location",
+      "export_inventory",
+    ]);
+    if (!allowed.has(action)) {
+      return res.status(400).json({
+        error: "Bulk action not allowed",
+        code: "BULK_DENIED",
+      });
+    }
+    const results = [];
+    if (action === "export_inventory") {
+      return handleExportInventory(req, res);
+    }
+    for (const deviceId of deviceIds) {
+      if (action === "end_all_sessions") {
+        await endActiveSessionsForDevice(uid, deviceId, "bulk_end_sessions");
+        results.push({ deviceId, ok: true });
+      } else if (action === "refresh_status" || action === "request_device_info") {
+        const cmd = await createModuleCommand(
+          uid,
+          deviceId,
+          clientId,
+          action === "refresh_status" ? "STATUS_REFRESH" : "DEVICE_INFO_REFRESH",
+          {},
+          `${action}:${deviceId}:${Date.now()}`
+        );
+        results.push({ deviceId, ok: true, commandId: cmd.commandId });
+      } else if (action === "stop_live_location") {
+        const cmd = await createModuleCommand(uid, deviceId, clientId, "LOCATION_STOP", {}, null);
+        results.push({ deviceId, ok: true, commandId: cmd.commandId });
+      }
+    }
+    return res.status(200).json({ ok: true, results });
+  } catch (e) {
+    return clientError(res, e, "BULK_FAILED");
+  }
+}
+
+async function handleCapabilitySecret(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const { createHmac } = await import("crypto");
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const secret = String(body.secret || "").trim();
+    if (!deviceId || !/^[a-f0-9]{64}$/i.test(secret)) {
+      return res.status(400).json({ error: "Invalid deviceId/secret", code: "BAD_REQUEST" });
+    }
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    if (!deviceSnap.exists || (deviceSnap.data() || {}).ownerUid !== uid) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+    await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICE_SECRETS)
+      .doc(deviceId)
+      .set({ deviceId, ownerUid: uid, secret, updatedAt: Date.now() });
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return clientError(res, e, "SECRET_SYNC_FAILED");
+  }
+}
+
+async function handlePhoneCapabilities(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const { createHmac, timingSafeEqual } = await import("crypto");
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const timestamp = Number(body.timestamp || 0);
+    const nonce = String(body.nonce || "").trim();
+    const signature = String(body.signature || "").trim().toLowerCase();
+    const now = Date.now();
+    if (!deviceId || !clientId || !nonce || !signature) {
+      return res.status(400).json({ error: "Missing fields", code: "BAD_REQUEST" });
+    }
+    if (!Number.isFinite(timestamp) || Math.abs(now - timestamp) > 2 * 60 * 1000) {
+      return res.status(401).json({ error: "Timestamp skew", code: "REPLAY" });
+    }
+    const secretSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICE_SECRETS)
+      .doc(deviceId)
+      .get();
+    if (!secretSnap.exists) {
+      return res.status(403).json({ error: "Device secret not registered", code: "SECRET_MISSING" });
+    }
+    const secret = String((secretSnap.data() || {}).secret || "");
+    const caps = normalizeAllowedCapabilities(body.allowedCapabilities);
+    const stable = JSON.stringify(caps);
+    const payload = `${deviceId}:${clientId}:${timestamp}:${nonce}:${stable}`;
+    const expected = createHmac("sha256", secret).update(payload, "utf8").digest("hex");
+    const a = Buffer.from(expected, "utf8");
+    const b = Buffer.from(signature, "utf8");
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      await writeAuditLog(uid, {
+        action: R.AUDIT_UNAUTHORIZED_ATTEMPT,
+        deviceId,
+        clientId,
+        result: "denied",
+        metadata: { reason: "bad_hmac" },
+      });
+      return res.status(403).json({ error: "Invalid signature", code: "BAD_SIGNATURE" });
+    }
+    const { consumeNonce } = await import("../lib/browser-identity.js");
+    if (!consumeNonce(`cap:${uid}:${deviceId}:${nonce}`, 5 * 60 * 1000)) {
+      return res.status(401).json({ error: "Replay", code: "REPLAY" });
+    }
+    const { sanitizeTrustedClient } = await import("../lib/pairing.js");
+    const ref = db().collection(R.COL_USERS).doc(uid).collection(R.COL_TRUSTED_CLIENTS).doc(clientId);
+    const snap = await ref.get();
+    if (!snap.exists || (snap.data() || {}).revoked === true) {
+      return res.status(404).json({ error: "Client not found", code: "CLIENT_NOT_FOUND" });
+    }
+    await ref.set({ allowedCapabilities: caps, updatedAt: now }, { merge: true });
+    await writeAuditLog(uid, {
+      action: R.AUDIT_BROWSER_PERMISSIONS_CHANGED,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { source: "phone_hmac", allowedCapabilities: caps },
+    });
+    const updated = { ...(snap.data() || {}), allowedCapabilities: caps, updatedAt: now };
+    return res.status(200).json({ ok: true, client: sanitizeTrustedClient(clientId, updated) });
+  } catch (e) {
+    return clientError(res, e, "PHONE_CAPS_FAILED");
   }
 }

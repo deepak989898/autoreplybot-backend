@@ -15,6 +15,7 @@ import {
 import {
   fingerprintPublicJwk,
   isPublicJwk,
+  mergeCapabilitiesWithoutElevation,
   normalizeAllowedCapabilities,
 } from "../lib/browser-identity.js";
 import { verifyFirebaseIdToken } from "../lib/auth.js";
@@ -459,19 +460,11 @@ async function handleUpdateClient(req, res) {
       throw new Error("Trusted client not found");
     }
 
-    const prevCaps = normalizeAllowedCapabilities(data.allowedCapabilities);
-    const nextCaps = normalizeAllowedCapabilities(
+    // Website cannot expand capabilities above phone-approved set.
+    const mergedCaps = mergeCapabilitiesWithoutElevation(
+      data.allowedCapabilities,
       body.allowedCapabilities || data.allowedCapabilities
     );
-    // Website cannot expand capabilities.
-    const mergedCaps = {
-      camera: prevCaps.camera && nextCaps.camera,
-      microphone: prevCaps.microphone && nextCaps.microphone,
-      photoCapture: prevCaps.photoCapture && nextCaps.photoCapture,
-      videoRecording: prevCaps.videoRecording && nextCaps.videoRecording,
-      audioRecording: prevCaps.audioRecording && nextCaps.audioRecording,
-      torch: prevCaps.torch && nextCaps.torch,
-    };
 
     const prevAuto = Boolean(data.autoApproveSessions);
     let nextAuto = prevAuto;

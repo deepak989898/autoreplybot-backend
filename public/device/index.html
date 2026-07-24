@@ -67,17 +67,35 @@
           <button type="button" class="nav-item" data-panel="devices">
             <span class="nav-ico">📱</span> My Phones
           </button>
+          <button type="button" class="nav-item" data-panel="multiview">
+            <span class="nav-ico">▦</span> Multi Device View
+          </button>
           <button type="button" class="nav-item" data-panel="pair">
             <span class="nav-ico">⬚</span> Pair New Browser
           </button>
           <button type="button" class="nav-item" data-panel="sessions">
             <span class="nav-ico">⏱</span> Sessions
           </button>
+          <button type="button" class="nav-item" data-panel="location">
+            <span class="nav-ico">📍</span> Location
+          </button>
+          <button type="button" class="nav-item" data-panel="info">
+            <span class="nav-ico">ℹ</span> Device Information
+          </button>
+          <button type="button" class="nav-item" data-panel="gallery">
+            <span class="nav-ico">🖼</span> Gallery
+          </button>
+          <button type="button" class="nav-item" data-panel="files">
+            <span class="nav-ico">📁</span> File Manager
+          </button>
+          <button type="button" class="nav-item" data-panel="transfers">
+            <span class="nav-ico">⇄</span> Transfers
+          </button>
           <button type="button" class="nav-item" data-panel="security">
             <span class="nav-ico">🛡</span> Trusted Browsers
           </button>
           <button type="button" class="nav-item" data-panel="media">
-            <span class="nav-ico">🖼</span> Media Files
+            <span class="nav-ico">🎞</span> Media Files
           </button>
           <button type="button" class="nav-item" data-panel="social">
             <span class="nav-ico">📣</span> Facebook &amp; Instagram
@@ -248,6 +266,90 @@
             </form>
             <div id="media-viewer-body" class="media-viewer-body"></div>
           </dialog>
+        </section>
+
+        <section class="panel" id="panel-location" data-panel="location" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Location</h1>
+              <p class="page-sub">View authorized device location. Phone must enable sharing first.</p>
+            </div>
+            <div class="page-actions">
+              <select id="location-device-select" class="input"></select>
+              <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh</button>
+              <button id="btn-loc-current" class="btn-primary" type="button">Request current</button>
+              <button id="btn-loc-live" class="btn-secondary" type="button">Live 15m</button>
+              <button id="btn-loc-stop" class="btn-secondary" type="button">Stop</button>
+            </div>
+          </header>
+          <div id="location-panel-body" class="surface muted">Select a device.</div>
+        </section>
+
+        <section class="panel" id="panel-info" data-panel="info" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Device Information</h1>
+              <p class="page-sub">Safe device details without restricted identifiers.</p>
+            </div>
+            <div class="page-actions">
+              <select id="info-device-select" class="input"></select>
+              <button id="btn-info-refresh" class="btn-primary" type="button">Refresh Information</button>
+            </div>
+          </header>
+          <pre id="info-panel-body" class="surface code-block">Select a device.</pre>
+        </section>
+
+        <section class="panel" id="panel-gallery" data-panel="gallery" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Gallery</h1>
+              <p class="page-sub">Authorized MediaStore index from your phone.</p>
+            </div>
+            <div class="page-actions">
+              <select id="gallery-device-select" class="input"></select>
+              <button id="btn-gallery-index" class="btn-secondary" type="button">Request index</button>
+              <button id="btn-gallery-refresh" class="btn-primary" type="button">Refresh</button>
+            </div>
+          </header>
+          <div id="gallery-list" class="media-gallery muted">Select a device.</div>
+        </section>
+
+        <section class="panel" id="panel-files" data-panel="files" hidden>
+          <header class="page-head">
+            <div>
+              <h1>File Manager</h1>
+              <p class="page-sub">Only folders authorized on the phone via SAF.</p>
+            </div>
+            <div class="page-actions">
+              <select id="files-device-select" class="input"></select>
+              <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
+              <button id="btn-files-list" class="btn-secondary" type="button">List folder</button>
+            </div>
+          </header>
+          <div id="files-panel-body" class="surface muted">Select a device.</div>
+        </section>
+
+        <section class="panel" id="panel-transfers" data-panel="transfers" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Transfers</h1>
+              <p class="page-sub">Temporary private gallery and file transfers.</p>
+            </div>
+            <button id="btn-transfers-refresh" class="btn-secondary" type="button">Refresh</button>
+          </header>
+          <div id="transfers-list" class="surface muted">Loading…</div>
+        </section>
+
+        <section class="panel" id="panel-multiview" data-panel="multiview" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Multi Device View</h1>
+              <p class="page-sub">Select up to 4 devices. Cameras do not auto-start.</p>
+            </div>
+            <button id="btn-multiview-refresh" class="btn-secondary" type="button">Refresh devices</button>
+          </header>
+          <div id="multiview-picker" class="surface"></div>
+          <div id="multiview-grid" class="device-list" style="margin-top:1rem"></div>
         </section>
       </main>
     </div>

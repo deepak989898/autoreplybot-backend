@@ -32,6 +32,33 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
+    function validPrivateTransfer() {
+      return request.resource.size > 0
+          && request.resource.size <= 100 * 1024 * 1024
+          && request.resource.contentType.matches('image/.*|video/.*|audio/.*|application/pdf|text/.*|application/zip|application/octet-stream');
+    }
+
+    match /users/{userId}/devices/{deviceId}/gallery-transfers/{transferId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validPrivateTransfer();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/devices/{deviceId}/file-transfers/{transferId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validPrivateTransfer();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/devices/{deviceId}/exports/{exportId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+          && request.resource.size > 0
+          && request.resource.size <= 20 * 1024 * 1024
+          && request.resource.contentType.matches('application/json|text/csv|text/plain');
+      allow delete: if isOwner(userId);
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

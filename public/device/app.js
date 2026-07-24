@@ -89,6 +89,12 @@ function showPanel(panelId) {
   if (id === "security") refreshClients().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "social") ensureSocialFrame();
+  if (id === "location") refreshLocationPanel().catch(() => {});
+  if (id === "info") refreshInfoPanel().catch(() => {});
+  if (id === "gallery") refreshGalleryPanel().catch(() => {});
+  if (id === "files") refreshFilesPanel().catch(() => {});
+  if (id === "transfers") refreshTransfersPanel().catch(() => {});
+  if (id === "multiview") refreshMultiViewPanel().catch(() => {});
 }
 
 function ensureSocialFrame() {
@@ -1291,9 +1297,24 @@ async function refreshDashboard() {
     refreshSessions().catch(() => {}),
     refreshClients().catch(() => {}),
   ]);
+  try {
+    const data = await api("/api/device/summary");
+    const s = data.summary || {};
+    const homeStatus = document.getElementById("home-status");
+    if (homeStatus) {
+      homeStatus.textContent =
+        `${s.totalDevices || 0} devices · ${s.onlineDevices || 0} online · ` +
+        `${s.activeCameraSessions || 0} camera sessions · ` +
+        `${s.activeLocationSessions || 0} location sharing · ` +
+        `${s.lowBatteryDevices || 0} low battery · ` +
+        `${s.permissionAttention || 0} need permission attention`;
+    }
+  } catch {
+    // summary optional
+  }
   if (dashSecurity) {
     dashSecurity.textContent = browserPaired
-      ? "Browser paired. Every live session still requires Approve on the phone."
+      ? "Browser paired. Sensitive modules require phone-enabled capabilities."
       : "Pair this browser first, then connect to a phone. Camera never starts silently.";
   }
 }
@@ -1734,3 +1755,301 @@ async function main() {
 main().catch((e) => {
   authStatus.textContent = e instanceof Error ? e.message : String(e);
 });
+
+function fillDeviceSelect(selectEl) {
+  if (!selectEl) return;
+  const prev = selectEl.value;
+  selectEl.innerHTML = "";
+  for (const d of cachedDevices || []) {
+    const opt = document.createElement("option");
+    opt.value = d.deviceId;
+    opt.textContent = `${d.deviceName || d.deviceModel || "Device"} (${d.online ? "online" : "offline"})`;
+    selectEl.appendChild(opt);
+  }
+  if (prev && [...selectEl.options].some((o) => o.value === prev)) selectEl.value = prev;
+}
+
+function requireClientId() {
+  const clientId = preferredClientId(cachedClients);
+  if (!clientId) throw new Error("Pair this browser first (Trusted Browsers / Pair).");
+  return clientId;
+}
+
+async function refreshLocationPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillDeviceSelect(document.getElementById("location-device-select"));
+  const deviceId = document.getElementById("location-device-select")?.value;
+  const body = document.getElementById("location-panel-body");
+  if (!body) return;
+  if (!deviceId) {
+    body.textContent = "No devices registered.";
+    return;
+  }
+  body.textContent = "Loading location…";
+  try {
+    const data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
+    const loc = data.location;
+    const device = data.device || {};
+    if (!device.locationSharingEnabled) {
+      body.innerHTML = `<p class="error">Location sharing is disabled on the phone.</p>`;
+      return;
+    }
+    if (!loc) {
+      body.textContent = "No location yet. Request current location.";
+      return;
+    }
+    const maps = `https://www.openstreetmap.org/?mlat=${loc.latitude}&mlon=${loc.longitude}#map=16/${loc.latitude}/${loc.longitude}`;
+    body.innerHTML = `
+      <p><strong>${escapeHtml(device.deviceName || deviceId)}</strong> · mode ${escapeHtml(String(device.locationSharingMode || loc.sharingMode || ""))}</p>
+      <p>Lat ${loc.latitude} · Lon ${loc.longitude} · accuracy ${loc.accuracyMeters ?? "—"} m</p>
+      <p>Updated ${loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—"}</p>
+      <p><a href="${maps}" target="_blank" rel="noopener">Open in OpenStreetMap</a></p>`;
+  } catch (e) {
+    body.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshInfoPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillDeviceSelect(document.getElementById("info-device-select"));
+  const deviceId = document.getElementById("info-device-select")?.value;
+  const body = document.getElementById("info-panel-body");
+  if (!body) return;
+  if (!deviceId) {
+    body.textContent = "No devices.";
+    return;
+  }
+  body.textContent = "Loading…";
+  try {
+    const data = await api(`/api/device/info?deviceId=${encodeURIComponent(deviceId)}`);
+    body.textContent = data.info ? JSON.stringify(data.info, null, 2) : "No device info yet. Tap Refresh Information.";
+  } catch (e) {
+    body.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshGalleryPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillDeviceSelect(document.getElementById("gallery-device-select"));
+  const deviceId = document.getElementById("gallery-device-select")?.value;
+  const list = document.getElementById("gallery-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  list.textContent = "Loading gallery index…";
+  try {
+    const data = await api(`/api/device/gallery?deviceId=${encodeURIComponent(deviceId)}&limit=60`);
+    const items = data.items || [];
+    if (!items.length) {
+      list.textContent = "No gallery items indexed. Enable Gallery Access on the phone, then Request index.";
+      list.classList.add("muted");
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = `<div class="media-grid">${items
+      .map(
+        (it) => `<article class="media-card">
+        <div class="media-meta"><strong>${escapeHtml(it.displayName || it.itemId)}</strong>
+        <span>${escapeHtml(it.type || "")} · ${Math.round((it.sizeBytes || 0) / 1024)} KB</span></div>
+        <button type="button" class="btn-secondary btn-gallery-dl" data-item-id="${escapeHtml(it.itemId)}" data-size="${it.sizeBytes || 0}" data-mime="${escapeHtml(it.mimeType || "")}" data-name="${escapeHtml(it.displayName || "file")}">Download</button>
+      </article>`
+      )
+      .join("")}</div>`;
+    list.querySelectorAll(".btn-gallery-dl").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const clientId = requireClientId();
+          await api("/api/device/gallery/transfer", {
+            method: "POST",
+            body: JSON.stringify({
+              deviceId,
+              clientId,
+              itemId: btn.getAttribute("data-item-id"),
+              sizeBytes: Number(btn.getAttribute("data-size") || 0),
+              mimeType: btn.getAttribute("data-mime"),
+              displayName: btn.getAttribute("data-name"),
+            }),
+          });
+          alert("Transfer requested. Check Transfers panel when ready.");
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        }
+      });
+    });
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshFilesPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillDeviceSelect(document.getElementById("files-device-select"));
+  const deviceId = document.getElementById("files-device-select")?.value;
+  const body = document.getElementById("files-panel-body");
+  if (!body) return;
+  if (!deviceId) {
+    body.textContent = "No devices.";
+    return;
+  }
+  body.textContent = "Loading…";
+  try {
+    const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
+    const folders = data.folders || [];
+    const entries = data.entries || [];
+    body.innerHTML = `
+      <h3>Authorized folders</h3>
+      <ul>${folders.length ? folders.map((f) => `<li>${escapeHtml(f.displayName || f.grantId)} · ${f.connected === false ? "disconnected" : "connected"} · <code>${escapeHtml(f.grantId || "")}</code></li>`).join("") : "<li>None — add a folder on the phone</li>"}</ul>
+      <h3>Cached listing</h3>
+      <ul>${entries.length ? entries.slice(0, 100).map((e) => `<li>${escapeHtml(e.name || "")} ${e.isDirectory ? "(dir)" : ""}</li>`).join("") : "<li>Empty — use List folder</li>"}</ul>`;
+  } catch (e) {
+    body.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshTransfersPanel() {
+  const list = document.getElementById("transfers-list");
+  if (!list) return;
+  list.textContent = "Loading…";
+  try {
+    const data = await api("/api/device/transfers");
+    const transfers = data.transfers || [];
+    if (!transfers.length) {
+      list.textContent = "No transfers yet.";
+      return;
+    }
+    list.innerHTML = `<table class="data-table"><thead><tr><th>Status</th><th>Operation</th><th>Progress</th><th></th></tr></thead><tbody>
+      ${transfers
+        .map((t) => {
+          const dl = t.downloadUrl
+            ? `<a href="${escapeHtml(t.downloadUrl)}" target="_blank" rel="noopener">Download</a>`
+            : "";
+          return `<tr><td>${escapeHtml(t.status || "")}</td><td>${escapeHtml(t.operation || "")}</td><td>${t.progress || 0}%</td><td>${dl}</td></tr>`;
+        })
+        .join("")}
+    </tbody></table>`;
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshMultiViewPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  const picker = document.getElementById("multiview-picker");
+  const grid = document.getElementById("multiview-grid");
+  if (!picker || !grid) return;
+  picker.innerHTML = (cachedDevices || [])
+    .map(
+      (d) => `<label style="display:inline-flex;gap:.4rem;margin:.25rem .75rem .25rem 0">
+      <input type="checkbox" class="mv-check" value="${escapeHtml(d.deviceId)}" />
+      ${escapeHtml(d.deviceName || d.deviceModel || d.deviceId)} (${d.online ? "online" : "offline"})
+    </label>`
+    )
+    .join("");
+  grid.innerHTML = `<p class="muted">Select up to 4 devices, then start live sessions from My Phones. This view mirrors connection status only and does not auto-start cameras.</p>
+    <div class="device-list">${(cachedDevices || [])
+      .slice(0, 4)
+      .map((d) => {
+        const live = liveByDevice.get(d.deviceId);
+        return `<article class="device-card"><strong>${escapeHtml(d.deviceName || "Device")}</strong>
+        <p>${live?.pc ? "Live session active" : "No live session"} · battery ${d.batteryLevel ?? "—"}%</p></article>`;
+      })
+      .join("")}</div>`;
+}
+
+document.getElementById("btn-loc-refresh")?.addEventListener("click", () => refreshLocationPanel());
+document.getElementById("btn-loc-current")?.addEventListener("click", async () => {
+  try {
+    const deviceId = document.getElementById("location-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/location/request", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshLocationPanel(), 2500);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-loc-live")?.addEventListener("click", async () => {
+  try {
+    const deviceId = document.getElementById("location-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/location/live", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, durationMs: 15 * 60 * 1000 }),
+    });
+    alert("Live location requested for 15 minutes (phone must allow).");
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-loc-stop")?.addEventListener("click", async () => {
+  try {
+    const deviceId = document.getElementById("location-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/location/stop", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-info-refresh")?.addEventListener("click", async () => {
+  try {
+    const deviceId = document.getElementById("info-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/info/refresh", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, fullScan: true }),
+    });
+    setTimeout(() => refreshInfoPanel(), 2500);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-gallery-refresh")?.addEventListener("click", () => refreshGalleryPanel());
+document.getElementById("btn-gallery-index")?.addEventListener("click", async () => {
+  try {
+    const deviceId = document.getElementById("gallery-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/gallery/index", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, mediaType: "all" }),
+    });
+    setTimeout(() => refreshGalleryPanel(), 3000);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());
+document.getElementById("btn-files-list")?.addEventListener("click", async () => {
+  try {
+    const deviceId = document.getElementById("files-device-select")?.value;
+    const clientId = requireClientId();
+    const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
+    const grantId = (data.folders || [])[0]?.grantId;
+    if (!grantId) throw new Error("No authorized folder on phone");
+    await api("/api/device/files/command", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId,
+        clientId,
+        action: "FILE_LIST",
+        folderGrantId: grantId,
+        payload: { folderGrantId: grantId, relativePath: "" },
+      }),
+    });
+    setTimeout(() => refreshFilesPanel(), 2500);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-transfers-refresh")?.addEventListener("click", () => refreshTransfersPanel());
+document.getElementById("btn-multiview-refresh")?.addEventListener("click", () => refreshMultiViewPanel());
+document.getElementById("location-device-select")?.addEventListener("change", () => refreshLocationPanel());
+document.getElementById("info-device-select")?.addEventListener("change", () => refreshInfoPanel());
+document.getElementById("gallery-device-select")?.addEventListener("change", () => refreshGalleryPanel());
+document.getElementById("files-device-select")?.addEventListener("change", () => refreshFilesPanel());
