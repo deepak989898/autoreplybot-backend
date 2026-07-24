@@ -1459,10 +1459,16 @@ async function refreshSessions() {
 }
 
 function formatBytes(n) {
-  const v = Number(n || 0);
-  if (v < 1024) return `${v} B`;
-  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
-  return `${(v / (1024 * 1024)).toFixed(1)} MB`;
+  const value = Number(n);
+  if (!Number.isFinite(value) || value < 0) return "Not available";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = value;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function openMediaViewer(item) {
@@ -1807,19 +1813,6 @@ async function refreshLocationPanel() {
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
   }
-}
-
-function formatBytes(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return "Not available";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function formatInfoValue(key, value) {
