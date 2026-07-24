@@ -17,7 +17,7 @@
         <div class="login-hero-inner">
           <p class="login-brand">AutoReplyBot</p>
           <h1>Remote Camera &amp; Voice</h1>
-          <p class="login-lead">Secure live streaming, recording, and phone control — only after you approve on your device.</p>
+          <p class="login-lead">Secure live streaming after trusted pairing — with optional auto-approve and Android-visible privacy indicators.</p>
           <ul class="login-features">
             <li>Live front / back camera over WebRTC</li>
             <li>QR pairing with trusted browsers</li>
@@ -269,11 +269,12 @@
           </header>
           <article class="surface">
             <ul class="settings-notes">
-              <li>Camera/mic never start until you tap <strong>Approve</strong> on the phone.</li>
-              <li>A foreground notification stays visible while sharing.</li>
+              <li>Camera/mic never start silently without Android permissions and a visible foreground notification.</li>
+              <li>Trusted browsers with auto-approve skip the app Approve/Reject dialog — but Android 14+ often still requires tapping the “tap to start” notification before camera/mic can start.</li>
+              <li>A foreground notification stays visible while sharing, with Stop Sharing.</li>
               <li>Live video uses WebRTC — frames are not stored in Firestore.</li>
               <li>Photos/recordings save on the phone only when you capture/record on purpose.</li>
-              <li>Revoke trusted browsers anytime to block reconnects.</li>
+              <li>Revoke trusted browsers anytime to block reconnects. Browser identity uses a cryptographic key (not just localStorage).</li>
               <li>If live video fails on some networks, configure TURN on the server.</li>
             </ul>
           </article>

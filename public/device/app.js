@@ -18,6 +18,11 @@ import {
   orderBy,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm";
+import {
+  canonicalSessionRequest,
+  exportBrowserPublicKey,
+  signMessage,
+} from "./browser-identity.js";
 
 const authStatus = document.getElementById("auth-status");
 const headerUser = document.getElementById("header-user");
@@ -120,6 +125,7 @@ function setLoggedOutUi() {
 }
 
 const CLIENT_ID_KEY = "autoreplybot_remote_client_id";
+const FINGERPRINT_KEY = "autoreplybot_remote_fingerprint";
 const SIGNAL_TTL_MS = 5 * 60 * 1000;
 const COMMAND_TTL_MS = 60 * 1000;
 
@@ -131,7 +137,11 @@ const CONN = Object.freeze({
   CONNECTED: "Connected",
   FAILED: "Failed",
   DISCONNECTED: "Disconnected",
+  TAP_REQUIRED: "Tap phone notification",
 });
+
+/** @type {string} */
+let browserFingerprint = "";
 
 let auth = null;
 let db = null;
@@ -200,14 +210,36 @@ function escapeHtml(value) {
 }
 
 function preferredClientId(clients) {
-  const stored = localStorage.getItem(CLIENT_ID_KEY) || "";
   const active = (clients || []).filter((c) => !c.revoked);
-  if (stored && active.some((c) => c.clientId === stored)) return stored;
-  if (active[0]?.clientId) {
-    localStorage.setItem(CLIENT_ID_KEY, active[0].clientId);
-    return active[0].clientId;
+  const fp = browserFingerprint || localStorage.getItem(FINGERPRINT_KEY) || "";
+  if (fp) {
+    const byFp = active.find((c) => c.browserFingerprintHash === fp);
+    if (byFp?.clientId) {
+      localStorage.setItem(CLIENT_ID_KEY, byFp.clientId);
+      return byFp.clientId;
+    }
   }
+  const stored = localStorage.getItem(CLIENT_ID_KEY) || "";
+  if (stored && active.some((c) => c.clientId === stored)) return stored;
   return "";
+}
+
+function preferredClient(clients) {
+  const id = preferredClientId(clients);
+  return (clients || []).find((c) => c.clientId === id && !c.revoked) || null;
+}
+
+function randomNonce() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function ensureBrowserIdentity() {
+  const { publicKeyJwk, fingerprint } = await exportBrowserPublicKey();
+  browserFingerprint = fingerprint;
+  localStorage.setItem(FINGERPRINT_KEY, fingerprint);
+  return { publicKeyJwk, fingerprint };
 }
 
 function renderDevices(devices, clients) {
@@ -219,23 +251,33 @@ function renderDevices(devices, clients) {
     return;
   }
   deviceList.classList.remove("muted");
-  const clientId = preferredClientId(clients);
+  const client = preferredClient(clients);
+  const clientId = client?.clientId || "";
+  const autoApprove = Boolean(client?.autoApproveSessions);
   deviceList.innerHTML = devices
     .map((d) => {
       const online = Boolean(d.online);
       const id = escapeHtml(d.deviceId);
+      const idleHint = !clientId
+        ? "This browser must be paired first."
+        : !online
+          ? "Device is offline. It will remain saved and reconnect automatically."
+          : autoApprove
+            ? `${CONN.IDLE} — trusted auto-approve on. Android may still require a notification tap.`
+            : `${CONN.IDLE} — phone must Approve after you Connect.`;
       return `<article class="device-card" data-device-id="${id}">
         <h3>${escapeHtml(d.deviceName || d.deviceId)}</h3>
         <div class="device-meta">
           <span class="pill ${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span>
+          <span class="pill">${d.remoteControlEnabled === false ? "Remote off" : "Remote on"}</span>
           <span>${escapeHtml(d.manufacturer || "")} ${escapeHtml(d.deviceModel || "")}</span>
           <span>Android ${escapeHtml(d.androidVersion || "?")}</span>
           <span>App ${escapeHtml(d.appVersion || "?")}</span>
           <span>Battery ${Number(d.batteryLevel || 0)}%${d.isCharging ? " (charging)" : ""}</span>
           <span>Network ${escapeHtml(d.networkType || "unknown")}</span>
           <span>Last seen ${escapeHtml(formatSeen(d.lastSeenAt))}</span>
-          <span>Camera ${d.cameraAvailable ? "ready" : "n/a"} · Mic ${
-            d.microphoneAvailable ? "ready" : "n/a"
+          <span>Camera ${escapeHtml(d.cameraPermission || (d.cameraAvailable ? "ready" : "n/a"))} · Mic ${
+            escapeHtml(d.microphonePermission || (d.microphoneAvailable ? "ready" : "n/a"))
           }</span>
         </div>
         <div class="connect-panel">
@@ -261,11 +303,7 @@ function renderDevices(devices, clients) {
               End Session
             </button>
           </div>
-          <p class="live-status" data-status-for="${id}">${
-            clientId
-              ? `${CONN.IDLE} — phone must Approve after you Connect.`
-              : "Pair this browser first to Connect."
-          }</p>
+          <p class="live-status" data-status-for="${id}">${escapeHtml(idleHint)}</p>
           <p class="connect-error" data-error-for="${id}" hidden></p>
           <div class="live-panel" data-live-for="${id}" hidden>
             <video class="live-video" data-video-for="${id}" autoplay playsinline muted controls></video>
@@ -469,8 +507,16 @@ async function startConnect(deviceId, clientId) {
   }
   const device = deviceById.get(deviceId);
   if (device && device.online === false) {
-    setDeviceError(deviceId, "Device is offline. Open the Android app and wait until Online.");
+    setDeviceError(
+      deviceId,
+      "Device is offline. It will remain saved and reconnect automatically."
+    );
     setConnectionLabel(deviceId, CONN.FAILED, "offline");
+    return;
+  }
+  if (!clientId) {
+    setDeviceError(deviceId, "This browser must be paired first.");
+    setConnectionLabel(deviceId, CONN.FAILED, "untrusted");
     return;
   }
   setDeviceError(deviceId, "");
@@ -480,9 +526,23 @@ async function startConnect(deviceId, clientId) {
   try {
     const capabilities = selectedCapabilities(deviceId);
     const quality = selectedQuality(deviceId);
+    await ensureBrowserIdentity();
+    const timestamp = Date.now();
+    const nonce = randomNonce();
+    const signature = await signMessage(
+      canonicalSessionRequest({ clientId, deviceId, timestamp, nonce, capabilities })
+    );
     const created = await api("/api/device/session/request", {
       method: "POST",
-      body: JSON.stringify({ deviceId, clientId, capabilities, quality }),
+      body: JSON.stringify({
+        deviceId,
+        clientId,
+        capabilities,
+        quality,
+        timestamp,
+        nonce,
+        signature,
+      }),
     });
     const requestId = created.requestId;
     if (!requestId) throw new Error("No requestId returned");
@@ -491,7 +551,7 @@ async function startConnect(deviceId, clientId) {
     const live = {
       deviceId,
       requestId,
-      sessionId: undefined,
+      sessionId: created.sessionId || undefined,
       pc: null,
       unsubRequest: null,
       unsubSignals: null,
@@ -501,15 +561,24 @@ async function startConnect(deviceId, clientId) {
       remoteDescriptionSet: false,
       pendingIce: [],
       root: deviceList.querySelector(`[data-device-id="${CSS.escape(deviceId)}"]`),
-      connectionLabel: CONN.WAITING_APPROVAL,
+      connectionLabel: created.autoApproved ? CONN.TAP_REQUIRED : CONN.WAITING_APPROVAL,
     };
     liveByDevice.set(deviceId, live);
 
-    setConnectionLabel(
-      deviceId,
-      CONN.WAITING_APPROVAL,
-      `expires ${new Date(created.expiresAt).toLocaleTimeString()}`
-    );
+    if (created.autoApproved) {
+      setConnectionLabel(
+        deviceId,
+        CONN.TAP_REQUIRED,
+        created.message ||
+          "Request authorized. Tap the notification on your phone to start."
+      );
+    } else {
+      setConnectionLabel(
+        deviceId,
+        CONN.WAITING_APPROVAL,
+        `expires ${new Date(created.expiresAt).toLocaleTimeString()}`
+      );
+    }
 
     const expiresAt = Number(created.expiresAt || 0);
     if (expiresAt > Date.now()) {
@@ -858,21 +927,46 @@ function renderClients(clients) {
   clientList.classList.remove("muted");
   const activeCount = clients.filter((c) => !c.revoked).length;
   updateStatClients(activeCount);
+  const fp = browserFingerprint || localStorage.getItem(FINGERPRINT_KEY) || "";
   clientList.innerHTML = `<table class="admin-table"><thead><tr>
-    <th>Browser</th><th>Platform</th><th>Paired</th><th>Last used</th><th>Status</th><th></th>
+    <th>Browser</th><th>OS</th><th>Paired</th><th>Last used</th><th>Auto-approve</th><th>Capabilities</th><th>Status</th><th></th>
   </tr></thead><tbody>${clients
     .map((c) => {
       const revoked = Boolean(c.revoked);
+      const caps = c.allowedCapabilities || {};
+      const capList = [
+        caps.camera !== false ? "cam" : null,
+        caps.microphone !== false ? "mic" : null,
+        caps.torch !== false ? "torch" : null,
+        caps.photoCapture !== false ? "photo" : null,
+        caps.videoRecording ? "video" : null,
+        caps.audioRecording ? "audio" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const isThis = fp && c.browserFingerprintHash === fp;
       return `<tr class="client-row" data-client-id="${escapeHtml(c.clientId)}">
-        <td><strong>${escapeHtml(c.clientName || c.clientId)}</strong><div class="muted">${escapeHtml(c.browser || "")}</div></td>
-        <td>${escapeHtml(c.platform || "—")}</td>
-        <td>${escapeHtml(formatSeen(c.createdAt))}</td>
-        <td>${escapeHtml(formatSeen(c.lastUsedAt))}</td>
-        <td><span class="pill ${revoked ? "offline" : "online"}">${revoked ? "Revoked" : "Active"}</span></td>
-        <td>${
+        <td><strong>${escapeHtml(c.clientName || c.browserName || c.clientId)}</strong>
+          <div class="muted">${escapeHtml(c.browserName || c.browser || "")}${
+            isThis ? " · this browser" : ""
+          }</div></td>
+        <td>${escapeHtml(c.operatingSystem || c.platform || "—")}</td>
+        <td>${escapeHtml(formatSeen(c.pairedAt || c.createdAt))}</td>
+        <td>${escapeHtml(formatSeen(c.lastSeenAt || c.lastUsedAt))}</td>
+        <td>${c.autoApproveSessions ? "On" : "Off"}</td>
+        <td class="muted">${escapeHtml(capList || "—")}</td>
+        <td><span class="pill ${revoked ? "offline" : "online"}">${
+          revoked ? "Revoked" : c.persistentPairing === false ? "Temporary" : "Persistent"
+        }</span></td>
+        <td class="client-actions">${
           revoked
             ? ""
-            : `<button type="button" class="btn-secondary btn-revoke" data-client-id="${escapeHtml(c.clientId)}">Revoke</button>`
+            : `<button type="button" class="btn-secondary btn-disable-auto" data-client-id="${escapeHtml(
+                c.clientId
+              )}" ${c.autoApproveSessions ? "" : "disabled"}>Disable auto</button>
+               <button type="button" class="btn-secondary btn-revoke" data-client-id="${escapeHtml(
+                 c.clientId
+               )}">Revoke</button>`
         }</td>
       </tr>`;
     })
@@ -891,6 +985,25 @@ function renderClients(clients) {
         if (localStorage.getItem(CLIENT_ID_KEY) === clientId) {
           localStorage.removeItem(CLIENT_ID_KEY);
         }
+        await refreshClients();
+        await refreshDevices();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+        btn.disabled = false;
+      }
+    });
+  });
+
+  clientList.querySelectorAll(".btn-disable-auto").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const clientId = btn.getAttribute("data-client-id");
+      if (!clientId) return;
+      btn.disabled = true;
+      try {
+        await api("/api/pair/update-client", {
+          method: "POST",
+          body: JSON.stringify({ clientId, autoApproveSessions: false }),
+        });
         await refreshClients();
         await refreshDevices();
       } catch (e) {
@@ -1026,6 +1139,7 @@ async function refreshClients() {
   }
   clientList.textContent = "Loading…";
   try {
+    await ensureBrowserIdentity();
     const data = await api("/api/pair/clients");
     cachedClients = data.clients || [];
     renderClients(cachedClients);
@@ -1089,7 +1203,16 @@ async function createPairing() {
   }
   btnCreatePair.disabled = true;
   try {
-    const data = await api("/api/pair/create", { method: "POST", body: "{}" });
+    const { publicKeyJwk, fingerprint } = await ensureBrowserIdentity();
+    const data = await api("/api/pair/create", {
+      method: "POST",
+      body: JSON.stringify({
+        publicKeyJwk,
+        browserFingerprintHash: fingerprint,
+        browserName: navigator.userAgentData?.brands?.[0]?.brand || undefined,
+        operatingSystem: navigator.userAgentData?.platform || undefined,
+      }),
+    });
     pairResult.hidden = false;
     pairCode.textContent = data.code || "------";
     pairExpires.textContent = data.expiresAt

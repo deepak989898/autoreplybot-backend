@@ -4,6 +4,13 @@ import { verifyFirebaseIdToken } from "../lib/auth.js";
 import { db } from "../lib/firebase.js";
 import { buildIceServers } from "../lib/ice-servers.js";
 import {
+  canonicalSessionRequest,
+  capabilitiesAllowed,
+  consumeNonce,
+  normalizeAllowedCapabilities,
+  verifyEcdsaP256Sha256,
+} from "../lib/browser-identity.js";
+import {
   endActiveSessionsForDevice,
   parseBody,
   writeAuditLog,
@@ -11,6 +18,7 @@ import {
 import * as R from "../lib/remote-constants.js";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
+const SIGNATURE_SKEW_MS = 2 * 60 * 1000;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 /**
@@ -63,6 +71,14 @@ function sanitizeDevice(id, data) {
     flashlightAvailable: Boolean(data.flashlightAvailable),
     revoked: Boolean(data.revoked),
     remoteControlEnabled: Boolean(data.remoteControlEnabled),
+    persistentRegistration: data.persistentRegistration !== false,
+    cameraPermission: String(data.cameraPermission || (data.cameraAvailable ? "granted" : "unknown")),
+    microphonePermission: String(
+      data.microphonePermission || (data.microphoneAvailable ? "granted" : "unknown")
+    ),
+    notificationPermission: String(data.notificationPermission || "unknown"),
+    foregroundServiceReady: Boolean(data.foregroundServiceReady),
+    pairedClientCount: Number(data.pairedClientCount || 0),
   };
 }
 
@@ -80,6 +96,8 @@ function sanitizeSession(id, data) {
     flashlightEnabled: Boolean(data.flashlightEnabled),
     quality: String(data.quality || ""),
     terminationReason: String(data.terminationReason || data.endReason || ""),
+    androidStartupState: String(data.androidStartupState || ""),
+    autoApproved: Boolean(data.autoApproved),
   };
 }
 
@@ -202,6 +220,9 @@ async function handleSessionRequest(req, res) {
     let clientId = String(body.clientId || "").trim();
     const quality = String(body.quality || "auto").trim().slice(0, 40) || "auto";
     const capabilities = normalizeCapabilities(body.capabilities);
+    const timestamp = Number(body.timestamp || 0);
+    const nonce = String(body.nonce || "").trim();
+    const signature = String(body.signature || "").trim();
 
     if (!deviceId || !ID_RE.test(deviceId)) {
       return res.status(400).json({ error: "Invalid deviceId", code: "BAD_DEVICE" });
@@ -230,30 +251,16 @@ async function handleSessionRequest(req, res) {
       return res.status(400).json({
         error: "Remote control disabled on device",
         code: "REMOTE_DISABLED",
+        androidState: R.ANDROID_STATE_PERMISSION_REQUIRED,
       });
     }
 
     if (!clientId) {
-      const clientsSnap = await db()
-        .collection(R.COL_USERS)
-        .doc(uid)
-        .collection(R.COL_TRUSTED_CLIENTS)
-        .where("revoked", "==", false)
-        .get();
-      let best = null;
-      clientsSnap.forEach((doc) => {
-        const data = doc.data() || {};
-        if (!best || Number(data.createdAt || 0) > Number(best.data().createdAt || 0)) {
-          best = doc;
-        }
+      return res.status(400).json({
+        error: "This browser must be paired first.",
+        code: "NO_TRUSTED_CLIENT",
+        androidState: R.ANDROID_STATE_PERMISSION_REQUIRED,
       });
-      if (!best) {
-        return res.status(400).json({
-          error: "Pair this browser first (no trusted clients)",
-          code: "NO_TRUSTED_CLIENT",
-        });
-      }
-      clientId = best.id;
     }
     if (!ID_RE.test(clientId)) {
       return res.status(400).json({ error: "Invalid clientId", code: "BAD_CLIENT" });
@@ -271,13 +278,222 @@ async function handleSessionRequest(req, res) {
         code: "CLIENT_REVOKED",
       });
     }
-    const clientName = String(clientSnap.data()?.clientName || "Trusted browser");
+    const client = clientSnap.data() || {};
+    const clientName = String(client.clientName || "Trusted browser");
+    const allowed = normalizeAllowedCapabilities(client.allowedCapabilities);
+
+    if (!capabilitiesAllowed(capabilities, allowed)) {
+      return res.status(403).json({
+        error: "Requested capabilities exceed this browser's allowlist",
+        code: "CAPABILITY_DENIED",
+      });
+    }
+
+    const publicKey = client.publicKey;
+    let signatureValid = false;
+    if (publicKey && signature && nonce && timestamp) {
+      const now = Date.now();
+      if (Math.abs(now - timestamp) > SIGNATURE_SKEW_MS) {
+        await writeAuditLog(uid, {
+          action: R.AUDIT_INVALID_SIGNED_REQUEST,
+          deviceId,
+          clientId,
+          result: "rejected",
+          metadata: { reason: "timestamp_skew" },
+        });
+        return res.status(401).json({
+          error: "Signed request expired or clock skew too large",
+          code: "SIGNATURE_EXPIRED",
+        });
+      }
+      if (!consumeNonce(uid, nonce)) {
+        await writeAuditLog(uid, {
+          action: R.AUDIT_REPLAY_ATTEMPT,
+          deviceId,
+          clientId,
+          result: "rejected",
+          metadata: { nonce },
+        });
+        return res.status(401).json({
+          error: "Replayed or invalid nonce",
+          code: "REPLAY",
+        });
+      }
+      const canonical = canonicalSessionRequest({
+        clientId,
+        deviceId,
+        timestamp,
+        nonce,
+        capabilities,
+      });
+      signatureValid = verifyEcdsaP256Sha256(publicKey, canonical, signature);
+      if (!signatureValid) {
+        await writeAuditLog(uid, {
+          action: R.AUDIT_INVALID_SIGNED_REQUEST,
+          deviceId,
+          clientId,
+          result: "rejected",
+          metadata: { reason: "bad_signature" },
+        });
+        return res.status(401).json({
+          error: "Invalid request signature — pair this browser again",
+          code: "BAD_SIGNATURE",
+        });
+      }
+    } else if (publicKey) {
+      // Client has a registered key but request was not signed → reject auto path.
+      await writeAuditLog(uid, {
+        action: R.AUDIT_INVALID_SIGNED_REQUEST,
+        deviceId,
+        clientId,
+        result: "rejected",
+        metadata: { reason: "signature_required" },
+      });
+      return res.status(401).json({
+        error: "Signed session request required for this trusted browser",
+        code: "SIGNATURE_REQUIRED",
+      });
+    }
+
+    const wantCamera = capabilities.includes("camera");
+    const wantMic = capabilities.includes("microphone");
+    if (wantCamera && device.cameraAvailable === false) {
+      return res.status(400).json({
+        error: "Camera permission must be restored in Android settings.",
+        code: "CAMERA_PERMISSION",
+        androidState: R.ANDROID_STATE_PERMISSION_REQUIRED,
+      });
+    }
+    if (wantMic && device.microphoneAvailable === false) {
+      return res.status(400).json({
+        error: "Microphone permission must be restored in Android settings.",
+        code: "MIC_PERMISSION",
+        androidState: R.ANDROID_STATE_PERMISSION_REQUIRED,
+      });
+    }
+
+    const autoApprove =
+      Boolean(client.autoApproveSessions) && signatureValid && !Boolean(client.revoked);
 
     await endActiveSessionsForDevice(uid, deviceId, "replaced_by_new_request");
 
     const requestId = randomBytes(16).toString("hex");
     const now = Date.now();
     const expiresAt = now + REQUEST_TTL_MS;
+    const fcmToken = String(device.fcmToken || "").trim();
+
+    if (autoApprove) {
+      const sessionId = randomBytes(16).toString("hex");
+      const androidState = R.ANDROID_STATE_TAP_REQUIRED;
+      const sessionDoc = {
+        sessionId,
+        deviceId,
+        clientId,
+        status: "connecting",
+        startedAt: now,
+        endedAt: 0,
+        selectedCamera: wantCamera ? "front" : "none",
+        microphoneEnabled: wantMic,
+        flashlightEnabled: false,
+        quality,
+        terminationReason: "",
+        ownerUid: uid,
+        autoApproved: true,
+        androidStartupState: androidState,
+        requestId,
+      };
+      const requestDoc = {
+        requestId,
+        deviceId,
+        clientId,
+        requestedCapabilities: capabilities,
+        status: "approved",
+        createdAt: now,
+        expiresAt,
+        approvedAt: now,
+        rejectedAt: 0,
+        ownerUid: uid,
+        preferredQuality: quality,
+        sessionId,
+        autoApproved: true,
+        androidStartupState: androidState,
+      };
+
+      await db()
+        .collection(R.COL_USERS)
+        .doc(uid)
+        .collection(R.COL_SESSIONS)
+        .doc(sessionId)
+        .set(sessionDoc);
+      await db()
+        .collection(R.COL_USERS)
+        .doc(uid)
+        .collection(R.COL_SESSION_REQUESTS)
+        .doc(requestId)
+        .set(requestDoc);
+      await clientSnap.ref.set(
+        { lastUsedAt: now, lastSeenAt: now, updatedAt: now },
+        { merge: true }
+      );
+
+      await writeAuditLog(uid, {
+        action: R.AUDIT_SESSION_AUTO_AUTHORIZED,
+        deviceId,
+        clientId,
+        sessionId,
+        result: "ok",
+        metadata: { requestId, capabilities, androidState },
+      });
+      await writeAuditLog(uid, {
+        action: "ANDROID_USER_TAP_REQUIRED",
+        deviceId,
+        clientId,
+        sessionId,
+        result: "ok",
+        metadata: { requestId },
+      });
+
+      let pushSent = false;
+      if (fcmToken) {
+        try {
+          await getMessaging().send({
+            token: fcmToken,
+            data: {
+              type: "session_auto_start",
+              requestId,
+              sessionId,
+              deviceId,
+              clientId,
+              clientName,
+              expiresAt: String(expiresAt),
+              cameraEnabled: wantCamera ? "1" : "0",
+              microphoneEnabled: wantMic ? "1" : "0",
+            },
+            android: { priority: "high" },
+          });
+          pushSent = true;
+        } catch (pushErr) {
+          console.warn("FCM auto-start send failed", pushErr);
+        }
+      }
+
+      return res.status(200).json({
+        ok: true,
+        requestId,
+        sessionId,
+        deviceId,
+        clientId,
+        expiresAt,
+        capabilities,
+        quality,
+        pushSent,
+        autoApproved: true,
+        androidState,
+        message:
+          "Request authorized. Tap the notification on your phone to start. Modern Android may require this tap before camera or microphone can start.",
+      });
+    }
+
     const requestDoc = {
       requestId,
       deviceId,
@@ -291,6 +507,7 @@ async function handleSessionRequest(req, res) {
       ownerUid: uid,
       preferredQuality: quality,
       sessionId: "",
+      autoApproved: false,
     };
     await db()
       .collection(R.COL_USERS)
@@ -304,10 +521,9 @@ async function handleSessionRequest(req, res) {
       deviceId,
       clientId,
       result: "ok",
-      metadata: { requestId, capabilities, quality },
+      metadata: { requestId, capabilities, quality, signatureValid },
     });
 
-    const fcmToken = String(device.fcmToken || "").trim();
     let pushSent = false;
     if (fcmToken) {
       try {
@@ -321,9 +537,7 @@ async function handleSessionRequest(req, res) {
             clientName,
             expiresAt: String(expiresAt),
           },
-          android: {
-            priority: "high",
-          },
+          android: { priority: "high" },
         });
         pushSent = true;
       } catch (pushErr) {
@@ -340,6 +554,9 @@ async function handleSessionRequest(req, res) {
       capabilities,
       quality,
       pushSent,
+      autoApproved: false,
+      androidState: null,
+      message: "Waiting for Approve on the phone.",
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

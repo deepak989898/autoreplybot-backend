@@ -417,7 +417,10 @@ service cloud.firestore {
             'deviceName', 'deviceModel', 'manufacturer', 'androidVersion', 'appVersion',
             'createdAt', 'lastSeenAt', 'online', 'batteryLevel', 'isCharging', 'networkType',
             'fcmToken', 'cameraAvailable', 'microphoneAvailable', 'flashlightAvailable',
-            'revoked', 'remoteControlEnabled'
+            'revoked', 'remoteControlEnabled',
+            'stableDeviceId', 'registeredAt', 'persistentRegistration', 'pairedClientCount',
+            'cameraPermission', 'microphonePermission', 'notificationPermission',
+            'foregroundServiceReady', 'fcmTokenUpdatedAt', 'disabledAt', 'updatedAt'
           ])
           && (!('batteryLevel' in request.resource.data.diff(resource.data).affectedKeys())
               || (request.resource.data.batteryLevel is int
@@ -434,9 +437,10 @@ service cloud.firestore {
       allow delete: if owner(uid);
     }
     match /users/{uid}/trustedClients/{clientId} {
+      // Pairing / revoke / permission updates go through Admin SDK APIs only.
+      // Clients may read; browsers cannot self-trust or raise capabilities.
       allow read: if owner(uid);
-      allow create, update: if owner(uid) && trustedClient(request.resource.data, clientId, uid);
-      allow delete: if owner(uid);
+      allow create, update, delete: if false;
     }
     // Pairing codes store only hashes; Admin SDK writes via API — deny all clients.
     match /users/{uid}/pairingCodes/{codeId} {
