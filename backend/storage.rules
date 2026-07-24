@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validImage() {
+      return request.resource.size > 0
+          && request.resource.size <= 10 * 1024 * 1024
+          && request.resource.contentType in [
+            'image/png', 'image/jpeg', 'image/webp'
+          ];
+    }
+
+    match /facebook_posts/{userId}/{fileName} {
+      // Firebase download-token URLs and Admin SDK signed URLs remain usable by Meta.
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validImage();
+      allow delete: if isOwner(userId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
