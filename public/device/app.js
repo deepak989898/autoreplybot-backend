@@ -57,8 +57,16 @@ function showPanel(panelId) {
 }
 
 function setLoggedInUi(user) {
-  if (viewLogin) viewLogin.hidden = true;
-  if (viewApp) viewApp.hidden = false;
+  if (viewLogin) {
+    viewLogin.hidden = true;
+    viewLogin.setAttribute("hidden", "");
+    viewLogin.style.display = "none";
+  }
+  if (viewApp) {
+    viewApp.hidden = false;
+    viewApp.removeAttribute("hidden");
+    viewApp.style.display = "";
+  }
   if (headerUser) {
     headerUser.textContent = user?.email || user?.uid || "";
   }
@@ -70,8 +78,16 @@ function setLoggedInUi(user) {
 }
 
 function setLoggedOutUi() {
-  if (viewLogin) viewLogin.hidden = false;
-  if (viewApp) viewApp.hidden = true;
+  if (viewApp) {
+    viewApp.hidden = true;
+    viewApp.setAttribute("hidden", "");
+    viewApp.style.display = "none";
+  }
+  if (viewLogin) {
+    viewLogin.hidden = false;
+    viewLogin.removeAttribute("hidden");
+    viewLogin.style.display = "";
+  }
   if (headerUser) headerUser.textContent = "";
   if (authStatus) authStatus.textContent = "Not logged in";
   showPanel("home");

@@ -4,6 +4,11 @@
   background: #eef2f7;
 }
 
+/* Ensure [hidden] wins over display:flex / grid layouts */
+.device-app [hidden] {
+  display: none !important;
+}
+
 .login-shell {
   min-height: 100vh;
   display: flex;
