@@ -77,11 +77,13 @@ let cachedSessions = [];
 let selectedWorkspaceDeviceId = "";
 /** @type {string} */
 let activePhoneTab = "camera";
+/** @type {ReturnType<typeof setInterval> | null} */
+let messagesLiveTimer = null;
 
 function showPanel(panelId) {
   let id = String(panelId || "phone");
   if (id === "home" || id === "devices" || id === "location" || id === "info"
-      || id === "gallery" || id === "files") {
+      || id === "gallery" || id === "files" || id === "notifications" || id === "messages") {
     id = "phone";
   }
   document.querySelectorAll(".panel").forEach((el) => {
@@ -110,6 +112,7 @@ function syncHiddenDeviceSelects(deviceId) {
     "info-device-select",
     "gallery-device-select",
     "notifications-device-select",
+    "messages-device-select",
     "files-device-select",
   ]) {
     const el = document.getElementById(id);
@@ -179,6 +182,7 @@ function setPhoneTab(tabId) {
   if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
   if (activePhoneTab === "gallery") refreshGalleryPanel().catch(() => {});
   if (activePhoneTab === "notifications") refreshNotificationsPanel().catch(() => {});
+  if (activePhoneTab === "messages") refreshMessagesPanel().catch(() => {});
   if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
 }
 
@@ -2223,6 +2227,117 @@ async function refreshNotificationsPanel() {
   }
 }
 
+async function refreshMessagesPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("messages-device-select")?.value;
+  const list = document.getElementById("messages-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  list.textContent = "Loading messages…";
+  try {
+    const data = await api(
+      `/api/device/messages?deviceId=${encodeURIComponent(deviceId)}&limit=100`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No SMS yet.\n\n" +
+        "On the phone: Permissions → SMS / Messages → allow.\n" +
+        "Trusted browsers → allow reading SMS / messages.\n" +
+        "Then Sync from phone. New SMS appear automatically.";
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = `<div class="msg-grid">${items
+      .map((it) => {
+        const name = escapeHtml(it.senderName || "");
+        const number = escapeHtml(it.address || "(unknown)");
+        const who = name ? `${name} · ${number}` : number;
+        const body = escapeHtml(it.body || "");
+        const when = escapeHtml(formatNotifDate(it.date));
+        const kind = escapeHtml(it.type || "inbox");
+        return `<article class="msg-card">
+          <div class="msg-card-head">
+            <strong class="msg-who">${who}</strong>
+            <time class="msg-time">${when}</time>
+          </div>
+          <p class="msg-body">${body || "<span class=\"muted\">(empty)</span>"}</p>
+          <div class="msg-meta"><span>${kind}</span></div>
+        </article>`;
+      })
+      .join("")}</div>`;
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function isAudioEntry(entry) {
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const name = String(entry.name || "").toLowerCase();
+  return mime.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac|wma)$/i.test(name);
+}
+
+async function requestFileDownload(deviceId, entry, { play } = { play: false }) {
+  const clientId = requireClientId();
+  const res = await api("/api/device/files/command", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId,
+      clientId,
+      action: "FILE_DOWNLOAD_REQUEST",
+      folderGrantId: entry.folderGrantId,
+      documentId: entry.documentId || entry.name,
+      relativePath: entry.relativePath || entry.name,
+      sizeBytes: entry.sizeBytes || 0,
+      mimeType: entry.mimeType || "audio/mpeg",
+      displayName: entry.name,
+      payload: {
+        folderGrantId: entry.folderGrantId,
+        relativePath: entry.relativePath || entry.name,
+      },
+    }),
+  });
+  const transferId = res.transfer?.transferId;
+  if (!transferId) {
+    alert("Transfer started. Open Transfers when ready.");
+    return;
+  }
+  const label = document.getElementById("files-audio-label");
+  if (label) label.textContent = play ? `Preparing ${entry.name}…` : `Downloading ${entry.name}…`;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+    const t = (data.transfers || []).find((x) => x.transferId === transferId);
+    if (!t) continue;
+    if (t.status === "ready" && t.downloadUrl) {
+      if (play) {
+        const wrap = document.getElementById("files-audio-player");
+        const audio = document.getElementById("files-audio");
+        if (wrap) wrap.hidden = false;
+        if (label) label.textContent = entry.name;
+        if (audio) {
+          audio.src = t.downloadUrl;
+          audio.play().catch(() => {});
+        }
+      } else {
+        window.open(t.downloadUrl, "_blank", "noopener");
+      }
+      return;
+    }
+    if (t.status === "failed" || t.status === "cancelled") {
+      throw new Error(t.error || `Transfer ${t.status}`);
+    }
+  }
+  alert("Still preparing. Open Transfers panel and Download when ready.");
+}
+
 async function refreshFilesPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillWorkspaceDeviceSelect();
@@ -2241,9 +2356,52 @@ async function refreshFilesPanel() {
     const entries = data.entries || [];
     body.innerHTML = `
       <h3>Authorized folders</h3>
-      <ul>${folders.length ? folders.map((f) => `<li>${escapeHtml(f.displayName || f.grantId)} · ${f.connected === false ? "disconnected" : "connected"} · <code>${escapeHtml(f.grantId || "")}</code></li>`).join("") : "<li>None — add a folder on the phone</li>"}</ul>
-      <h3>Cached listing</h3>
-      <ul>${entries.length ? entries.slice(0, 100).map((e) => `<li>${escapeHtml(e.name || "")} ${e.isDirectory ? "(dir)" : ""}</li>`).join("") : "<li>Empty — use List folder</li>"}</ul>`;
+      <ul>${folders.length ? folders.map((f) => `<li>${escapeHtml(f.displayName || f.grantId)} · ${f.connected === false ? "disconnected" : "connected"} · <code>${escapeHtml(f.grantId || "")}</code></li>`).join("") : "<li>None — add a folder on the phone Permissions card</li>"}</ul>
+      <h3>Files</h3>
+      ${
+        entries.length
+          ? `<div class="files-grid">${entries
+              .slice(0, 120)
+              .map((e) => {
+                if (e.isDirectory) {
+                  return `<article class="file-card"><strong>${escapeHtml(e.name || "")}</strong><span class="muted">Folder</span></article>`;
+                }
+                const audio = isAudioEntry(e);
+                const meta = `${escapeHtml(e.mimeType || "file")} · ${Math.round((e.sizeBytes || 0) / 1024)} KB`;
+                return `<article class="file-card">
+                  <strong>${escapeHtml(e.name || "")}</strong>
+                  <span class="muted">${meta}</span>
+                  <div class="file-card-actions">
+                    ${audio ? `<button type="button" class="btn-primary btn-file-play" data-json="">Play</button>` : ""}
+                    <button type="button" class="btn-secondary btn-file-dl" data-json="">Download</button>
+                  </div>
+                </article>`;
+              })
+              .join("")}</div>`
+          : `<p class="muted">Empty — tap List folder, wait a few seconds, then Refresh.</p>`
+      }`;
+    const fileEntries = entries.filter((e) => !e.isDirectory);
+    const fileCards = [...body.querySelectorAll(".file-card")].filter((c) =>
+      c.querySelector("button")
+    );
+    fileCards.forEach((card, i) => {
+      const entry = fileEntries[i];
+      if (!entry) return;
+      card.querySelector(".btn-file-play")?.addEventListener("click", async () => {
+        try {
+          await requestFileDownload(deviceId, entry, { play: true });
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        }
+      });
+      card.querySelector(".btn-file-dl")?.addEventListener("click", async () => {
+        try {
+          await requestFileDownload(deviceId, entry, { play: false });
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        }
+      });
+    });
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
   }
@@ -2397,6 +2555,31 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
           "4) Website → Trusted Browsers → Permissions → allow mirrored notifications\n" +
           "5) Sync from phone again\n\n" +
           "Error: " + msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+document.getElementById("btn-msg-refresh")?.addEventListener("click", () => refreshMessagesPanel());
+document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId =
+      selectedWorkspaceDeviceId || document.getElementById("messages-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/messages/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshMessagesPanel(), 3000);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/messagesList|CAPABILITY_DENIED|MESSAGES_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot sync SMS yet.\n\n" +
+          "1) Phone → Permissions → SMS / Messages → allow\n" +
+          "2) Trusted browsers → allow reading SMS / messages\n\n" +
+          msg
       );
     } else {
       alert(msg);

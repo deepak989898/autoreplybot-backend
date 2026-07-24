@@ -985,6 +985,83 @@ button, input, select, textarea {
   color: var(--muted, #9aa3b5);
 }
 
+.msg-list {
+  min-height: 120px;
+}
+
+.msg-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.msg-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.msg-who {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.msg-time {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--muted, #9aa3b5);
+  white-space: nowrap;
+}
+
+.msg-body {
+  margin: 8px 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.msg-meta {
+  font-size: 0.82rem;
+  color: var(--muted, #9aa3b5);
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.file-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.file-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.files-audio-player {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

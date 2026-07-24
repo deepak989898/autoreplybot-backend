@@ -64,6 +64,8 @@ export default async function handler(req, res) {
   if (path === "gallery/transfer") return handleGalleryTransfer(req, res);
   if (path === "notifications") return handleNotificationsList(req, res);
   if (path === "notifications/sync") return handleNotificationsSync(req, res);
+  if (path === "messages") return handleMessagesList(req, res);
+  if (path === "messages/sync") return handleMessagesSync(req, res);
   if (path === "files") return handleFilesList(req, res);
   if (path === "files/command") return handleFilesCommand(req, res);
   if (path === "transfers") return handleTransfersList(req, res);
@@ -108,6 +110,7 @@ function sanitizeDevice(id, data) {
     locationSharingMode: String(data.locationSharingMode || "disabled"),
     galleryAccessEnabled: Boolean(data.galleryAccessEnabled),
     notificationMirrorEnabled: Boolean(data.notificationMirrorEnabled),
+    messagesSharingEnabled: Boolean(data.messagesSharingEnabled),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
     storageUsedBytes: Number(data.storageUsedBytes || 0),
     storageTotalBytes: Number(data.storageTotalBytes || 0),
@@ -1192,6 +1195,87 @@ async function handleNotificationsSync(req, res) {
   }
 }
 
+async function handleMessagesList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const limit = Math.min(150, Math.max(1, Number(req.query?.limit || 80)));
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_MESSAGE_ITEMS)
+      .orderBy("date", "desc")
+      .limit(limit)
+      .get();
+    const items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        itemId: d.id,
+        address: String(data.address || ""),
+        senderName: String(data.senderName || ""),
+        body: String(data.body || ""),
+        date: Number(data.date || 0),
+        type: String(data.type || "inbox"),
+        read: Boolean(data.read),
+        threadId: String(data.threadId || ""),
+        syncedAt: Number(data.syncedAt || 0),
+      };
+    });
+    return res.status(200).json({ ok: true, items });
+  } catch (e) {
+    return clientError(res, e, "MESSAGES_LIST_FAILED");
+  }
+}
+
+async function handleMessagesSync(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    if (!deviceSnap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "MESSAGES_SYNC",
+      { limit: Math.min(200, Math.max(20, Number(body.limit || 100))) },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_MESSAGES_SYNC,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "MESSAGES_SYNC_FAILED");
+  }
+}
+
 async function handleFilesList(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -1275,6 +1359,7 @@ async function handleFilesCommand(req, res) {
     const payload = { ...(body.payload || {}), ...(transfer ? { transferId: transfer.transferId } : {}) };
     if (body.folderGrantId) payload.folderGrantId = String(body.folderGrantId);
     if (body.documentId) payload.documentId = String(body.documentId);
+    if (body.relativePath) payload.relativePath = String(body.relativePath);
     const cmd = await createModuleCommand(uid, deviceId, clientId, action, payload, body.idempotencyKey);
     return res.status(200).json({ ok: true, command: cmd, transfer });
   } catch (e) {

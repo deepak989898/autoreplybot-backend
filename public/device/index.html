@@ -131,6 +131,7 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="info">Device Information</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery">Gallery</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications">Notifications</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages">Messages</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files">File Manager</button>
           </div>
 
@@ -188,9 +189,21 @@
             <div id="notifications-list" class="notif-list muted">Select a device.</div>
           </div>
 
+          <div id="phone-tab-messages" class="phone-tab-panel" data-phone-panel="messages" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">SMS from the phone (sender name, number, full text, date/time). Enable SMS on Permissions, allow this browser, then Sync. New SMS appear live.</p>
+              <div class="page-actions">
+                <button id="btn-msg-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-msg-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="messages-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="messages-list" class="msg-list muted">Select a device.</div>
+          </div>
+
           <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Only folders authorized on the phone via the system folder picker.</p>
+              <p class="page-sub">Tap <strong>List folder</strong>, then <strong>Play</strong> / <strong>Download</strong> on an MP3. Transfers open when ready.</p>
               <div class="page-actions">
                 <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
                 <button id="btn-files-list" class="btn-secondary" type="button">List folder</button>
@@ -198,6 +211,10 @@
             </div>
             <select id="files-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="files-panel-body" class="surface muted">Select a device.</div>
+            <div id="files-audio-player" class="files-audio-player" hidden>
+              <p id="files-audio-label" class="muted"></p>
+              <audio id="files-audio" controls preload="none" style="width:100%"></audio>
+            </div>
           </div>
         </section>
 
