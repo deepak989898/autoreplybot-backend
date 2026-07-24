@@ -2387,13 +2387,16 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
     setTimeout(() => refreshNotificationsPanel(), 2500);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (/notificationsList|CAPABILITY_DENIED|NOTIFICATIONS_DISABLED|LISTENER_NOT_CONNECTED|WRITE_FAILED|lacks capability/i.test(msg)) {
+    if (/notificationsList|CAPABILITY_DENIED|NOTIFICATIONS_DISABLED|LISTENER_NOT_CONNECTED|WRITE_FAILED|lacks capability|sharing is disabled/i.test(msg)) {
       alert(
         "Cannot sync notifications yet.\n\n" +
-          "1) Phone: Remote Camera & Voice → Permissions → Notification access = Enabled.\n" +
-          "2) Trusted browsers → Permissions → enable “Allow reading mirrored notifications”.\n" +
-          "3) If Firestore rules were not deployed, deploy notificationItems rules.\n\n" +
-          msg
+          "On the phone (rebuild/install latest app first):\n" +
+          "1) Remote Camera & Voice → Permissions\n" +
+          "2) Tap Notification access → enable AutoReplyBot in system settings\n" +
+          "3) Return to the app (sharing turns on automatically)\n" +
+          "4) Website → Trusted Browsers → Permissions → allow mirrored notifications\n" +
+          "5) Sync from phone again\n\n" +
+          "Error: " + msg
       );
     } else {
       alert(msg);
