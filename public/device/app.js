@@ -2193,7 +2193,12 @@ async function refreshNotificationsPanel() {
     if (!items.length) {
       list.classList.add("muted");
       list.textContent =
-        "No notifications yet. On the phone: Remote Control → Device Management → Notification Sharing → enable, grant Notification Access, then Sync from phone.";
+        "No notifications yet.\n\n" +
+        "On the phone:\n" +
+        "1) Remote Camera & Voice → Permissions → enable Notification access (tap the row).\n" +
+        "2) Trusted browsers → Permissions → allow reading mirrored notifications.\n" +
+        "3) Come back here and tap Sync from phone (then Refresh).\n\n" +
+        "New phone notifications will appear automatically after access is granted.";
       return;
     }
     list.classList.remove("muted");
@@ -2382,11 +2387,12 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
     setTimeout(() => refreshNotificationsPanel(), 2500);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (/notificationsList|CAPABILITY_DENIED|NOTIFICATIONS_DISABLED|lacks capability/i.test(msg)) {
+    if (/notificationsList|CAPABILITY_DENIED|NOTIFICATIONS_DISABLED|LISTENER_NOT_CONNECTED|WRITE_FAILED|lacks capability/i.test(msg)) {
       alert(
         "Cannot sync notifications yet.\n\n" +
-          "1) On the phone: Remote Control → Device Management → Notification Sharing → enable and grant Notification Access.\n" +
-          "2) Trusted browsers → Permissions → enable “Allow reading mirrored notifications”.\n\n" +
+          "1) Phone: Remote Camera & Voice → Permissions → Notification access = Enabled.\n" +
+          "2) Trusted browsers → Permissions → enable “Allow reading mirrored notifications”.\n" +
+          "3) If Firestore rules were not deployed, deploy notificationItems rules.\n\n" +
           msg
       );
     } else {

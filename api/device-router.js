@@ -1167,12 +1167,10 @@ async function handleNotificationsSync(req, res) {
       .collection(R.COL_DEVICES)
       .doc(deviceId)
       .get();
-    if (!(deviceSnap.data() || {}).notificationMirrorEnabled) {
-      return res.status(403).json({
-        error: "Notification sharing is disabled on the phone.",
-        code: "NOTIFICATIONS_DISABLED",
-      });
+    if (!deviceSnap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
     }
+    // Prefer phone-side gate; device flag is advisory (may lag until publishModuleFlags).
     const cmd = await createModuleCommand(
       uid,
       deviceId,
