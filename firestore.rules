@@ -1,0 +1,405 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isId(value) {
+      return value is string
+          && value.size() >= 1
+          && value.size() <= 128
+          && value.matches('^[A-Za-z0-9_-]+$');
+    }
+
+    function isText(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function isMillis(value) {
+      return value is int && value >= 0;
+    }
+
+    function validIntent(value) {
+      return value in [
+        'BUSINESS_SCUBA', 'BUSINESS_BOOKING', 'BUSINESS_PRICING',
+        'BUSINESS_AVAILABILITY', 'BUSINESS_LOCATION', 'BUSINESS_CANCELLATION',
+        'BUSINESS_COMPLAINT', 'BUSINESS_PAYMENT', 'GREETING', 'PERSONAL_CASUAL',
+        'FRIEND_CONVERSATION', 'FAMILY_CONVERSATION', 'PROFESSIONAL_CONVERSATION',
+        'GENERAL_QUESTION', 'EMOTIONAL_MESSAGE', 'SENSITIVE_PERSONAL', 'LEGAL',
+        'MEDICAL', 'FINANCIAL', 'EMERGENCY', 'ABUSIVE', 'SPAM',
+        'COMPANY_PROMOTION', 'BANK_ALERT', 'OTP_MESSAGE', 'TRANSACTION_NOTIFICATION',
+        'ORDER_CONFIRMATION', 'DELIVERY_UPDATE', 'PAYMENT_ALERT', 'MARKETING_MESSAGE',
+        'AUTOMATED_NOTIFICATION', 'SERVICE_NOTIFICATION', 'VERIFIED_BUSINESS_BROADCAST',
+        'SYSTEM_GENERATED_MESSAGE', 'UNKNOWN'
+      ];
+    }
+
+    function validConfig(data) {
+      return data.keys().hasAll([
+          'enabled_packages', 'business_instructions', 'package_instructions_json',
+          'reply_language', 'contact_filter', 'whitelist_numbers', 'enabled',
+          'replyPolicyVersion', 'defaultReplyMode', 'aiDisclosureEnabled', 'businessAutoReplyEnabled',
+          'friendAutoReplyEnabled', 'familyAutoReplyEnabled',
+          'generalQuestionAutoReplyEnabled', 'sensitiveMessagesRequireApproval',
+          'duplicateWindowSeconds', 'contactCooldownSeconds', 'maxRecentMessages',
+          'maxRecentRepliesForSimilarity', 'minimumAutoReplyConfidence',
+          'minimumClarificationConfidence', 'scheduledFollowUpEnabled',
+          'groupAutoReplyEnabled', 'neverShareLiveLocation', 'neverShareHomeAddress',
+          'neverMakeFinancialCommitments', 'neverConfirmMeetingsAutomatically',
+          'neverRevealContactConversations', 'personalFactualFallbackEnabled',
+          'personalFactualFallback', 'ignoreCompanyMessages', 'ignorePromotionalMessages',
+          'ignoreBankMessages', 'ignoreOtpMessages', 'ignoreTransactionAlerts',
+          'ignoreDeliveryUpdates', 'ignoreAutomatedMessages',
+          'ignoreVerifiedBusinessBroadcasts'
+        ])
+        && data.keys().size() <= 48
+        && data.enabled_packages is map && data.enabled_packages.size() <= 50
+        && data.package_instructions_json is map
+        && data.package_instructions_json.size() <= 50
+        && isText(data.business_instructions, 10000)
+        && data.reply_language in ['english', 'hindi', 'auto']
+        && data.contact_filter in ['all', 'contacts_only', 'unknown_only', 'whitelist']
+        && isText(data.whitelist_numbers, 5000)
+        && data.enabled is bool
+        && data.replyPolicyVersion is int
+        && data.replyPolicyVersion >= 2
+        && data.defaultReplyMode in ['FULL_AUTO', 'SMART', 'MANUAL_ONLY']
+        && data.aiDisclosureEnabled is bool
+        && data.businessAutoReplyEnabled is bool
+        && data.friendAutoReplyEnabled is bool
+        && data.familyAutoReplyEnabled is bool
+        && data.generalQuestionAutoReplyEnabled is bool
+        && data.sensitiveMessagesRequireApproval is bool
+        && data.duplicateWindowSeconds is int
+        && data.duplicateWindowSeconds >= 0 && data.duplicateWindowSeconds <= 86400
+        && data.contactCooldownSeconds is int
+        && data.contactCooldownSeconds >= 0 && data.contactCooldownSeconds <= 86400
+        && data.maxRecentMessages is int
+        && data.maxRecentMessages >= 1 && data.maxRecentMessages <= 50
+        && data.maxRecentRepliesForSimilarity is int
+        && data.maxRecentRepliesForSimilarity >= 1
+        && data.maxRecentRepliesForSimilarity <= 20
+        && data.minimumAutoReplyConfidence is number
+        && data.minimumAutoReplyConfidence >= 0
+        && data.minimumAutoReplyConfidence <= 1
+        && data.minimumClarificationConfidence is number
+        && data.minimumClarificationConfidence >= 0
+        && data.minimumClarificationConfidence <= 1
+        && data.scheduledFollowUpEnabled is bool
+        && data.groupAutoReplyEnabled is bool
+        && data.neverShareLiveLocation is bool
+        && data.neverShareHomeAddress is bool
+        && data.neverMakeFinancialCommitments is bool
+        && data.neverConfirmMeetingsAutomatically is bool
+        && data.neverRevealContactConversations is bool
+        && data.personalFactualFallbackEnabled is bool
+        && data.ignoreCompanyMessages is bool
+        && data.ignorePromotionalMessages is bool
+        && data.ignoreBankMessages is bool
+        && data.ignoreOtpMessages is bool
+        && data.ignoreTransactionAlerts is bool
+        && data.ignoreDeliveryUpdates is bool
+        && data.ignoreAutomatedMessages is bool
+        && data.ignoreVerifiedBusinessBroadcasts is bool
+        && isText(data.personalFactualFallback, 2000);
+    }
+
+    function validFacebookSchedule(data) {
+      return data.keys().hasOnly([
+          'scheduleEnabled', 'hour', 'minute', 'topicBlocks', 'topicRotationIndex',
+          'topicHintLegacy', 'postLanguageIndex', 'customLanguageHint',
+          'pageBrandName', 'postRequirements', 'businessTagline', 'logoUrl',
+          'logoDescription', 'brandPrimaryColorHex', 'brandAccentColorHex',
+          'visualStyleKeywords', 'imageGenerationRequirements', 'captionTone',
+          'facebookAutoPostEnabled', 'instagramAutoPostEnabled',
+          'connectedPageNameCloud', 'scheduleTimezone', 'lastAutoPostDay', 'updatedAt'
+        ])
+        && data.get('scheduleEnabled', false) is bool
+        && data.get('hour', 21) is int
+        && data.get('hour', 21) >= 0 && data.get('hour', 21) <= 23
+        && data.get('minute', 0) is int
+        && data.get('minute', 0) >= 0 && data.get('minute', 0) <= 59
+        && isText(data.get('topicBlocks', ''), 50000)
+        && data.get('topicRotationIndex', 0) is int
+        && data.get('topicRotationIndex', 0) >= 0
+        && data.get('topicRotationIndex', 0) <= 10000
+        && isText(data.get('topicHintLegacy', ''), 4000)
+        && data.get('postLanguageIndex', 0) is int
+        && data.get('postLanguageIndex', 0) >= 0
+        && data.get('postLanguageIndex', 0) <= 4
+        && isText(data.get('customLanguageHint', ''), 200)
+        && isText(data.get('pageBrandName', ''), 300)
+        && isText(data.get('postRequirements', ''), 10000)
+        && isText(data.get('businessTagline', ''), 1000)
+        && isText(data.get('logoUrl', ''), 2048)
+        && isText(data.get('logoDescription', ''), 4000)
+        && isText(data.get('brandPrimaryColorHex', ''), 32)
+        && isText(data.get('brandAccentColorHex', ''), 32)
+        && isText(data.get('visualStyleKeywords', ''), 4000)
+        && isText(data.get('imageGenerationRequirements', ''), 10000)
+        && isText(data.get('captionTone', ''), 1000)
+        && data.get('facebookAutoPostEnabled', true) is bool
+        && data.get('instagramAutoPostEnabled', false) is bool
+        && isText(data.get('connectedPageNameCloud', ''), 300)
+        && isText(data.get('scheduleTimezone', ''), 64)
+        && isText(data.get('lastAutoPostDay', ''), 10)
+        && data.get('updatedAt', request.time) is timestamp;
+    }
+
+    function validContact(data, contactId) {
+      return data.keys().hasOnly([
+          'contactId', 'phoneNumber', 'displayName', 'relationshipType',
+          'autoReplyEnabled', 'replyMode', 'preferredLanguage', 'customNotes',
+          'allowBusinessContext', 'allowPersonalContext', 'detectedAsCompany',
+          'companyName', 'allowCompanyReplies', 'companyReplyMode',
+          'createdAt', 'updatedAt'
+        ])
+        && data.contactId == contactId
+        && isId(data.contactId)
+        && isText(data.phoneNumber, 64)
+        && isText(data.displayName, 300)
+        && data.relationshipType in [
+          'BUSINESS_CUSTOMER', 'BUSINESS_LEAD', 'FRIEND', 'FAMILY',
+          'PROFESSIONAL', 'UNKNOWN', 'BLOCKED', 'MANUAL_ONLY'
+        ]
+        && data.autoReplyEnabled is bool
+        && data.replyMode in ['FULL_AUTO', 'SMART', 'MANUAL_ONLY']
+        && isText(data.preferredLanguage, 64)
+        && isText(data.customNotes, 10000)
+        && data.allowBusinessContext is bool
+        && data.allowPersonalContext is bool
+        && data.detectedAsCompany is bool
+        && isText(data.companyName, 300)
+        && data.allowCompanyReplies is bool
+        && data.companyReplyMode in ['NO_REPLY', 'MANUAL_ONLY', 'SMART_APPROVAL']
+        && isMillis(data.createdAt) && isMillis(data.updatedAt)
+        && data.updatedAt >= data.createdAt;
+    }
+
+    function validConversation(data, contactId) {
+      return data.keys().hasOnly([
+          'contactId', 'lastIntent', 'conversationSummary', 'lastIncomingMessage',
+          'lastOutgoingMessage', 'lastReplyTimestamp', 'consecutiveBotReplies',
+          'unansweredBotMessage', 'updatedAt'
+        ])
+        && data.contactId == contactId
+        && isId(data.contactId)
+        && validIntent(data.lastIntent)
+        && isText(data.conversationSummary, 10000)
+        && isText(data.lastIncomingMessage, 10000)
+        && isText(data.lastOutgoingMessage, 10000)
+        && isMillis(data.lastReplyTimestamp)
+        && data.consecutiveBotReplies is int
+        && data.consecutiveBotReplies >= 0 && data.consecutiveBotReplies <= 10000
+        && data.unansweredBotMessage is bool
+        && isMillis(data.updatedAt);
+    }
+
+    function validMessage(data, contactId, messageId) {
+      return data.keys().hasOnly([
+          'messageId', 'contactId', 'direction', 'messageText', 'timestamp',
+          'intent', 'language', 'replyText', 'notificationHash',
+          'deliveryStatus', 'requiresReview'
+        ])
+        && data.messageId == messageId && data.contactId == contactId
+        && isId(data.messageId) && isId(data.contactId)
+        && data.direction in ['incoming', 'outgoing']
+        && isText(data.messageText, 10000)
+        && isMillis(data.timestamp)
+        && validIntent(data.intent)
+        && isText(data.language, 64)
+        && isText(data.replyText, 10000)
+        && isText(data.notificationHash, 128)
+        && data.deliveryStatus in [
+          'dispatching', 'sent', 'approval_pending', 'no_reply', 'approved_sent'
+        ]
+        && data.requiresReview is bool;
+    }
+
+    function validApproval(data, approvalId) {
+      return data.keys().hasOnly([
+          'approvalId', 'contactId', 'incomingMessage', 'suggestedReply',
+          'intent', 'reasonCode', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.approvalId == approvalId
+        && isId(data.approvalId) && isId(data.contactId)
+        && isText(data.incomingMessage, 10000)
+        && isText(data.suggestedReply, 10000)
+        && validIntent(data.intent)
+        && isText(data.reasonCode, 128)
+        && data.status in ['PENDING', 'SENDING', 'SENT', 'IGNORED', 'EXPIRED']
+        && isMillis(data.createdAt) && isMillis(data.updatedAt)
+        && data.updatedAt >= data.createdAt;
+    }
+
+    function validApprovalTransition(before, after) {
+      return (before.status == after.status && before.status == 'PENDING')
+          || (before.status == 'PENDING'
+              && after.status in ['SENDING', 'IGNORED', 'EXPIRED'])
+          || (before.status == 'SENDING' && after.status in ['SENT', 'EXPIRED']);
+    }
+
+    function validReplyEvent(data, eventId) {
+      return data.keys().hasOnly([
+          'eventId', 'contactId', 'incomingMessage', 'replyText', 'action',
+          'intent', 'confidence', 'reasonCode', 'approvalStatus', 'timestamp',
+          'senderCategory', 'sensitiveContentRedacted', 'processedAt'
+        ])
+        && data.eventId == eventId
+        && isId(data.eventId) && isId(data.contactId)
+        && isText(data.incomingMessage, 10000)
+        && isText(data.replyText, 10000)
+        && data.action in ['SEND_REPLY', 'REQUIRE_APPROVAL', 'NO_REPLY']
+        && validIntent(data.intent)
+        && data.confidence is number && data.confidence >= 0 && data.confidence <= 1
+        && isText(data.reasonCode, 128)
+        && data.approvalStatus in ['pending', 'sent', 'not_required']
+        && data.senderCategory in [
+          'PERSONAL_HUMAN', 'COMPANY', 'BANK', 'ECOMMERCE', 'DELIVERY_SERVICE',
+          'PAYMENT_SERVICE', 'TELECOM', 'PROMOTIONAL_SENDER', 'AUTOMATED_SYSTEM',
+          'VERIFIED_BUSINESS', 'OTP_SENDER', 'TRANSACTION_ALERT', 'UNKNOWN_BUSINESS'
+        ]
+        && data.sensitiveContentRedacted is bool
+        && isMillis(data.processedAt)
+        && isMillis(data.timestamp);
+    }
+
+    function validMetrics(data, day) {
+      return data.keys().hasOnly([
+          'day', 'processedMessages', 'autoSentReplies', 'approvedReplies',
+          'approvalPending', 'duplicatesBlocked', 'sensitiveBlocked'
+        ])
+        && data.day == day && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.get('processedMessages', 0) is int
+        && data.get('processedMessages', 0) >= 0
+        && data.get('autoSentReplies', 0) is int
+        && data.get('autoSentReplies', 0) >= 0
+        && data.get('approvedReplies', 0) is int
+        && data.get('approvedReplies', 0) >= 0
+        && data.get('approvalPending', 0) is int
+        && data.get('approvalPending', 0) >= 0
+        && data.get('duplicatesBlocked', 0) is int
+        && data.get('duplicatesBlocked', 0) >= 0
+        && data.get('sensitiveBlocked', 0) is int
+        && data.get('sensitiveBlocked', 0) >= 0;
+    }
+
+    function metricsNeverDecrease(before, after) {
+      return after.get('processedMessages', 0) >= before.get('processedMessages', 0)
+          && after.get('autoSentReplies', 0) >= before.get('autoSentReplies', 0)
+          && after.get('approvedReplies', 0) >= before.get('approvedReplies', 0)
+          && after.get('approvalPending', 0) >= before.get('approvalPending', 0)
+          && after.get('duplicatesBlocked', 0) >= before.get('duplicatesBlocked', 0)
+          && after.get('sensitiveBlocked', 0) >= before.get('sensitiveBlocked', 0);
+    }
+
+    match /users/{userId}/autoReplySettings/config {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validConfig(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/autoReplySettings/facebookSchedule {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+          && validFacebookSchedule(request.resource.data)
+          && !request.resource.data.keys().hasAny(['lastAutoPostDay'])
+          && request.resource.data.get('updatedAt', request.time) == request.time;
+      allow update: if isOwner(userId)
+          && validFacebookSchedule(request.resource.data)
+          && request.resource.data.get('lastAutoPostDay', '')
+              == resource.data.get('lastAutoPostDay', '')
+          && request.resource.data.get('updatedAt', request.time) == request.time;
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/contacts/{contactId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validContact(request.resource.data, contactId);
+      allow update: if isOwner(userId)
+          && validContact(request.resource.data, contactId)
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt >= resource.data.updatedAt;
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/conversations/{contactId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+          && validConversation(request.resource.data, contactId);
+      allow update: if isOwner(userId)
+          && validConversation(request.resource.data, contactId)
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.updatedAt >= resource.data.updatedAt;
+      allow delete: if isOwner(userId);
+
+      match /messages/{messageId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+            && validMessage(request.resource.data, contactId, messageId);
+        allow update: if isOwner(userId)
+            && validMessage(request.resource.data, contactId, messageId)
+            && request.resource.data.messageId == resource.data.messageId
+            && request.resource.data.contactId == resource.data.contactId
+            && request.resource.data.timestamp == resource.data.timestamp;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /users/{userId}/pendingApprovals/{approvalId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+          && validApproval(request.resource.data, approvalId)
+          && request.resource.data.status == 'PENDING';
+      allow update: if isOwner(userId)
+          && validApproval(request.resource.data, approvalId)
+          && request.resource.data.approvalId == resource.data.approvalId
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt >= resource.data.updatedAt
+          && validApprovalTransition(resource.data, request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'suggestedReply', 'status', 'updatedAt'
+          ]);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/replyHistory/{eventId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+          && validReplyEvent(request.resource.data, eventId);
+      allow update: if isOwner(userId)
+          && validReplyEvent(request.resource.data, eventId)
+          && request.resource.data.eventId == resource.data.eventId
+          && request.resource.data.contactId == resource.data.contactId
+          && request.resource.data.incomingMessage == resource.data.incomingMessage
+          && request.resource.data.intent == resource.data.intent
+          && request.resource.data.timestamp >= resource.data.timestamp
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'replyText', 'action', 'confidence', 'reasonCode',
+            'approvalStatus', 'timestamp'
+          ]);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/metrics/{day} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validMetrics(request.resource.data, day);
+      allow update: if isOwner(userId)
+          && validMetrics(request.resource.data, day)
+          && metricsNeverDecrease(resource.data, request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    // Integrations contain server-managed Meta credentials. Firebase Admin bypasses rules.
+    match /users/{userId}/integrations/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

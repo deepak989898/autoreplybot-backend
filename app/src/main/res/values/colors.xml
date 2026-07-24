@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Launcher adaptive icon background (behind @drawable/autoreplybot) -->
+    <color name="launcher_icon_background">#FFE8F5E9</color>
+
+    <!-- Status chips on main screen -->
+    <color name="status_positive_container">#FFC8E6C9</color>
+    <color name="status_positive_text">#FF1B5E20</color>
+    <color name="status_negative_container">#FFFFCDD2</color>
+    <color name="status_negative_text">#FFB71C1C</color>
+
+    <!-- Facebook posting screen (header + colorful steps) -->
+    <color name="fb_posting_toolbar_start">#1565C0</color>
+    <color name="fb_posting_toolbar_end">#42A5F5</color>
+    <color name="fb_posting_screen_bg">#F3F8FF</color>
+    <color name="fb_intro_card_bg">#E8F4FD</color>
+    <color name="fb_quick_steps_text">#263238</color>
+    <color name="fb_connection_status_bg">#D6EAF8</color>
+    <color name="fb_connection_status_text">#0D47A1</color>
+
+    <color name="fb_step_1_stroke">#2196F3</color>
+    <color name="fb_step_1_badge_bg">#E3F2FD</color>
+    <color name="fb_step_1_badge_text">#0D47A1</color>
+    <color name="fb_step_2_stroke">#7E57C2</color>
+    <color name="fb_step_2_badge_bg">#EDE7F6</color>
+    <color name="fb_step_2_badge_text">#4527A0</color>
+    <color name="fb_step_3_stroke">#26A69A</color>
+    <color name="fb_step_3_badge_bg">#E0F2F1</color>
+    <color name="fb_step_3_badge_text">#00695C</color>
+    <color name="fb_step_4_stroke">#FF9800</color>
+    <color name="fb_step_4_badge_bg">#FFF3E0</color>
+    <color name="fb_step_4_badge_text">#E65100</color>
+
+    <!-- System bars (solid so clock & icons stay visible on all screens) -->
+    <color name="app_status_bar">#FEF7FF</color>
+    <color name="app_navigation_bar">#FEF7FF</color>
+    <color name="main_screen_bg">#FEF7FF</color>
+    <color name="main_profile_chip_stroke">#E8DEF8</color>
+</resources>

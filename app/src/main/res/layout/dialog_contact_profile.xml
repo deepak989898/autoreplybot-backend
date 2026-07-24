@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/relationship" />
+        <Spinner
+            android:id="@+id/spinner_relationship"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/reply_mode" />
+        <Spinner
+            android:id="@+id/spinner_reply_mode"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_auto_reply"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/contact_auto_reply" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_business_context"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/allow_business_context" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_personal_context"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/allow_personal_context" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_detected_company"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/detected_as_company" />
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/company_name">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_company_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switch_allow_company_replies"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/allow_company_replies" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/company_reply_mode" />
+        <Spinner
+            android:id="@+id/spinner_company_reply_mode"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/contact_notes">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_notes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textMultiLine|textCapSentences"
+                android:minLines="2" />
+        </com.google.android.material.textfield.TextInputLayout>
+    </LinearLayout>
+</ScrollView>

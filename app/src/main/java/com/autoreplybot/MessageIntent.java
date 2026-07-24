@@ -1,0 +1,26 @@
+package com.autoreplybot;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+public enum MessageIntent {
+    BUSINESS_SCUBA, BUSINESS_BOOKING, BUSINESS_PRICING, BUSINESS_AVAILABILITY,
+    BUSINESS_LOCATION, BUSINESS_CANCELLATION, BUSINESS_COMPLAINT, BUSINESS_PAYMENT,
+    GREETING, PERSONAL_CASUAL, FRIEND_CONVERSATION, FAMILY_CONVERSATION,
+    PROFESSIONAL_CONVERSATION, GENERAL_QUESTION, EMOTIONAL_MESSAGE, SENSITIVE_PERSONAL,
+    LEGAL, MEDICAL, FINANCIAL, EMERGENCY, ABUSIVE, SPAM,
+    COMPANY_PROMOTION, BANK_ALERT, OTP_MESSAGE, TRANSACTION_NOTIFICATION,
+    ORDER_CONFIRMATION, DELIVERY_UPDATE, PAYMENT_ALERT, MARKETING_MESSAGE,
+    AUTOMATED_NOTIFICATION, SERVICE_NOTIFICATION, VERIFIED_BUSINESS_BROADCAST,
+    SYSTEM_GENERATED_MESSAGE, UNKNOWN;
+
+    @NonNull
+    public static MessageIntent fromValue(@Nullable Object value) {
+        if (value == null) return UNKNOWN;
+        try {
+            return valueOf(String.valueOf(value).trim().toUpperCase());
+        } catch (IllegalArgumentException ignored) {
+            return UNKNOWN;
+        }
+    }
+}

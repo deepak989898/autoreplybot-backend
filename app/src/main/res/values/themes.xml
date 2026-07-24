@@ -1,0 +1,22 @@
+<resources>
+    <!-- Base application theme. -->
+    <style name="Base.Theme.AutoReplyBot" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Material 3 / androidx.activity may enable edge-to-edge; turn off so bars are opaque -->
+        <item name="enableEdgeToEdge">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@color/app_status_bar</item>
+        <item name="android:navigationBarColor">@color/app_navigation_bar</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.AutoReplyBot" parent="Base.Theme.AutoReplyBot" />
+
+    <!-- Status bar = light strip + dark icons (same idea as main). Blue gradient is only below the bar. -->
+    <style name="Theme.AutoReplyBot.FacebookPosting" parent="Theme.AutoReplyBot">
+        <item name="enableEdgeToEdge">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@color/fb_posting_screen_bg</item>
+        <item name="android:navigationBarColor">@color/fb_posting_screen_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

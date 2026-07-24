@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fb_posting_toolbar_start">#0D47A1</color>
+    <color name="fb_posting_toolbar_end">#1976D2</color>
+    <color name="fb_posting_screen_bg">#0D1117</color>
+    <color name="fb_intro_card_bg">#132F4C</color>
+    <color name="fb_quick_steps_text">#ECEFF1</color>
+    <color name="fb_connection_status_bg">#1E3A5F</color>
+    <color name="fb_connection_status_text">#E3F2FD</color>
+
+    <color name="fb_step_1_stroke">#42A5F5</color>
+    <color name="fb_step_1_badge_bg">#1E3A5F</color>
+    <color name="fb_step_1_badge_text">#BBDEFB</color>
+    <color name="fb_step_2_stroke">#B39DDB</color>
+    <color name="fb_step_2_badge_bg">#311B92</color>
+    <color name="fb_step_2_badge_text">#E1BEE7</color>
+    <color name="fb_step_3_stroke">#80CBC4</color>
+    <color name="fb_step_3_badge_bg">#004D40</color>
+    <color name="fb_step_3_badge_text">#B2DFDB</color>
+    <color name="fb_step_4_stroke">#FFB74D</color>
+    <color name="fb_step_4_badge_bg">#BF360C</color>
+    <color name="fb_step_4_badge_text">#FFE0B2</color>
+
+    <color name="app_status_bar">#121212</color>
+    <color name="app_navigation_bar">#121212</color>
+    <color name="main_screen_bg">#121212</color>
+    <color name="main_profile_chip_stroke">#49454F</color>
+</resources>

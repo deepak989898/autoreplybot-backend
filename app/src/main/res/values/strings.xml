@@ -1,0 +1,328 @@
+<resources>
+    <string name="app_name">Auto reply Bot</string>
+
+    <string name="login_title">Sign in</string>
+    <string name="login_subtitle">Use your email and password. New users can create an account below.</string>
+    <string name="email">Email</string>
+    <string name="password">Password</string>
+    <string name="sign_in">Sign in</string>
+    <string name="create_account">Create account</string>
+    <string name="error_fill_fields">Enter email and password.</string>
+    <string name="error_auth">Authentication failed: %1$s</string>
+
+    <string name="main_welcome">Signed in as %1$s</string>
+    <string name="main_signed_in_label">Signed in</string>
+    <string name="main_profile_label">Signed in</string>
+    <string name="main_home_tagline">AutoReply Bot</string>
+    <string name="main_home_subtitle">Auto-reply for any app &amp; optional Facebook posts</string>
+    <string name="main_status_section">Status</string>
+    <string name="main_row_notification">Notification access</string>
+    <string name="main_row_notification_hint_on">Listener can read notifications from enabled apps</string>
+    <string name="main_row_notification_hint_off">Open settings below and enable Auto reply Bot</string>
+    <string name="main_row_apps">Auto-reply apps</string>
+    <string name="status_enabled">Enabled</string>
+    <string name="status_disabled">Disabled</string>
+    <string name="open_settings">Auto-reply settings</string>
+    <string name="open_facebook_posting">Facebook auto-post</string>
+    <string name="open_notification_access">Open notification access</string>
+    <string name="sign_out">Sign out</string>
+    <string name="status_listener_on">Notification access: enabled for this app</string>
+    <string name="status_listener_off">Notification access: not enabled — tap below and allow Auto reply Bot</string>
+    <string name="status_apps_line">Apps:</string>
+    <string name="status_apps_none">none enabled</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_apps">Apps</string>
+    <string name="settings_apps_card_summary">Choose any installed app and turn auto-reply on or off for each one.</string>
+    <string name="settings_apps_reply_note">The app must show a quick-reply button on its notification (like WhatsApp, Telegram, or Messages). Apps without inline reply are skipped automatically.</string>
+    <string name="hint_search_apps">Search apps</string>
+    <string name="settings_section_ai">AI &amp; replies</string>
+    <string name="settings_section_contacts">Who gets replies</string>
+
+    <string name="app_whatsapp">WhatsApp</string>
+    <string name="app_whatsapp_short">WhatsApp</string>
+    <string name="pkg_whatsapp">com.whatsapp</string>
+
+    <string name="app_whatsapp_business">WhatsApp Business</string>
+    <string name="app_whatsapp_business_short">WA Business</string>
+    <string name="pkg_whatsapp_business">com.whatsapp.w4b</string>
+
+    <string name="app_dual_clone">Dual / clone WhatsApp</string>
+    <string name="app_dual_short">Clone package(s)</string>
+    <string name="app_dual_clone_desc">Only if your phone uses a different app ID for the second WhatsApp. Find it in Settings → Apps → your clone app → App details.</string>
+    <string name="hint_dual_packages">Extra package names</string>
+    <string name="helper_dual_packages">Comma-separated, e.g. com.whatsapp (only if your OEM reports a different ID). Many dual apps still use com.whatsapp — then you only need the main WhatsApp toggle above.</string>
+
+    <string name="business_instructions_label">Business or personal instructions</string>
+    <string name="business_instructions_hint">Important facts &amp; rules for the selected app (activities, prices, timings, policies). Saved separately per app and synced to Firebase.</string>
+    <string name="instructions_target_label">Choose app for instructions</string>
+    <string name="instructions_target_whatsapp">WhatsApp (com.whatsapp)</string>
+    <string name="instructions_target_business">WhatsApp Business (com.whatsapp.w4b)</string>
+    <string name="instructions_target_dual">Dual / clone WhatsApp package(s)</string>
+    <string name="instructions_scope_label">Use these instructions for</string>
+    <string name="instructions_scope_summary">Turn off an app to answer only from the chat there (no saved facts). You can enable one app, several, or all.</string>
+    <string name="instructions_scope_whatsapp">WhatsApp</string>
+    <string name="instructions_scope_business">WhatsApp Business</string>
+    <string name="instructions_scope_dual">Dual / clone packages</string>
+    <string name="reply_language_label">Reply language</string>
+    <string name="contact_filter_label">Who gets auto-replies</string>
+    <string name="whitelist_hint">Allowed numbers (digits only, comma-separated) — used when filter is “Whitelist only”</string>
+    <string name="contacts_permission_note">“Saved contacts” / “Unknown only” uses your address book. Grant contacts permission when saving.</string>
+    <string name="save">Save changes</string>
+    <string name="settings_saved">Saved</string>
+    <string name="error_load_settings">Could not load settings from cloud; showing last saved on device.</string>
+    <string name="error_save_settings">Could not save: %1$s</string>
+    <string name="error_contacts_denied">Contacts permission is needed for this filter.</string>
+
+    <string name="facebook_posting_title">Facebook auto-post</string>
+    <string name="fb_intro_title">You’re setting up daily posts</string>
+    <string name="fb_intro_body">The app writes the caption, creates an image, and can publish for you. Fill the sections below in order — only your Facebook Page step is required before anything goes live. Tap Save when you’re done.</string>
+    <string name="fb_intro_quick_steps">Topics &amp; tone → Image style → Schedule → Link Page → Save</string>
+    <string name="fb_step_write_title">What each post should say</string>
+    <string name="fb_step_write_subtitle">Business name, tone, rules for text, rotating topics, and caption language.</string>
+    <string name="fb_step_visual_title">How generated images should look</string>
+    <string name="fb_step_visual_subtitle">Optional but recommended. Describe colors and vibe so pictures match your brand. The AI does not download images from links — describe your logo in words if you want it hinted in art.</string>
+    <string name="fb_step_schedule_title">When to publish</string>
+    <string name="fb_step_schedule_subtitle">Turn on auto-post and pick one time per day (your phone’s local time).</string>
+    <string name="fb_step_connect_title">Which Page receives the posts</string>
+    <string name="fb_step_connect_subtitle">Use Connect Page for the easiest setup. Paste ID and token only if you prefer to enter them yourself.</string>
+    <string name="fb_manual_section_title">Manual setup (skip if you used Connect)</string>
+    <string name="fb_manual_section_summary">Paste the numeric Page ID and a Page access token from Meta’s tools. Your token stays encrypted on this device.</string>
+    <string name="fb_save_footer_hint">Stored on this device. When you’re signed in, schedule and topics sync to your account.</string>
+    <string name="fb_brand_hint">Business or Page name</string>
+    <string name="fb_requirements_hint">Rules for every caption (promos, audience, phrases to include or avoid)</string>
+    <string name="fb_topics_blocks_hint">Rotating post topics</string>
+    <string name="fb_topics_blocks_helper">Each numbered row is one future post. Use “Add topic” for more rows, or remove a row you don’t need (one row must stay).</string>
+    <string name="fb_topic_row_hint">Topic text</string>
+    <string name="fb_topic_add">Add topic</string>
+    <string name="fb_topic_remove_desc">Remove this topic row</string>
+    <string name="fb_language_label">Caption language</string>
+    <string name="fb_language_helper_short">Pick the language for post text. Choose Custom to type a specific language below.</string>
+    <string name="fb_custom_language_hint">Custom language name or dialect (when you chose Custom)</string>
+    <string name="fb_tagline_hint">Short tagline or slogan (optional)</string>
+    <string name="fb_logo_url_hint">Logo link — for your notes only (optional)</string>
+    <string name="fb_logo_description_hint">Describe your logo for the AI (colors, shapes, style)</string>
+    <string name="fb_color_primary_hint">Main brand color (#RRGGBB)</string>
+    <string name="fb_color_accent_hint">Accent color (#RRGGBB)</string>
+    <string name="fb_color_quick_pick_title">Quick colors</string>
+    <string name="fb_color_quick_pick_help">Tap a circle to fill the box you last tapped (defaults to main color). Or type # plus 6 hex digits.</string>
+    <string name="fb_color_preset_blue">Blue</string>
+    <string name="fb_color_preset_green">Green</string>
+    <string name="fb_color_preset_teal">Teal</string>
+    <string name="fb_color_preset_orange">Orange</string>
+    <string name="fb_color_preset_purple">Purple</string>
+    <string name="fb_color_preset_rose">Rose</string>
+    <string name="fb_color_preset_slate">Slate</string>
+    <string name="fb_visual_style_hint">Overall style (e.g. clean &amp; minimal, bold &amp; colorful)</string>
+    <string name="fb_image_requirements_hint">Picture-only rules (background, people, products, things to avoid)</string>
+    <string name="fb_caption_tone_section_title">How captions should sound</string>
+    <string name="fb_caption_tone_section_help">Pick a style below, then adjust the text if you want more detail.</string>
+    <string name="fb_caption_tone_hint">Fine-tune or write your own</string>
+    <string name="fb_caption_tone_chip_friendly">Friendly</string>
+    <string name="fb_caption_tone_chip_professional">Professional</string>
+    <string name="fb_caption_tone_chip_playful">Playful</string>
+    <string name="fb_caption_tone_chip_urgent">Urgent / sale</string>
+    <string name="fb_caption_tone_chip_minimal">Minimal</string>
+    <string name="fb_caption_tone_chip_inspirational">Inspirational</string>
+    <string name="fb_caption_tone_instr_friendly">Warm and conversational, like talking to a friend. Light emoji only if it fits naturally.</string>
+    <string name="fb_caption_tone_instr_professional">Clear, trustworthy, and business-appropriate. Avoid slang; stay concise.</string>
+    <string name="fb_caption_tone_instr_playful">Fun, witty, and energetic. Safe humor; still readable.</string>
+    <string name="fb_caption_tone_instr_urgent">Short and action-focused for offers or deadlines—excited but not spammy.</string>
+    <string name="fb_caption_tone_instr_minimal">Very short lines. No fluff; one idea per sentence.</string>
+    <string name="fb_caption_tone_instr_inspirational">Uplifting and motivational; positive without sounding generic.</string>
+    <string name="fb_schedule_enable">Post automatically once per day</string>
+    <string name="fb_daily_time">Time of day</string>
+    <string name="fb_daily_time_help">Uses your phone\'s local timezone.</string>
+    <string name="fb_pick_time">Set time</string>
+    <string name="fb_pick_time_title">Daily post time</string>
+    <string name="fb_topic_hint">Topic / focus (legacy — use rotating topics above)</string>
+    <string name="fb_page_id_hint">Page ID (numbers only)</string>
+    <string name="fb_access_token_hint">Page access token</string>
+    <string name="fb_token_note">Token type must be Page (not User). In Graph API Explorer, select your Page, then generate a token — or use Connect Page above to skip this.</string>
+    <string name="fb_connect_title">Facebook Page</string>
+    <string name="fb_connect_summary">First you\'ll sign in with your Facebook profile (that\'s normal). Then this screen lists Pages you manage — tap Use on the Page you want for auto-posting. If that Page is linked to an Instagram Business account, Instagram details are saved automatically too. Tokens stay encrypted on this device only.</string>
+    <string name="fb_meta_development_note">Unpublished app: you can test without Google Play. Add your Facebook account under App roles (Admin / Developer / Tester). On OPPO/Oplus phones, login uses an in-app browser instead of the Facebook app so OAuth can return to this app.</string>
+    <string name="fb_connect_with_facebook">Continue with Facebook</string>
+    <string name="fb_missing_app_id">Facebook is not configured. Add FACEBOOK_APP_ID (and FACEBOOK_CLIENT_TOKEN from Meta Developer App → Settings → Advanced) to local.properties and rebuild.</string>
+    <string name="fb_login_failed">Facebook sign-in failed</string>
+    <string name="fb_login_retrying_dialog_mode">Facebook web login failed. Retrying in app…</string>
+    <string name="fb_pages_fetch_failed">Could not load your Pages</string>
+    <string name="fb_login_cancelled">Facebook login cancelled</string>
+    <string name="fb_pages_empty">No Pages found. Create a Facebook Page or ensure your account is an admin of that Page, then try again.</string>
+    <string name="fb_pages_missing_scope">Login succeeded but Page access wasn\'t granted. In Meta Developer App enable Facebook Login and test as an admin; ensure the login flow includes Pages access.</string>
+    <string name="fb_use_this_page">Use</string>
+    <string name="fb_page_row_id_template">ID %1$s</string>
+    <string name="fb_page_row_with_ig_template">ID %1$s\n%2$s</string>
+    <string name="fb_page_selected">Page saved for posting</string>
+    <string name="fb_connected_status">Connected: %1$s · ID %2$s</string>
+    <string name="fb_not_connected_facebook">Not connected — use Connect Page or enter credentials below.</string>
+    <string name="fb_auto_post_enable">Post to Facebook</string>
+    <string name="ig_auto_post_enable">Also auto-post to Instagram</string>
+    <string name="ig_user_id_hint">Instagram Business Account ID (optional if Connect found it)</string>
+    <string name="ig_connected_status">Instagram connected · ID %1$s</string>
+    <string name="ig_connected_status_named">Instagram connected: @%1$s · ID %2$s</string>
+    <string name="ig_not_connected">Instagram not connected yet.</string>
+    <string name="ig_connect_title">Connect Instagram Business</string>
+    <string name="ig_connect_button">Connect Instagram</string>
+    <string name="ig_disconnect">Disconnect Instagram</string>
+    <string name="ig_connect_summary">Sign in with Facebook, then choose a Page that is linked to your Instagram Business account. We will save your Instagram account details for auto-posting.</string>
+    <string name="ig_accounts_empty">No Instagram Business account found on your Pages. Link Instagram to your Facebook Page in Meta Business settings, then try again.</string>
+    <string name="ig_account_selected">Instagram account connected</string>
+    <string name="ig_disconnected">Instagram account disconnected</string>
+    <string name="fb_connect_page_button">Connect Page</string>
+    <string name="fb_disconnect_facebook">Disconnect</string>
+    <string name="fb_page_disconnected">Facebook Page disconnected on this device</string>
+
+    <string name="settings_section_facebook">Facebook auto-post</string>
+    <string name="settings_facebook_summary">Link your Page with Facebook Login, then open posting options. Schedule settings sync to Firebase when you are signed in (tokens stay on this device).</string>
+    <string name="settings_facebook_connect">Connect Facebook Page</string>
+    <string name="settings_facebook_open_posting">Posting &amp; schedule</string>
+    <string name="settings_facebook_status_connected_named">Linked: %1$s · Page ID %2$s</string>
+    <string name="settings_facebook_status_connected_id">Linked · Page ID %1$s</string>
+    <string name="settings_facebook_status_not_connected">Facebook Page not linked yet.</string>
+
+    <string name="fb_save_schedule">Save all settings</string>
+    <string name="fb_post_now">Post now (test)</string>
+    <string name="fb_settings_saved">Facebook posting settings saved</string>
+    <string name="fb_post_now_success">Post published (check your Page).</string>
+    <string name="fb_post_now_error">Could not post: %1$s</string>
+    <string name="fb_post_failed_title">Could not post</string>
+    <string name="fb_post_error_full">%1$s\n\n%2$s</string>
+    <string name="fb_error_tips">Checklist:\n\n1) Access Token Debugger must show Type: Page (not User). In Graph API Explorer, pick your Page in the user/page dropdown, then Generate — paste that token.\n\n2) If the error says the app cannot post or is in development: In developers.facebook.com → your app → Roles → add your Facebook profile as Admin/Developer/Tester (same account that owns the Page). Or publish the app and complete App Review for pages_manage_posts for wider use.\n\n3) Page ID must match the Page for that token (see me/accounts).\n\n4) SSL/connection messages during upload are often temporary; if the dialog shows a Facebook OAuth error, the failure is at the Facebook step, not Storage.</string>
+    <string name="reel_open_studio">Open Reel Studio</string>
+    <string name="reel_studio_title">Facebook Reel Studio</string>
+    <string name="reel_select_source">Select source video</string>
+    <string name="reel_start_sec">Start (seconds)</string>
+    <string name="reel_end_sec">End (seconds)</string>
+    <string name="reel_generate">Generate reel (FFmpeg)</string>
+    <string name="reel_caption">Reel caption (editable before publish)</string>
+    <string name="reel_publish_now">Publish now</string>
+    <string name="reel_schedule_publish">Schedule publish</string>
+    <string name="reel_source_selected">Source video selected</string>
+    <string name="reel_generated">Reel generated. Preview and edit, then publish.</string>
+    <string name="reel_error">Reel action failed: %1$s</string>
+    <string name="reel_select_video_first">Select a source video first</string>
+    <string name="reel_generate_first">Generate reel first</string>
+    <string name="reel_connect_facebook_first">Connect Facebook Page first in posting settings</string>
+    <string name="reel_publish_success">Reel posted to Facebook successfully</string>
+    <string name="reel_pick_schedule_time">Select schedule time</string>
+    <string name="reel_schedule_in_future">Please choose a future date and time</string>
+    <string name="reel_schedule_success">Reel scheduled for auto publish</string>
+
+    <string name="dashboard_title">Auto-reply dashboard</string>
+    <string name="master_auto_reply">Master auto reply</string>
+    <string name="default_reply_mode">Default reply mode</string>
+    <string name="metric_processed">Processed today</string>
+    <string name="metric_auto_sent">Auto-sent today</string>
+    <string name="metric_pending">Pending approval</string>
+    <string name="metric_duplicates">Duplicate blocked</string>
+    <string name="metric_sensitive">Sensitive blocked</string>
+    <string name="dashboard_save_failed">Saved on this device, but cloud sync failed.</string>
+    <string name="open_contacts">Contacts</string>
+    <string name="open_pending_approvals">Pending approvals</string>
+    <string name="open_privacy">Privacy settings</string>
+    <string name="open_reply_history">Reply history</string>
+    <string name="settings_section_management">Manage auto replies</string>
+
+    <string name="approval_channel_name">Reply approvals</string>
+    <string name="approval_channel_description">Replies waiting for your review</string>
+    <string name="approval_notification_title">Reply needs approval</string>
+    <string name="approval_notification_text">Open to edit, send, or ignore</string>
+    <string name="pending_approvals_title">Pending approvals</string>
+    <string name="pending_approvals_empty">No replies are waiting for approval.</string>
+    <string name="approval_no_suggestion">No suggested reply. Tap Edit to write one.</string>
+    <string name="approval_meta">%1$s · %2$s</string>
+    <string name="ignore">Ignore</string>
+    <string name="edit">Edit</string>
+    <string name="send">Send</string>
+    <string name="suggested_reply">Suggested reply</string>
+    <string name="approval_edit_title">Edit suggested reply</string>
+    <string name="approval_reply_required">Enter a reply before sending.</string>
+    <string name="approval_load_failed">Could not load pending approvals.</string>
+    <string name="approval_already_handled">This approval was already handled.</string>
+    <string name="approval_payload_expired">The original notification reply action is no longer available. This item was marked expired.</string>
+    <string name="approval_send_failed_expired">The messaging app no longer accepts this reply. This item was marked expired.</string>
+    <string name="approval_notifications_denied">Approval alerts are off. You can still review approvals on this screen.</string>
+    <string name="approval_sent">Reply sent</string>
+
+    <string name="contacts_title">Observed contacts</string>
+    <string name="search_contacts">Search contacts</string>
+    <string name="contacts_empty">Profiles appear here after a notification is observed. Your address book is not uploaded.</string>
+    <string name="contacts_load_failed">Could not load observed contact profiles.</string>
+    <string name="unknown_contact">Unknown contact</string>
+    <string name="contact_profile_summary">%1$s · %2$s</string>
+    <string name="relationship">Relationship</string>
+    <string name="reply_mode">Reply mode</string>
+    <string name="contact_auto_reply">Allow auto reply for this contact</string>
+    <string name="allow_business_context">Allow saved business context</string>
+    <string name="allow_personal_context">Allow saved personal context</string>
+    <string name="detected_as_company">Treat this contact as a company</string>
+    <string name="company_name">Company name (optional)</string>
+    <string name="allow_company_replies">Allow manual company reply review</string>
+    <string name="company_reply_mode">Company reply mode (never full auto)</string>
+    <string name="contact_notes">Private notes</string>
+    <string name="contact_saved">Contact profile saved</string>
+    <string name="contact_save_failed">Could not save contact profile.</string>
+
+    <string name="privacy_title">Privacy settings</string>
+    <string name="privacy_never_title">Never share or commit</string>
+    <string name="never_share_live_location">Never share live location</string>
+    <string name="never_share_home_address">Never share home address</string>
+    <string name="never_financial_commitment">Never make financial commitments</string>
+    <string name="never_confirm_meetings">Never confirm meetings automatically</string>
+    <string name="never_reveal_conversations">Never reveal other contact conversations</string>
+    <string name="privacy_behavior_title">Reply behavior</string>
+    <string name="ignore_company_messages">Ignore company messages</string>
+    <string name="ignore_promotional_messages">Ignore promotions and marketing</string>
+    <string name="ignore_bank_messages">Ignore bank alerts</string>
+    <string name="ignore_otp_messages">Ignore OTP and verification codes</string>
+    <string name="ignore_transaction_alerts">Ignore transaction and payment alerts</string>
+    <string name="ignore_delivery_updates">Ignore order and delivery updates</string>
+    <string name="ignore_automated_messages">Ignore automated and system messages</string>
+    <string name="ignore_verified_broadcasts">Ignore verified-business broadcasts</string>
+    <string name="sensitive_always_manual">Sensitive messages always require approval</string>
+    <string name="ai_disclosure">Include AI disclosure when appropriate</string>
+    <string name="group_auto_reply">Allow group auto reply (off by default)</string>
+    <string name="personal_fallback_enable">Enable safe personal factual fallback</string>
+    <string name="personal_fallback_text">Safe fallback text</string>
+    <string name="privacy_thresholds_title">Thresholds and windows</string>
+    <string name="auto_confidence">Auto-reply confidence (0–1)</string>
+    <string name="clarification_confidence">Clarification confidence (0–1)</string>
+    <string name="duplicate_window">Duplicate window (seconds)</string>
+    <string name="contact_cooldown">Contact cooldown (seconds)</string>
+    <string name="privacy_invalid_numbers">Enter confidence values from 0 to 1 and non-negative seconds.</string>
+    <string name="privacy_save_failed">Saved on this device, but cloud sync failed.</string>
+
+    <string name="reply_history_title">Reply history</string>
+    <string name="history_empty">No reply history yet.</string>
+    <string name="history_load_failed">Could not load reply history.</string>
+    <string name="history_no_reply">No reply sent</string>
+    <string name="history_meta">%1$s · %2$s · approval: %3$s · %4$s</string>
+
+    <string-array name="fb_post_language_options">
+        <item>English</item>
+        <item>Hindi</item>
+        <item>Hinglish</item>
+        <item>Auto (pick from topic)</item>
+        <item>Custom…</item>
+    </string-array>
+
+    <string-array name="reply_language_options">
+        <item>English</item>
+        <item>Hindi</item>
+        <item>Auto (match incoming)</item>
+    </string-array>
+
+    <string-array name="contact_filter_options">
+        <item>Everyone</item>
+        <item>Saved contacts only</item>
+        <item>Unknown senders only</item>
+        <item>Whitelist numbers only</item>
+    </string-array>
+
+    <string-array name="reply_mode_options">
+        <item>Full auto</item>
+        <item>Smart</item>
+        <item>Manual only</item>
+    </string-array>
+</resources>

@@ -1,0 +1,31 @@
+*.iml
+.gradle
+/local.properties
+local.properties
+/.idea/
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Secrets
+.env
+.env.local
+*.pem
+serviceAccount.json
+google-services.json.bak
+
+# Backend
+backend/node_modules/
+backend/.env
+backend/.env.local
+backend/.vercel
+backend/serviceAccount.json
+backend/*.log
+
+# Misc
+*.apk
+*.aab
+*.log

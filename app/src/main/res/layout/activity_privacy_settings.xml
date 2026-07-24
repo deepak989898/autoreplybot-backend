@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:navigationIcon="@drawable/ic_arrow_back_24"
+        app:title="@string/privacy_title" />
+    <ProgressBar
+        android:id="@+id/progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:visibility="gone" />
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/privacy_never_title"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_live_location"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/never_share_live_location" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_home_address"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/never_share_home_address" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_financial_commitments"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/never_financial_commitment" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_meetings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/never_confirm_meetings" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_contact_conversations"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/never_reveal_conversations" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="@string/privacy_behavior_title"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_company"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_company_messages" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_promotional"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_promotional_messages" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_bank"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_bank_messages" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_otp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_otp_messages" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_transactions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_transaction_alerts" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_delivery"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_delivery_updates" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_automated"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_automated_messages" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ignore_verified_broadcasts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ignore_verified_broadcasts" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_sensitive_manual"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/sensitive_always_manual" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_ai_disclosure"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/ai_disclosure" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_group_reply"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/group_auto_reply" />
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_fallback"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/personal_fallback_enable" />
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/personal_fallback_text">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/input_fallback"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textMultiLine|textCapSentences" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="@string/privacy_thresholds_title"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/auto_confidence">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/input_auto_confidence"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/clarification_confidence">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/input_clarification_confidence"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/duplicate_window">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/input_duplicate_window"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="@string/contact_cooldown">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/input_cooldown"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/button_save"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/save" />
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

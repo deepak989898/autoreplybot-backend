@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Defense in depth if allowBackup is re-enabled: these files contain private state. -->
+    <exclude domain="sharedpref" path="auto_reply_prefs.xml" />
+    <exclude domain="sharedpref" path="auto_reply_data_cache.xml" />
+    <exclude domain="sharedpref" path="notification_dedup_v1.xml" />
+    <exclude domain="sharedpref" path="facebook_post_schedule.xml" />
+    <exclude domain="sharedpref" path="facebook_post_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="facebook_post_secure_prefs_fallback.xml" />
+    <exclude domain="sharedpref" path="com.facebook.AccessTokenManager.SharedPreferences.xml" />
+    <exclude domain="sharedpref" path="com.facebook.AuthenticationTokenManager.SharedPreferences.xml" />
+</full-backup-content>
