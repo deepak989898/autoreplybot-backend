@@ -1011,38 +1011,32 @@ async function handleGalleryList(req, res) {
   try {
     const uid = await requireAuthed(req);
     const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
     const type = String(req.query?.type || "").trim().toLowerCase();
     const limit = Math.min(100, Math.max(1, Number(req.query?.limit || 40)));
-    let q = db()
+    // Avoid composite-index requirement: single-field orderBy, filter in memory.
+    const snap = await db()
       .collection(R.COL_USERS)
       .doc(uid)
       .collection(R.COL_DEVICES)
       .doc(deviceId)
       .collection(R.COL_GALLERY_ITEMS)
-      .where("deleted", "==", false)
       .orderBy("dateAdded", "desc")
-      .limit(limit);
-    if (type === "image" || type === "video" || type === "audio") {
-      q = db()
-        .collection(R.COL_USERS)
-        .doc(uid)
-        .collection(R.COL_DEVICES)
-        .doc(deviceId)
-        .collection(R.COL_GALLERY_ITEMS)
-        .where("deleted", "==", false)
-        .where("type", "==", type)
-        .orderBy("dateAdded", "desc")
-        .limit(limit);
-    }
-    const snap = await q.get();
-    return res.status(200).json({
-      ok: true,
-      items: snap.docs.map((d) => {
-        const data = d.data() || {};
-        delete data.contentUri;
-        return { itemId: d.id, ...data };
-      }),
+      .limit(Math.min(300, limit * 3))
+      .get();
+    let items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      delete data.contentUri;
+      return { itemId: d.id, ...data };
     });
+    items = items.filter((it) => it.deleted !== true);
+    if (type === "image" || type === "video" || type === "audio") {
+      items = items.filter((it) => String(it.type || "") === type);
+    }
+    items = items.slice(0, limit);
+    return res.status(200).json({ ok: true, items });
   } catch (e) {
     return clientError(res, e, "GALLERY_LIST_FAILED");
   }
