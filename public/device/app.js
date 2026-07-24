@@ -307,7 +307,13 @@ function renderDevices(devices, clients) {
           <p class="connect-error" data-error-for="${id}" hidden></p>
           <div class="live-panel" data-live-for="${id}" hidden>
             <video class="live-video" data-video-for="${id}" autoplay playsinline muted controls></video>
+            <audio class="live-audio" data-audio-for="${id}" autoplay playsinline></audio>
+            <p class="live-audio-hint muted" data-audio-hint-for="${id}" hidden>
+              Live microphone is on the phone stream. Tap <strong>Enable speaker</strong> if you hear no voice
+              (browser autoplay may block sound). “Start audio” only saves a file on the phone — it is not live voice.
+            </p>
             <div class="live-controls" data-controls-for="${id}">
+              <button type="button" class="btn-enable-sound" data-device-id="${id}">Enable speaker</button>
               <button type="button" data-cmd="SWITCH_CAMERA">Switch camera</button>
               <button type="button" data-cmd="TORCH_ON">Torch on</button>
               <button type="button" data-cmd="TORCH_OFF">Torch off</button>
@@ -316,8 +322,8 @@ function renderDevices(devices, clients) {
               <button type="button" data-cmd="CAPTURE_PHOTO">Capture photo</button>
               <button type="button" data-cmd="START_VIDEO_RECORDING">Start video</button>
               <button type="button" data-cmd="STOP_VIDEO_RECORDING">Stop video</button>
-              <button type="button" data-cmd="START_AUDIO_RECORDING">Start audio</button>
-              <button type="button" data-cmd="STOP_AUDIO_RECORDING">Stop audio</button>
+              <button type="button" data-cmd="START_AUDIO_RECORDING" title="Saves an audio file on the phone; may pause live mic">Record audio file</button>
+              <button type="button" data-cmd="STOP_AUDIO_RECORDING">Stop audio file</button>
               <button type="button" data-cmd="END_SESSION">End session</button>
             </div>
           </div>
@@ -329,7 +335,9 @@ function renderDevices(devices, clients) {
   deviceList.querySelectorAll(".btn-connect").forEach((btn) => {
     btn.addEventListener("click", () => {
       const deviceId = btn.getAttribute("data-device-id");
-      if (deviceId) startConnect(deviceId, clientId);
+      if (deviceId) {
+        unlockBrowserAudio().finally(() => startConnect(deviceId, clientId));
+      }
     });
   });
   deviceList.querySelectorAll(".btn-end-session").forEach((btn) => {
@@ -338,12 +346,27 @@ function renderDevices(devices, clients) {
       if (deviceId) endLiveSession(deviceId, "client_ended");
     });
   });
+  deviceList.querySelectorAll(".btn-enable-sound").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const deviceId = btn.getAttribute("data-device-id");
+      if (deviceId) enableSpeaker(deviceId);
+    });
+  });
   deviceList.querySelectorAll(".live-controls").forEach((panel) => {
     const deviceId = panel.getAttribute("data-controls-for");
     panel.querySelectorAll("button[data-cmd]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const action = btn.getAttribute("data-cmd");
-        if (deviceId && action) sendCommand(deviceId, action);
+        if (!deviceId || !action) return;
+        if (action === "START_AUDIO_RECORDING") {
+          const ok = window.confirm(
+            "Record audio file saves sound on the phone only.\n\n" +
+              "Live voice should already play here when Connect used Camera + mic.\n" +
+              "Recording may interrupt live microphone until you stop the file.\n\nContinue?"
+          );
+          if (!ok) return;
+        }
+        sendCommand(deviceId, action);
       });
     });
   });
@@ -387,12 +410,47 @@ function setConnectUi(deviceId, { connecting, live }) {
 }
 
 /**
- * Always resolve the current <video> node (refreshDevices may recreate the DOM).
+ * Always resolve the current media nodes (refreshDevices may recreate the DOM).
+ * Video stays muted for autoplay; live mic plays on a separate <audio> element
+ * so browser autoplay muting does not silence the phone microphone.
  * @param {string} deviceId
  * @param {MediaStreamTrack} track
  * @param {MediaStream | null | undefined} stream
  */
 function attachRemoteTrack(deviceId, track, stream) {
+  if (!track) return;
+  setConnectUi(deviceId, { connecting: false, live: true });
+
+  const hint = deviceList.querySelector(
+    `[data-audio-hint-for="${CSS.escape(deviceId)}"]`
+  );
+  if (hint) hint.hidden = false;
+
+  if (track.kind === "audio") {
+    attachRemoteAudio(deviceId, track, stream);
+  } else {
+    attachRemoteVideo(deviceId, track, stream);
+  }
+
+  const live = liveByDevice.get(deviceId);
+  const pc = live?.pc;
+  const kinds = pc
+    ? pc
+        .getReceivers()
+        .map((r) => r.track)
+        .filter(Boolean)
+        .map((t) => `${t.kind}:${t.readyState}`)
+        .join(", ")
+    : `${track.kind}:${track.readyState}`;
+  setConnectionLabel(deviceId, CONN.CONNECTED, kinds || "media flowing");
+}
+
+/**
+ * @param {string} deviceId
+ * @param {MediaStreamTrack} track
+ * @param {MediaStream | null | undefined} stream
+ */
+function attachRemoteVideo(deviceId, track, stream) {
   const videoEl = deviceList.querySelector(
     `video[data-video-for="${CSS.escape(deviceId)}"]`
   );
@@ -400,7 +458,6 @@ function attachRemoteTrack(deviceId, track, stream) {
     console.warn("No video element for", deviceId);
     return;
   }
-  setConnectUi(deviceId, { connecting: false, live: true });
 
   let mediaStream = stream;
   if (!mediaStream || typeof mediaStream.getTracks !== "function") {
@@ -413,22 +470,126 @@ function attachRemoteTrack(deviceId, track, stream) {
     } else {
       mediaStream = new MediaStream([track]);
     }
+  } else {
+    // Prefer video-only on the <video> element so muted autoplay never
+    // permanently mutes the remote microphone track.
+    const videoOnly = new MediaStream(
+      mediaStream.getVideoTracks().length
+        ? mediaStream.getVideoTracks()
+        : [track]
+    );
+    mediaStream = videoOnly;
   }
   videoEl.srcObject = mediaStream;
-  videoEl.muted = false;
+  videoEl.muted = true;
   videoEl.autoplay = true;
   videoEl.playsInline = true;
-  const playPromise = videoEl.play();
+  videoEl.play().catch(() => {});
+}
+
+/**
+ * @param {string} deviceId
+ * @param {MediaStreamTrack} track
+ * @param {MediaStream | null | undefined} stream
+ */
+function attachRemoteAudio(deviceId, track, stream) {
+  const audioEl = deviceList.querySelector(
+    `audio[data-audio-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!audioEl) {
+    console.warn("No audio element for", deviceId);
+    return;
+  }
+
+  let mediaStream;
+  const existing = audioEl.srcObject;
+  if (existing instanceof MediaStream) {
+    mediaStream = existing;
+    if (!mediaStream.getAudioTracks().some((t) => t.id === track.id)) {
+      mediaStream.addTrack(track);
+    }
+  } else if (stream && typeof stream.getAudioTracks === "function") {
+    mediaStream = new MediaStream(stream.getAudioTracks());
+  } else {
+    mediaStream = new MediaStream([track]);
+  }
+
+  audioEl.srcObject = mediaStream;
+  audioEl.muted = false;
+  audioEl.volume = 1;
+  audioEl.autoplay = true;
+  const playPromise = audioEl.play();
   if (playPromise && typeof playPromise.catch === "function") {
     playPromise.catch((err) => {
-      // Autoplay with audio may be blocked — retry muted then unmute hint.
-      console.warn("video.play blocked, retrying muted", err);
-      videoEl.muted = true;
-      videoEl.play().catch(() => {});
+      console.warn("audio.play blocked — tap Enable speaker", err);
+      setDeviceError(
+        deviceId,
+        "Browser blocked speaker playback. Tap Enable speaker (live mic is separate from Record audio file)."
+      );
     });
   }
-  const kinds = mediaStream.getTracks().map((t) => `${t.kind}:${t.readyState}`).join(", ");
-  setConnectionLabel(deviceId, CONN.CONNECTED, kinds || "media flowing");
+}
+
+/**
+ * Unlock browser audio during a user gesture (Connect click) so remote mic can play later.
+ */
+async function unlockBrowserAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    if (ctx.state === "suspended") await ctx.resume();
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+  } catch (e) {
+    console.warn("audio unlock failed", e);
+  }
+}
+
+/**
+ * User-gesture unlock for remote microphone playback.
+ * @param {string} deviceId
+ */
+async function enableSpeaker(deviceId) {
+  const audioEl = deviceList.querySelector(
+    `audio[data-audio-for="${CSS.escape(deviceId)}"]`
+  );
+  const videoEl = deviceList.querySelector(
+    `video[data-video-for="${CSS.escape(deviceId)}"]`
+  );
+  setDeviceError(deviceId, "");
+  try {
+    if (audioEl) {
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      if (!audioEl.srcObject) {
+        const live = liveByDevice.get(deviceId);
+        const audioTracks =
+          live?.pc
+            ?.getReceivers()
+            .map((r) => r.track)
+            .filter((t) => t && t.kind === "audio") || [];
+        if (audioTracks.length) {
+          audioEl.srcObject = new MediaStream(/** @type {MediaStreamTrack[]} */ (audioTracks));
+        }
+      }
+      await audioEl.play();
+    }
+    if (videoEl) {
+      // Keep video element muted — sound comes from <audio>.
+      videoEl.muted = true;
+      await videoEl.play().catch(() => {});
+    }
+    setConnectionLabel(deviceId, CONN.CONNECTED, "speaker enabled");
+  } catch (e) {
+    setDeviceError(
+      deviceId,
+      e instanceof Error ? e.message : "Could not enable speaker"
+    );
+  }
 }
 
 function selectedCapabilities(deviceId) {
@@ -906,6 +1067,21 @@ function cleanupLive(deviceId, endOnServer) {
     `video[data-video-for="${CSS.escape(deviceId)}"]`
   );
   if (videoEl) videoEl.srcObject = null;
+  const audioEl = deviceList.querySelector(
+    `audio[data-audio-for="${CSS.escape(deviceId)}"]`
+  );
+  if (audioEl) {
+    try {
+      audioEl.pause();
+    } catch {
+      // ignore
+    }
+    audioEl.srcObject = null;
+  }
+  const hint = deviceList.querySelector(
+    `[data-audio-hint-for="${CSS.escape(deviceId)}"]`
+  );
+  if (hint) hint.hidden = true;
   const sessionId = live.sessionId;
   liveByDevice.delete(deviceId);
   setConnectUi(deviceId, { connecting: false, live: false });

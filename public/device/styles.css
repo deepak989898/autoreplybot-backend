@@ -561,6 +561,19 @@ button, input, select, textarea {
   object-fit: contain;
 }
 
+.live-audio {
+  display: none;
+}
+
+.live-audio-hint {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.live-controls button.btn-enable-sound {
+  background: #0f766e;
+}
+
 .live-controls {
   display: flex;
   flex-wrap: wrap;
