@@ -51,7 +51,10 @@ function showPanel(panelId) {
   document.querySelectorAll(".nav-item").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.panel === id);
   });
-  if (id === "devices") refreshDevices().catch(() => {});
+  // Do not rebuild the devices DOM while a live WebRTC session is attached —
+  // that destroys the <video> element and leaves a black player.
+  const hasLive = [...liveByDevice.values()].some((l) => l.pc);
+  if (id === "devices" && !hasLive) refreshDevices().catch(() => {});
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "security") refreshClients().catch(() => {});
 }
@@ -242,7 +245,7 @@ function renderDevices(devices, clients) {
           }</p>
           <p class="connect-error" data-error-for="${id}" hidden></p>
           <div class="live-panel" data-live-for="${id}" hidden>
-            <video class="live-video" data-video-for="${id}" autoplay playsinline controls></video>
+            <video class="live-video" data-video-for="${id}" autoplay playsinline muted controls></video>
             <div class="live-controls" data-controls-for="${id}">
               <button type="button" data-cmd="SWITCH_CAMERA">Switch camera</button>
               <button type="button" data-cmd="TORCH_ON">Torch on</button>
@@ -320,6 +323,51 @@ function setConnectUi(deviceId, { connecting, live }) {
   if (connectBtn) connectBtn.disabled = Boolean(connecting || live);
   if (endBtn) endBtn.hidden = !live;
   if (livePanel) livePanel.hidden = !live;
+}
+
+/**
+ * Always resolve the current <video> node (refreshDevices may recreate the DOM).
+ * @param {string} deviceId
+ * @param {MediaStreamTrack} track
+ * @param {MediaStream | null | undefined} stream
+ */
+function attachRemoteTrack(deviceId, track, stream) {
+  const videoEl = deviceList.querySelector(
+    `video[data-video-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!videoEl) {
+    console.warn("No video element for", deviceId);
+    return;
+  }
+  setConnectUi(deviceId, { connecting: false, live: true });
+
+  let mediaStream = stream;
+  if (!mediaStream || typeof mediaStream.getTracks !== "function") {
+    const existing = videoEl.srcObject;
+    if (existing instanceof MediaStream) {
+      mediaStream = existing;
+      if (!mediaStream.getTracks().some((t) => t.id === track.id)) {
+        mediaStream.addTrack(track);
+      }
+    } else {
+      mediaStream = new MediaStream([track]);
+    }
+  }
+  videoEl.srcObject = mediaStream;
+  videoEl.muted = false;
+  videoEl.autoplay = true;
+  videoEl.playsInline = true;
+  const playPromise = videoEl.play();
+  if (playPromise && typeof playPromise.catch === "function") {
+    playPromise.catch((err) => {
+      // Autoplay with audio may be blocked — retry muted then unmute hint.
+      console.warn("video.play blocked, retrying muted", err);
+      videoEl.muted = true;
+      videoEl.play().catch(() => {});
+    });
+  }
+  const kinds = mediaStream.getTracks().map((t) => `${t.kind}:${t.readyState}`).join(", ");
+  setConnectionLabel(deviceId, CONN.CONNECTED, kinds || "media flowing");
 }
 
 function selectedCapabilities(deviceId) {
@@ -536,20 +584,24 @@ async function beginWebRtc(live) {
   const pc = new RTCPeerConnection({ iceServers });
   live.pc = pc;
 
-  const videoEl = deviceList.querySelector(
-    `video[data-video-for="${CSS.escape(deviceId)}"]`
-  );
   pc.ontrack = (ev) => {
-    if (!videoEl) return;
-    if (videoEl.srcObject !== ev.streams[0]) {
-      videoEl.srcObject = ev.streams[0] || new MediaStream([ev.track]);
-    }
-    setConnectUi(deviceId, { connecting: false, live: true });
-    setConnectionLabel(deviceId, CONN.CONNECTED, "media flowing");
+    const track = ev.track;
+    if (!track) return;
+    attachRemoteTrack(deviceId, track, ev.streams && ev.streams[0]);
+    track.onunmute = () => {
+      attachRemoteTrack(deviceId, track, ev.streams && ev.streams[0]);
+    };
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected") {
-      setConnectionLabel(deviceId, CONN.CONNECTED);
+      // Don't claim "media flowing" until ontrack; ICE can connect with black video.
+      const hasMedia =
+        pc.getReceivers().some((r) => r.track && r.track.readyState === "live");
+      setConnectionLabel(
+        deviceId,
+        CONN.CONNECTED,
+        hasMedia ? "peer connected" : "peer connected — waiting for camera frames"
+      );
     } else if (pc.connectionState === "connecting") {
       setConnectionLabel(deviceId, CONN.CONNECTING, "peer connection");
     } else if (pc.connectionState === "failed") {
