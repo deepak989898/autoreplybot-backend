@@ -2116,7 +2116,16 @@ document.getElementById("btn-loc-current")?.addEventListener("click", async () =
     });
     setTimeout(() => refreshLocationPanel(), 2500);
   } catch (e) {
-    alert(e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/locationCurrent|CAPABILITY_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "This browser is not allowed to request location yet.\n\n" +
+          "On the phone: Remote Control → Trusted browsers → Permissions → enable “Allow current & live location”, then try again.\n\n" +
+          "Also enable Location Sharing on the phone."
+      );
+    } else {
+      alert(msg);
+    }
   }
 });
 document.getElementById("btn-loc-live")?.addEventListener("click", async () => {

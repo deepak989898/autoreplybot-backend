@@ -1443,7 +1443,11 @@ async function handlePhoneCapabilities(req, res) {
     }
     const secret = String((secretSnap.data() || {}).secret || "");
     const caps = normalizeAllowedCapabilities(body.allowedCapabilities);
-    const stable = JSON.stringify(caps);
+    // Deterministic key order for cross-platform HMAC (Android mirrors CAPABILITY_KEYS).
+    const { CAPABILITY_KEYS } = await import("../lib/capability-model.js");
+    const ordered = {};
+    for (const key of CAPABILITY_KEYS) ordered[key] = Boolean(caps[key]);
+    const stable = JSON.stringify(ordered);
     const payload = `${deviceId}:${clientId}:${timestamp}:${nonce}:${stable}`;
     const expected = createHmac("sha256", secret).update(payload, "utf8").digest("hex");
     const a = Buffer.from(expected, "utf8");
@@ -1468,15 +1472,15 @@ async function handlePhoneCapabilities(req, res) {
     if (!snap.exists || (snap.data() || {}).revoked === true) {
       return res.status(404).json({ error: "Client not found", code: "CLIENT_NOT_FOUND" });
     }
-    await ref.set({ allowedCapabilities: caps, updatedAt: now }, { merge: true });
+    await ref.set({ allowedCapabilities: ordered, updatedAt: now }, { merge: true });
     await writeAuditLog(uid, {
       action: R.AUDIT_BROWSER_PERMISSIONS_CHANGED,
       deviceId,
       clientId,
       result: "ok",
-      metadata: { source: "phone_hmac", allowedCapabilities: caps },
+      metadata: { source: "phone_hmac", allowedCapabilities: ordered },
     });
-    const updated = { ...(snap.data() || {}), allowedCapabilities: caps, updatedAt: now };
+    const updated = { ...(snap.data() || {}), allowedCapabilities: ordered, updatedAt: now };
     return res.status(200).json({ ok: true, client: sanitizeTrustedClient(clientId, updated) });
   } catch (e) {
     return clientError(res, e, "PHONE_CAPS_FAILED");
