@@ -2845,18 +2845,69 @@ function startScreenStats(pc) {
   }, 2000);
 }
 
+/** @type {ReturnType<typeof setInterval> | null} */
+let recordingsPollTimer = null;
+
+function setRecStatus(label) {
+  const el = document.getElementById("rec-status");
+  if (el) el.textContent = label;
+}
+
+function stopRecordingsPoll() {
+  if (recordingsPollTimer) {
+    clearInterval(recordingsPollTimer);
+    recordingsPollTimer = null;
+  }
+}
+
+function startRecordingsPoll(maxMs = 90000) {
+  stopRecordingsPoll();
+  const started = Date.now();
+  recordingsPollTimer = setInterval(async () => {
+    try {
+      await refreshRecordingsPanel();
+      const badge = document.getElementById("rec-status")?.textContent || "";
+      if (/^(Completed|Failed|Idle)$/i.test(badge) || Date.now() - started > maxMs) {
+        stopRecordingsPoll();
+      }
+    } catch {
+      /* keep polling briefly */
+    }
+  }, 2500);
+}
+
 async function refreshRecordingsPanel() {
   const list = document.getElementById("recordings-list");
+  const transferBox = document.getElementById("rec-transfer");
   const deviceId = selectedWorkspaceDeviceId;
   if (!list) return;
   if (!deviceId) {
     list.textContent = "Select a device.";
     list.classList.add("muted");
+    setRecStatus("Idle");
     return;
   }
   try {
     const data = await api(`/api/device/recordings?deviceId=${encodeURIComponent(deviceId)}`);
     const items = data.items || [];
+    const latest = items[0];
+    if (latest?.status) {
+      setRecStatus(String(latest.status));
+      if (transferBox) {
+        if (latest.status === "Uploading" || latest.status === "Encoding") {
+          transferBox.hidden = false;
+          transferBox.textContent = `${latest.status}… refresh automatically.`;
+        } else if (latest.status === "Failed") {
+          transferBox.hidden = false;
+          transferBox.textContent = `Failed: ${latest.errorMessage || "See phone / Storage rules."}`;
+        } else if (latest.status === "Completed") {
+          transferBox.hidden = false;
+          transferBox.textContent = "Upload complete. Use Download on the recording below.";
+        }
+      }
+    } else {
+      setRecStatus("Idle");
+    }
     if (!items.length) {
       list.textContent = "No recordings yet.";
       list.classList.add("muted");
@@ -2868,12 +2919,19 @@ async function refreshRecordingsPanel() {
         const when = it.createdAt ? new Date(it.createdAt).toLocaleString() : "—";
         const dur = it.durationMs ? `${Math.round(it.durationMs / 1000)}s` : "—";
         const size = it.sizeBytes ? `${(it.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : "—";
+        const err = it.errorMessage
+          ? `<div class="muted" style="color:#c0392b">${escapeHtml(it.errorMessage)}</div>`
+          : "";
+        const canDownload = String(it.status || "") === "Completed" && it.transferId;
         return `<div class="rec-row surface">
           <div><strong>${escapeHtml(it.displayName || it.recordingId)}</strong>
           <span class="status-badge">${escapeHtml(it.status || "")}</span></div>
           <div class="muted">${when} · ${dur} · ${size} · ${escapeHtml(it.quality || "")}</div>
+          ${err}
           <div class="page-actions">
-            ${it.transferId ? `<button type="button" class="btn-secondary btn-rec-dl" data-transfer="${escapeHtml(it.transferId)}">Download</button>` : ""}
+            ${canDownload
+              ? `<button type="button" class="btn-secondary btn-rec-dl" data-transfer="${escapeHtml(it.transferId)}">Download</button>`
+              : ""}
           </div>
         </div>`;
       })
@@ -2884,9 +2942,21 @@ async function refreshRecordingsPanel() {
         if (!transferId) return;
         try {
           const t = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
-          const row = (t.items || []).find((x) => x.transferId === transferId);
-          if (row?.downloadUrl) window.open(row.downloadUrl, "_blank");
-          else alert("Download not ready yet — check Transfers.");
+          const rows = t.transfers || t.items || [];
+          const row = rows.find((x) => String(x.transferId || "") === transferId);
+          if (row?.downloadUrl) {
+            window.open(row.downloadUrl, "_blank");
+            return;
+          }
+          if (String(row?.status || "") === "failed") {
+            alert(`Upload failed: ${row.errorMessage || row.errorCode || "unknown"}`);
+            return;
+          }
+          alert(
+            row
+              ? `Transfer status: ${row.status || "unknown"}. Wait until Completed, then try again.`
+              : "Transfer not found yet — wait a few seconds and Refresh."
+          );
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
         }
@@ -3037,21 +3107,21 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
     const quality = document.getElementById("rec-quality")?.value || "720p";
     const fps = Number(document.getElementById("rec-fps")?.value || 30);
     const withMic = Boolean(document.getElementById("rec-mic")?.checked);
-    const status = document.getElementById("rec-status");
-    if (status) status.textContent = "Waiting for Permission";
+    setRecStatus("Waiting for Permission");
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({ deviceId, clientId, op: "START", quality, fps, withMic }),
     });
-    if (status) status.textContent = "Recording";
+    setRecStatus("Recording");
     const transferBox = document.getElementById("rec-transfer");
     if (transferBox) {
       transferBox.hidden = false;
-      transferBox.textContent = "Recording started on phone. Upload appears in Transfers when stopped.";
+      transferBox.textContent = "Recording on phone — approve capture if prompted, then Stop when done.";
     }
-    setTimeout(() => refreshRecordingsPanel(), 4000);
+    startRecordingsPoll(120000);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    setRecStatus("Failed");
     if (/screenRecord|CAPABILITY_DENIED/i.test(msg)) {
       alert("Enable Screen Recording for this browser on the phone Trusted Browsers list.\n\n" + msg);
     } else alert(msg);
@@ -3067,8 +3137,7 @@ document.getElementById("btn-rec-pause")?.addEventListener("click", async () => 
         op: "PAUSE",
       }),
     });
-    const status = document.getElementById("rec-status");
-    if (status) status.textContent = "Paused";
+    setRecStatus("Paused");
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }
@@ -3083,8 +3152,7 @@ document.getElementById("btn-rec-resume")?.addEventListener("click", async () =>
         op: "RESUME",
       }),
     });
-    const status = document.getElementById("rec-status");
-    if (status) status.textContent = "Recording";
+    setRecStatus("Recording");
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }
@@ -3099,10 +3167,10 @@ document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
         op: "STOP",
       }),
     });
-    const status = document.getElementById("rec-status");
-    if (status) status.textContent = "Uploading";
-    setTimeout(() => refreshRecordingsPanel(), 5000);
+    setRecStatus("Encoding");
+    startRecordingsPoll(120000);
   } catch (e) {
+    setRecStatus("Failed");
     alert(e instanceof Error ? e.message : String(e));
   }
 });
