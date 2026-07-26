@@ -1076,22 +1076,51 @@ button, input, select, textarea {
   cursor: grabbing;
 }
 
+.gallery-card-downloading {
+  background: #fff7ed;
+  border-color: #f97316;
+  box-shadow: inset 0 0 0 1px rgba(249, 115, 22, 0.25);
+}
+
+.gallery-card-ready {
+  background: #ecfdf5;
+  border-color: #10b981;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.25);
+}
+
+.gallery-card-error {
+  background: #fef2f2;
+  border-color: #ef4444;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.25);
+}
+
 .btn-gallery-progress {
   min-width: 5.5rem;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  opacity: 0.95;
+  background: #f97316 !important;
+  border-color: #ea580c !important;
+  color: #fff !important;
+  font-weight: 700;
 }
 
 .btn-gallery-ready {
-  background: #0f766e;
-  border-color: #0f766e;
-  color: #fff;
+  background: #10b981 !important;
+  border-color: #059669 !important;
+  color: #fff !important;
+  font-weight: 700;
 }
 
 .btn-gallery-error {
-  border-color: #b91c1c;
-  color: #b91c1c;
+  background: #fee2e2 !important;
+  border-color: #ef4444 !important;
+  color: #b91c1c !important;
+  font-weight: 700;
+}
+
+.media-card .btn-gallery-dl {
+  margin: 0 12px 12px;
+  width: calc(100% - 24px);
 }
 
 .nav-section-label {

@@ -2647,21 +2647,26 @@ async function galleryCachePut(record) {
 
 function paintGalleryButton(btn, state) {
   if (!btn || !state) return;
+  const card = btn.closest(".media-card");
   btn.classList.remove("btn-gallery-progress", "btn-gallery-ready", "btn-gallery-error");
+  card?.classList.remove("gallery-card-downloading", "gallery-card-ready", "gallery-card-error");
   if (state.status === "downloading") {
     btn.disabled = true;
     btn.textContent = `${Math.max(0, Math.min(100, Number(state.progress) || 0))}%`;
     btn.classList.add("btn-gallery-progress");
+    card?.classList.add("gallery-card-downloading");
     btn.dataset.ready = "0";
   } else if (state.status === "ready") {
     btn.disabled = false;
     btn.textContent = galleryActionLabel(state.mimeType, state.type);
     btn.classList.add("btn-gallery-ready");
+    card?.classList.add("gallery-card-ready");
     btn.dataset.ready = "1";
   } else if (state.status === "error") {
     btn.disabled = false;
     btn.textContent = "Retry";
     btn.classList.add("btn-gallery-error");
+    card?.classList.add("gallery-card-error");
     btn.dataset.ready = "0";
   } else {
     btn.disabled = false;
@@ -2726,19 +2731,117 @@ async function findReadyGalleryTransfer(deviceId, itemId) {
   );
 }
 
-async function pollGalleryTransfer(deviceId, transferId, onProgress) {
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 1200));
-    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
-    const t = (data.transfers || []).find((x) => x.transferId === transferId);
-    if (!t) continue;
-    onProgress?.(Number(t.progress || 0), t.status);
-    if (t.status === "ready" && (t.downloadUrl || t.storagePath)) return t;
-    if (t.status === "failed" || t.status === "cancelled") {
-      throw new Error(t.errorMessage || t.error || `Transfer ${t.status}`);
-    }
+/**
+ * Wait for phone upload via Firestore (live progress), with API fallback for signed URL.
+ * @param {string} deviceId
+ * @param {string} transferId
+ * @param {string | null} commandId
+ * @param {(progress: number, status: string) => void} [onProgress]
+ */
+async function pollGalleryTransfer(deviceId, transferId, commandId, onProgress) {
+  if (!db || !firebaseUid) {
+    throw new Error("Not signed in");
   }
-  throw new Error("Transfer timed out — try again");
+
+  const transferRef = doc(db, "users", firebaseUid, "transfers", transferId);
+  const commandRef =
+    commandId
+      ? doc(db, "users", firebaseUid, "devices", deviceId, "moduleCommands", commandId)
+      : null;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    /** @type {(() => void) | null} */
+    let unsubTransfer = null;
+    /** @type {(() => void) | null} */
+    let unsubCommand = null;
+    const timer = setTimeout(() => {
+      finish(new Error("Transfer timed out — keep the phone unlocked and try again"));
+    }, 3 * 60 * 1000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      try {
+        unsubTransfer?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        unsubCommand?.();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    function finish(err, value) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (err) reject(err);
+      else resolve(value);
+    }
+
+    async function onReady(data) {
+      // Prefer signed URL from API; storagePath alone is enough for getBlob.
+      try {
+        const apiData = await api(
+          `/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`
+        );
+        const row = (apiData.transfers || []).find((x) => x.transferId === transferId);
+        if (row && (row.downloadUrl || row.storagePath)) {
+          finish(null, row);
+          return;
+        }
+      } catch {
+        /* use Firestore fields */
+      }
+      if (data.storagePath || data.downloadUrl) {
+        finish(null, { ...data, transferId });
+        return;
+      }
+      finish(new Error("Transfer ready but file path missing"));
+    }
+
+    unsubTransfer = onSnapshot(
+      transferRef,
+      (snap) => {
+        if (!snap.exists()) return;
+        const t = snap.data() || {};
+        const status = String(t.status || "");
+        const progress = Number(t.progress || 0);
+        if (status === "requested" || status === "pending") {
+          onProgress?.(Math.max(5, progress), status);
+        } else {
+          onProgress?.(Math.max(5, progress || 5), status);
+        }
+        if (status === "ready") {
+          onReady(t).catch((e) => finish(e instanceof Error ? e : new Error(String(e))));
+        } else if (status === "failed" || status === "cancelled") {
+          finish(new Error(t.errorMessage || t.errorCode || `Transfer ${status}`));
+        }
+      },
+      (err) => finish(err instanceof Error ? err : new Error(String(err)))
+    );
+
+    if (commandRef) {
+      unsubCommand = onSnapshot(commandRef, (snap) => {
+        if (!snap.exists()) return;
+        const c = snap.data() || {};
+        const status = String(c.status || "");
+        if (status === "failed" || status === "expired") {
+          finish(
+            new Error(
+              c.errorMessage ||
+                c.errorCode ||
+                (status === "expired"
+                  ? "Phone did not respond in time — unlock phone and retry"
+                  : "Phone could not prepare this file")
+            )
+          );
+        }
+      });
+    }
+  });
 }
 
 async function cacheGalleryBlob(key, meta, blob) {
@@ -2820,12 +2923,16 @@ async function downloadGalleryItem(deviceId, meta, btn) {
         }),
       });
       const transferId = res.transfer?.transferId;
+      const commandId = res.command?.commandId || null;
       if (!transferId) throw new Error("Transfer did not start");
       state = { ...state, progress: 5 };
       galleryItemState.set(key, state);
       paintGalleryButton(btn, state);
-      transfer = await pollGalleryTransfer(deviceId, transferId, (progress) => {
-        state = { ...state, status: "downloading", progress: Math.max(5, Number(progress) || 5) };
+      transfer = await pollGalleryTransfer(deviceId, transferId, commandId, (progress, status) => {
+        let p = Math.max(5, Number(progress) || 5);
+        if (status === "requested" || status === "pending") p = Math.max(p, 5);
+        if (status === "uploading") p = Math.max(p, 10);
+        state = { ...state, status: "downloading", progress: p };
         galleryItemState.set(key, state);
         paintGalleryButton(btn, state);
       });
@@ -2909,17 +3016,21 @@ async function refreshGalleryPanel() {
         const st = galleryItemState.get(key);
         let label = "Download";
         let extraClass = "";
+        let cardClass = "media-card";
         if (st?.status === "downloading") {
           label = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
           extraClass = " btn-gallery-progress";
+          cardClass += " gallery-card-downloading";
         } else if (st?.status === "ready") {
           label = galleryActionLabel(st.mimeType || it.mimeType, st.type || it.type);
           extraClass = " btn-gallery-ready";
+          cardClass += " gallery-card-ready";
         } else if (st?.status === "error") {
           label = "Retry";
           extraClass = " btn-gallery-error";
+          cardClass += " gallery-card-error";
         }
-        return `<article class="media-card">
+        return `<article class="${cardClass}">
         <div class="media-meta"><strong>${escapeHtml(it.displayName || it.itemId)}</strong>
         <span>${escapeHtml(it.type || "")} · ${Math.round((it.sizeBytes || 0) / 1024)} KB</span></div>
         <button type="button" class="btn-secondary btn-gallery-dl${extraClass}" data-item-id="${escapeHtml(it.itemId)}" data-size="${it.sizeBytes || 0}" data-mime="${escapeHtml(it.mimeType || "")}" data-name="${escapeHtml(it.displayName || "file")}" data-type="${escapeHtml(it.type || "")}" ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(label)}</button>

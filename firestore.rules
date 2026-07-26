@@ -616,7 +616,8 @@ service cloud.firestore {
           && request.resource.data.transferId == transferId
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'progress', 'storagePath', 'errorCode',
-                        'errorMessage', 'completedAt', 'sizeBytes']);
+                        'errorMessage', 'completedAt', 'sizeBytes', 'mimeType',
+                        'displayName']);
       allow delete: if owner(uid);
     }
 
