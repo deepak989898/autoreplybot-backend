@@ -2069,6 +2069,11 @@ async function main() {
   if (Array.isArray(cfg.iceServers) && cfg.iceServers.length) {
     publicIceServers = cfg.iceServers;
   }
+  if (!cfg.firebase.storageBucket) {
+    authStatus.textContent =
+      "Missing Firebase storageBucket (set FIREBASE_WEB_STORAGE_BUCKET on the server).";
+    return;
+  }
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
   db = getFirestore(app);
