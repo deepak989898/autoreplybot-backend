@@ -2181,15 +2181,27 @@ async function handlePhoneCapabilities(req, res) {
     if (!snap.exists || (snap.data() || {}).revoked === true) {
       return res.status(404).json({ error: "Client not found", code: "CLIENT_NOT_FOUND" });
     }
-    await ref.set({ allowedCapabilities: ordered, updatedAt: now }, { merge: true });
+    const patch = { allowedCapabilities: ordered, updatedAt: now };
+    // Phone may enable/disable auto-approve after pairing (HMAC-authenticated).
+    if (typeof body.autoApproveSessions === "boolean") {
+      patch.autoApproveSessions = body.autoApproveSessions;
+    }
+    await ref.set(patch, { merge: true });
     await writeAuditLog(uid, {
       action: R.AUDIT_BROWSER_PERMISSIONS_CHANGED,
       deviceId,
       clientId,
       result: "ok",
-      metadata: { source: "phone_hmac", allowedCapabilities: ordered },
+      metadata: {
+        source: "phone_hmac",
+        allowedCapabilities: ordered,
+        autoApproveSessions:
+          typeof body.autoApproveSessions === "boolean"
+            ? body.autoApproveSessions
+            : Boolean((snap.data() || {}).autoApproveSessions),
+      },
     });
-    const updated = { ...(snap.data() || {}), allowedCapabilities: ordered, updatedAt: now };
+    const updated = { ...(snap.data() || {}), ...patch };
     return res.status(200).json({ ok: true, client: sanitizeTrustedClient(clientId, updated) });
   } catch (e) {
     return clientError(res, e, "PHONE_CAPS_FAILED");
