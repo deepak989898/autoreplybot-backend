@@ -1221,9 +1221,13 @@ button, input, select, textarea {
   display: grid;
   gap: 4px;
   padding: 12px 14px;
-  border: none;
-  cursor: pointer;
+  border: 1px solid var(--line, #e5e7eb);
   width: 100%;
+}
+
+.rec-row {
+  cursor: pointer;
+  border: none;
 }
 
 .block-row {
@@ -1232,8 +1236,56 @@ button, input, select, textarea {
   align-items: center;
 }
 
+.app-row {
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  cursor: default;
+}
+
+.app-row-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.app-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .app-row.is-blocked {
-  outline: 1px solid #c0392b55;
+  background: #fef2f2;
+  border-color: #ef4444;
+  outline: none;
+}
+
+.app-control-sep {
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line, #d1d5db);
+  font-size: 0.85rem;
+}
+
+.btn-danger-soft {
+  background: #dc2626;
+  border: 1px solid #b91c1c;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.55rem 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-danger-soft:hover {
+  background: #b91c1c;
+}
+
+.btn-danger-soft:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .app-badge-blocked {

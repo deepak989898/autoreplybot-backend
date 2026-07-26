@@ -18,6 +18,7 @@ import {
 import * as R from "../lib/remote-constants.js";
 import { createModuleCommand, createTransfer } from "../lib/module-commands.js";
 import { getStorage } from "firebase-admin/storage";
+import { bucket as storageBucket } from "../lib/firebase.js";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
 const SIGNATURE_SKEW_MS = 2 * 60 * 1000;
@@ -76,6 +77,7 @@ export default async function handler(req, res) {
   if (path === "files") return handleFilesList(req, res);
   if (path === "files/command") return handleFilesCommand(req, res);
   if (path === "transfers") return handleTransfersList(req, res);
+  if (path === "transfers/content") return handleTransferContent(req, res);
   if (path === "transfers/cancel") return handleTransferCancel(req, res);
   if (path === "command") return handleModuleCommand(req, res);
   if (path === "capability-secret") return handleCapabilitySecret(req, res);
@@ -1133,7 +1135,7 @@ async function handleGalleryTransfer(req, res) {
       sizeBytes: Number(body.sizeBytes || 0),
       mimeType: body.mimeType,
       displayName: body.displayName,
-      storagePath: `users/${uid}/devices/${deviceId}/gallery-transfers/pending/${itemId}`,
+      storagePath: `users/${uid}/devices/${deviceId}/gallery-transfers/{transferId}/file`,
     });
     const cmd = await createModuleCommand(
       uid,
@@ -1810,6 +1812,36 @@ async function handleFilesCommand(req, res) {
   }
 }
 
+/** Candidate Storage object paths for a transfer (handles old pending/ docs). */
+function transferStorageCandidates(uid, t) {
+  const paths = [];
+  const stored = String(t.storagePath || "").trim();
+  if (stored) paths.push(stored);
+  const transferId = String(t.transferId || "").trim();
+  const deviceId = String(t.deviceId || "").trim();
+  if (transferId && deviceId && uid) {
+    paths.push(`users/${uid}/devices/${deviceId}/gallery-transfers/${transferId}/file`);
+    paths.push(`users/${uid}/devices/${deviceId}/file-transfers/${transferId}/file`);
+    paths.push(`users/${uid}/devices/${deviceId}/screen-recordings/${transferId}/recording.mp4`);
+    paths.push(`users/${uid}/devices/${deviceId}/screen-recordings/${transferId}/file`);
+  }
+  return [...new Set(paths.filter(Boolean))];
+}
+
+async function resolveTransferFile(uid, t) {
+  const b = storageBucket();
+  for (const path of transferStorageCandidates(uid, t)) {
+    try {
+      const file = b.file(path);
+      const [exists] = await file.exists();
+      if (exists) return { file, storagePath: path };
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
 async function handleTransfersList(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -1826,16 +1858,25 @@ async function handleTransfersList(req, res) {
     const out = [];
     for (const t of items) {
       const copy = { ...t };
-      if (t.status === "ready" && t.storagePath) {
-        try {
-          const bucket = getStorage().bucket();
-          const file = bucket.file(t.storagePath);
-          const [url] = await file.getSignedUrl({
-            action: "read",
-            expires: Date.now() + 10 * 60 * 1000,
-          });
-          copy.downloadUrl = url;
-        } catch {
+      copy.contentUrl =
+        t.status === "ready"
+          ? `/api/device/transfers/content?transferId=${encodeURIComponent(String(t.transferId || ""))}`
+          : null;
+      if (t.status === "ready") {
+        const resolved = await resolveTransferFile(uid, t);
+        if (resolved) {
+          copy.storagePath = resolved.storagePath;
+          try {
+            const [url] = await resolved.file.getSignedUrl({
+              action: "read",
+              expires: Date.now() + 15 * 60 * 1000,
+              version: "v4",
+            });
+            copy.downloadUrl = url;
+          } catch {
+            copy.downloadUrl = null;
+          }
+        } else {
           copy.downloadUrl = null;
         }
       }
@@ -1844,6 +1885,61 @@ async function handleTransfersList(req, res) {
     return res.status(200).json({ ok: true, transfers: out });
   } catch (e) {
     return clientError(res, e, "TRANSFERS_FAILED");
+  }
+}
+
+/** Authenticated binary download — works even when signed URLs are unavailable on Vercel. */
+async function handleTransferContent(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const transferId = String(req.query?.transferId || "").trim();
+    if (!transferId) {
+      return res.status(400).json({ error: "transferId required", code: "BAD_REQUEST" });
+    }
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_TRANSFERS)
+      .doc(transferId)
+      .get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Transfer not found", code: "NOT_FOUND" });
+    }
+    const t = snap.data() || {};
+    if (String(t.ownerUid || "") !== uid) {
+      return res.status(403).json({ error: "Forbidden", code: "FORBIDDEN" });
+    }
+    if (String(t.status || "") !== "ready") {
+      return res.status(409).json({
+        error: `Transfer not ready (${t.status || "unknown"})`,
+        code: "NOT_READY",
+      });
+    }
+    const resolved = await resolveTransferFile(uid, t);
+    if (!resolved) {
+      return res.status(404).json({ error: "File missing in storage", code: "FILE_MISSING" });
+    }
+    // Keep Firestore path in sync for later polls.
+    if (resolved.storagePath !== t.storagePath) {
+      await snap.ref.set({ storagePath: resolved.storagePath }, { merge: true }).catch(() => {});
+    }
+    const [buf] = await resolved.file.download();
+    const mime = String(t.mimeType || "application/octet-stream");
+    const name = String(t.displayName || "file").replace(/[^\w.\- ()[\]]+/g, "_");
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${name.slice(0, 180)}"`
+    );
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.status(200).send(buf);
+  } catch (e) {
+    return clientError(res, e, "TRANSFER_CONTENT_FAILED");
   }
 }
 

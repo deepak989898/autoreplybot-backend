@@ -2702,19 +2702,67 @@ async function openCachedGalleryItem(key) {
 }
 
 async function fetchTransferBlob(transfer) {
+  const transferId = String(transfer.transferId || "").trim();
+  const errors = [];
+
+  // 1) Authenticated API proxy (works when signed URLs / client Storage fail).
+  if (transferId && idToken) {
+    try {
+      const res = await fetch(
+        `/api/device/transfers/content?transferId=${encodeURIComponent(transferId)}`,
+        { headers: { Authorization: `Bearer ${idToken}` } }
+      );
+      if (res.ok) {
+        return await res.blob();
+      }
+      const body = await res.json().catch(() => ({}));
+      errors.push(body.error || `content HTTP ${res.status}`);
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // 2) Firebase client SDK (same-account Storage rules).
   const path = String(transfer.storagePath || "").trim();
   if (path && storage) {
     try {
       return await getBlob(storageRef(storage, path));
-    } catch {
-      /* fall through to signed URL */
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : "getBlob failed");
     }
   }
-  const url = String(transfer.downloadUrl || "").trim();
-  if (!url) throw new Error("Transfer ready but no download URL");
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed (${res.status})`);
-  return res.blob();
+
+  // 3) Signed URL if the list API attached one.
+  let url = String(transfer.downloadUrl || "").trim();
+  if (!url && transferId) {
+    try {
+      const deviceId = String(transfer.deviceId || "").trim();
+      const q = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : "";
+      const data = await api(`/api/device/transfers${q}`);
+      const row = (data.transfers || []).find((x) => x.transferId === transferId);
+      url = String(row?.downloadUrl || "").trim();
+      if (!path && row?.storagePath && storage) {
+        try {
+          return await getBlob(storageRef(storage, String(row.storagePath)));
+        } catch {
+          /* continue */
+        }
+      }
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : "transfers refresh failed");
+    }
+  }
+  if (url) {
+    const res = await fetch(url);
+    if (res.ok) return res.blob();
+    errors.push(`signed URL HTTP ${res.status}`);
+  }
+
+  throw new Error(
+    errors[0]
+      ? `Could not open file (${errors[0]})`
+      : "Transfer ready but file could not be downloaded"
+  );
 }
 
 async function findReadyGalleryTransfer(deviceId, itemId) {
@@ -4331,7 +4379,7 @@ async function refreshAppsBlocksPanel() {
     const items = (data.items || []).filter((b) => b.status === "active");
     appsActiveBlocks = items;
     if (!items.length) {
-      box.textContent = "No active blocks.";
+      box.textContent = "No apps locked.";
       box.classList.add("muted");
       return;
     }
@@ -4347,11 +4395,11 @@ async function refreshAppsBlocksPanel() {
             <strong>${title}</strong>
             <div class="muted">${escapeHtml(b.packageName)} · ${formatBlockRemaining(b.expiresAt)}</div>
           </div>
-          <button type="button" class="btn-secondary btn-unblock-pkg" data-package="${escapeHtml(b.packageName)}" data-mode="${escapeHtml(b.mode || "app")}">Unblock</button>
+          <button type="button" class="btn-secondary btn-unlock-pkg" data-package="${escapeHtml(b.packageName)}" data-mode="${escapeHtml(b.mode || "app")}">Unlock</button>
         </div>`;
       })
       .join("");
-    box.querySelectorAll(".btn-unblock-pkg").forEach((btn) => {
+    box.querySelectorAll(".btn-unlock-pkg").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const pkg = btn.getAttribute("data-package");
         const mode = btn.getAttribute("data-mode") || "app";
@@ -4447,8 +4495,10 @@ async function refreshAppsPanel() {
     if (!items.length) {
       list.textContent =
         filter === "blocked"
-          ? "No blocked apps right now."
-          : "No apps indexed yet. Tap Sync from phone.";
+          ? "No locked apps right now."
+          : filter === "user"
+            ? "No user apps found. Tap Sync from phone, or switch Filter to All apps."
+            : "No apps indexed yet. Tap Sync from phone.";
       list.classList.add("muted");
       return;
     }
@@ -4456,19 +4506,69 @@ async function refreshAppsPanel() {
     list.innerHTML = items
       .map((a) => {
         const blocked = isPackageBlockedNow(a.packageName);
-        return `<button type="button" class="app-row surface${blocked ? " is-blocked" : ""}" data-package="${escapeHtml(a.packageName)}">
-          <strong>${escapeHtml(a.appName || a.packageName)}${
-            blocked ? '<span class="app-badge-blocked">Blocked</span>' : ""
-          }</strong>
-          <span class="muted">${escapeHtml(a.packageName)}</span>
-          <span class="muted">v${escapeHtml(a.versionName || "?")} · ${a.isSystem ? "System" : "User"} · ${escapeHtml(a.category || "")}</span>
-        </button>`;
+        const name = escapeHtml(a.appName || a.packageName);
+        const pkg = escapeHtml(a.packageName);
+        return `<article class="app-row surface${blocked ? " is-blocked" : ""}" data-package="${pkg}">
+          <div class="app-row-main">
+            <strong>${name}${
+              blocked ? '<span class="app-badge-blocked">Locked</span>' : ""
+            }</strong>
+            <span class="muted">${pkg}</span>
+            <span class="muted">v${escapeHtml(a.versionName || "?")} · ${
+              a.isSystem ? "System" : "User"
+            } · ${escapeHtml(a.category || "")}</span>
+          </div>
+          <div class="app-row-actions">
+            <button type="button" class="btn-secondary btn-app-details" data-package="${pkg}">Details</button>
+            ${
+              blocked
+                ? `<button type="button" class="btn-primary btn-app-unlock" data-package="${pkg}" data-name="${name}">Unlock</button>`
+                : `<button type="button" class="btn-danger-soft btn-app-lock" data-package="${pkg}" data-name="${name}">Lock</button>`
+            }
+          </div>
+        </article>`;
       })
       .join("");
-    list.querySelectorAll(".app-row").forEach((btn) => {
+
+    list.querySelectorAll(".btn-app-details").forEach((btn) => {
       btn.addEventListener("click", () => {
         const pkg = btn.getAttribute("data-package");
         if (pkg) openAppDetail(deviceId, pkg);
+      });
+    });
+    list.querySelectorAll(".btn-app-lock").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.getAttribute("data-package") || "";
+        const name = btn.getAttribute("data-name") || pkg;
+        if (!pkg) return;
+        btn.disabled = true;
+        try {
+          await sendAppControl("BLOCK", pkg, name, "app");
+          setTimeout(async () => {
+            await refreshAppsBlocksPanel();
+            await refreshAppsPanel();
+          }, 1200);
+        } catch (e) {
+          btn.disabled = false;
+          alertAppControlError(e);
+        }
+      });
+    });
+    list.querySelectorAll(".btn-app-unlock").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.getAttribute("data-package") || "";
+        if (!pkg) return;
+        btn.disabled = true;
+        try {
+          await sendAppControl("UNBLOCK", pkg, "", "app");
+          setTimeout(async () => {
+            await refreshAppsBlocksPanel();
+            await refreshAppsPanel();
+          }, 1000);
+        } catch (e) {
+          btn.disabled = false;
+          alertAppControlError(e);
+        }
       });
     });
   } catch (e) {
@@ -4509,11 +4609,11 @@ async function openAppDetail(deviceId, packageName) {
           : ""
       }
       <div class="app-control-actions">
-        <button type="button" class="btn-primary" id="btn-block-app">Block app</button>
-        <button type="button" class="btn-secondary" id="btn-unblock-app" ${blocked ? "" : "disabled"}>Unblock</button>
+        <button type="button" class="btn-danger-soft" id="btn-block-app">${blocked ? "Extend lock" : "Lock app"}</button>
+        <button type="button" class="btn-primary" id="btn-unblock-app" ${blocked ? "" : "disabled"}>Unlock</button>
         <button type="button" class="btn-secondary" id="btn-copy-pkg">Copy package</button>
       </div>
-      <p class="muted">Uses the Block duration above (e.g. 30 minutes). After the timer, the app can open again.</p>
+      <p class="muted">Uses Lock duration above. While locked, opening the app on the phone returns to Home.</p>
       <p>Permissions (${a.permissionCount || perms.length}):</p>
       <ul>${perms.map((p) => `<li><code>${escapeHtml(p)}</code></li>`).join("")}</ul>`;
     detail.querySelector("#btn-copy-pkg")?.addEventListener("click", async () => {

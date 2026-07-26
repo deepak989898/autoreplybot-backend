@@ -314,7 +314,7 @@
 
           <div id="phone-tab-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">List apps, block them from opening, set a timer, or lock the camera hardware. Phone must enable App Control (Accessibility) and grant this browser App Control.</p>
+              <p class="page-sub">Lock or unlock any app (WhatsApp, YouTube, Instagram, etc.) with the duration below. Camera hardware lock is optional and separate. Phone needs App Control (Accessibility) + browser App Control permission.</p>
               <div class="page-actions">
                 <button id="btn-apps-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-apps-refresh" class="btn-primary" type="button">Refresh</button>
@@ -322,7 +322,7 @@
               </div>
             </div>
             <div class="screen-controls surface app-control-bar">
-              <label>Block duration
+              <label>Lock duration
                 <select id="apps-block-duration" class="input">
                   <option value="15">15 minutes</option>
                   <option value="30" selected>30 minutes</option>
@@ -330,21 +330,22 @@
                   <option value="120">2 hours</option>
                   <option value="360">6 hours</option>
                   <option value="1440">24 hours</option>
-                  <option value="0">Until I unblock</option>
+                  <option value="0">Until I unlock</option>
                 </select>
               </label>
-              <button id="btn-camera-lock" class="btn-primary" type="button">Lock camera hardware</button>
+              <button id="btn-blocks-refresh" class="btn-secondary" type="button">Refresh locks</button>
+              <span class="app-control-sep muted">Camera hardware</span>
+              <button id="btn-camera-lock" class="btn-secondary" type="button">Lock camera</button>
               <button id="btn-camera-unlock" class="btn-secondary" type="button">Unlock camera</button>
-              <button id="btn-blocks-refresh" class="btn-secondary" type="button">Refresh blocks</button>
             </div>
-            <div id="apps-blocks" class="apps-blocks surface muted">No active blocks.</div>
+            <div id="apps-blocks" class="apps-blocks surface muted">No apps locked.</div>
             <div class="screen-controls surface">
-              <input id="apps-search" class="input" type="search" placeholder="Search name or package…" />
+              <input id="apps-search" class="input" type="search" placeholder="Search WhatsApp, YouTube, Instagram…" />
               <label>Filter
                 <select id="apps-filter" class="input">
-                  <option value="all">All</option>
-                  <option value="blocked">Blocked now</option>
-                  <option value="user">User</option>
+                  <option value="user" selected>User apps</option>
+                  <option value="all">All apps</option>
+                  <option value="blocked">Locked now</option>
                   <option value="system">System</option>
                   <option value="games">Games</option>
                   <option value="social">Social</option>
