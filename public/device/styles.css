@@ -1050,6 +1050,50 @@ button, input, select, textarea {
   width: 100%;
 }
 
+.media-viewer-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.media-zoom-wrap {
+  width: 100%;
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.media-viewer-img-zoom {
+  transform-origin: center center;
+  cursor: grab;
+  user-select: none;
+  transition: transform 0.05s linear;
+}
+
+.media-viewer-img-zoom:active {
+  cursor: grabbing;
+}
+
+.btn-gallery-progress {
+  min-width: 5.5rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.btn-gallery-ready {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.btn-gallery-error {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
 .nav-section-label {
   margin: 14px 12px 6px;
   font-size: 0.72rem;

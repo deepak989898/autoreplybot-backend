@@ -86,12 +86,6 @@
             </span>
             <span class="nav-label">Multi Device View</span>
           </button>
-          <button type="button" class="nav-item" data-panel="transfers">
-            <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17l-4-4 4-4"/><path d="M3 13h12"/><path d="M17 7l4 4-4 4"/><path d="M21 11H9"/></svg>
-            </span>
-            <span class="nav-label">Transfers</span>
-          </button>
           <button type="button" class="nav-item" data-panel="social">
             <span class="nav-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>
@@ -494,24 +488,6 @@
             <button id="btn-refresh-media" class="btn-secondary" type="button">Refresh</button>
           </header>
           <div id="media-list" class="media-gallery muted">Loading media…</div>
-          <dialog id="media-viewer" class="media-viewer">
-            <form method="dialog" class="media-viewer-bar">
-              <strong id="media-viewer-title">Preview</strong>
-              <button type="submit" class="btn-secondary" value="close">Close</button>
-            </form>
-            <div id="media-viewer-body" class="media-viewer-body"></div>
-          </dialog>
-        </section>
-
-        <section class="panel" id="panel-transfers" data-panel="transfers" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Transfers</h1>
-              <p class="page-sub">Temporary private gallery and file transfers.</p>
-            </div>
-            <button id="btn-transfers-refresh" class="btn-secondary" type="button">Refresh</button>
-          </header>
-          <div id="transfers-list" class="surface muted">Loading…</div>
         </section>
 
         <section class="panel" id="panel-multiview" data-panel="multiview" hidden>
@@ -538,6 +514,19 @@
           <div id="dash-session-list"></div>
           <p id="dash-security"></p>
         </div>
+
+        <dialog id="media-viewer" class="media-viewer">
+          <form method="dialog" class="media-viewer-bar">
+            <strong id="media-viewer-title">Preview</strong>
+            <div class="media-viewer-actions" id="media-viewer-actions" hidden>
+              <button type="button" class="btn-secondary" id="btn-zoom-out" title="Zoom out">−</button>
+              <button type="button" class="btn-secondary" id="btn-zoom-reset" title="Reset zoom">Reset</button>
+              <button type="button" class="btn-secondary" id="btn-zoom-in" title="Zoom in">+</button>
+            </div>
+            <button type="submit" class="btn-secondary" value="close">Close</button>
+          </form>
+          <div id="media-viewer-body" class="media-viewer-body"></div>
+        </dialog>
       </main>
     </div>
   </div>

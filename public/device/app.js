@@ -17,6 +17,7 @@ import {
   query,
   orderBy,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
+import { getStorage, ref as storageRef, getBlob } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-storage.js";
 import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm";
 import {
   canonicalSessionRequest,
@@ -46,6 +47,10 @@ const mediaList = document.getElementById("media-list");
 const mediaViewer = document.getElementById("media-viewer");
 const mediaViewerBody = document.getElementById("media-viewer-body");
 const mediaViewerTitle = document.getElementById("media-viewer-title");
+const mediaViewerActions = document.getElementById("media-viewer-actions");
+const btnZoomIn = document.getElementById("btn-zoom-in");
+const btnZoomOut = document.getElementById("btn-zoom-out");
+const btnZoomReset = document.getElementById("btn-zoom-reset");
 const pairResult = document.getElementById("pair-result");
 const pairCode = document.getElementById("pair-code");
 const pairExpires = document.getElementById("pair-expires");
@@ -83,7 +88,8 @@ let messagesLiveTimer = null;
 function showPanel(panelId) {
   let id = String(panelId || "phone");
   if (id === "home" || id === "devices" || id === "location" || id === "info"
-      || id === "gallery" || id === "files" || id === "notifications" || id === "messages") {
+      || id === "gallery" || id === "files" || id === "notifications" || id === "messages"
+      || id === "transfers") {
     id = "phone";
   }
   document.querySelectorAll(".panel").forEach((el) => {
@@ -102,7 +108,6 @@ function showPanel(panelId) {
   if (id === "security") refreshClients().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "social") ensureSocialFrame();
-  if (id === "transfers") refreshTransfersPanel().catch(() => {});
   if (id === "multiview") refreshMultiViewPanel().catch(() => {});
 }
 
@@ -271,8 +276,17 @@ let browserFingerprint = "";
 
 let auth = null;
 let db = null;
+let storage = null;
 let idToken = null;
 let firebaseUid = null;
+
+const GALLERY_CACHE_DB = "autoreplybot-gallery-v1";
+const GALLERY_CACHE_STORE = "files";
+/** In-memory gallery download/play state keyed by deviceId::itemId */
+/** @type {Map<string, { status: string, progress: number, mimeType: string, type: string, displayName: string, objectUrl?: string, sizeBytes?: number }>} */
+const galleryItemState = new Map();
+/** @type {{ scale: number, x: number, y: number, img: HTMLImageElement | null, dragging: boolean, lastX: number, lastY: number } | null} */
+let imageZoomState = null;
 let publicIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
 /** @type {Map<string, LiveSession>} */
 const liveByDevice = new Map();
@@ -1766,22 +1780,80 @@ function formatBytes(n) {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function applyImageZoom() {
+  if (!imageZoomState?.img) return;
+  const { scale, x, y, img } = imageZoomState;
+  img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+}
+
+function setImageZoom(scale) {
+  if (!imageZoomState) return;
+  imageZoomState.scale = Math.min(6, Math.max(1, scale));
+  if (imageZoomState.scale === 1) {
+    imageZoomState.x = 0;
+    imageZoomState.y = 0;
+  }
+  applyImageZoom();
+}
+
+function bindImageZoom(img) {
+  imageZoomState = { scale: 1, x: 0, y: 0, img, dragging: false, lastX: 0, lastY: 0 };
+  if (mediaViewerActions) mediaViewerActions.hidden = false;
+  applyImageZoom();
+  img.addEventListener(
+    "wheel",
+    (ev) => {
+      ev.preventDefault();
+      setImageZoom(imageZoomState.scale + (ev.deltaY < 0 ? 0.2 : -0.2));
+    },
+    { passive: false }
+  );
+  img.addEventListener("pointerdown", (ev) => {
+    if (!imageZoomState || imageZoomState.scale <= 1) return;
+    imageZoomState.dragging = true;
+    imageZoomState.lastX = ev.clientX;
+    imageZoomState.lastY = ev.clientY;
+    img.setPointerCapture(ev.pointerId);
+  });
+  img.addEventListener("pointermove", (ev) => {
+    if (!imageZoomState?.dragging) return;
+    imageZoomState.x += ev.clientX - imageZoomState.lastX;
+    imageZoomState.y += ev.clientY - imageZoomState.lastY;
+    imageZoomState.lastX = ev.clientX;
+    imageZoomState.lastY = ev.clientY;
+    applyImageZoom();
+  });
+  const endDrag = () => {
+    if (imageZoomState) imageZoomState.dragging = false;
+  };
+  img.addEventListener("pointerup", endDrag);
+  img.addEventListener("pointercancel", endDrag);
+}
+
 function openMediaViewer(item) {
   if (!mediaViewer || !mediaViewerBody) return;
   const kind = String(item.kind || "");
-  const url = String(item.downloadUrl || "");
-  const title = `${kind || "file"} · ${item.fileName || item.mediaId || ""}`;
+  const mime = String(item.contentType || item.mimeType || "");
+  const url = String(item.downloadUrl || item.url || "");
+  const title = `${kind || mime || "file"} · ${item.fileName || item.displayName || item.mediaId || ""}`;
   if (mediaViewerTitle) mediaViewerTitle.textContent = title;
   mediaViewerBody.innerHTML = "";
+  imageZoomState = null;
+  if (mediaViewerActions) mediaViewerActions.hidden = true;
   if (!url) {
     mediaViewerBody.textContent = "No download URL";
-  } else if (kind === "photo" || String(item.contentType || "").startsWith("image/")) {
+  } else if (kind === "photo" || kind === "image" || mime.startsWith("image/")) {
+    const wrap = document.createElement("div");
+    wrap.className = "media-zoom-wrap";
     const img = document.createElement("img");
     img.src = url;
     img.alt = title;
-    img.className = "media-viewer-img";
-    mediaViewerBody.appendChild(img);
-  } else if (kind === "video" || String(item.contentType || "").startsWith("video/")) {
+    img.className = "media-viewer-img media-viewer-img-zoom";
+    img.draggable = false;
+    wrap.appendChild(img);
+    mediaViewerBody.appendChild(wrap);
+    bindImageZoom(img);
+  } else if (kind === "video" || mime.startsWith("video/")) {
     const video = document.createElement("video");
     video.src = url;
     video.controls = true;
@@ -1789,17 +1861,29 @@ function openMediaViewer(item) {
     video.playsInline = true;
     video.className = "media-viewer-av";
     mediaViewerBody.appendChild(video);
-  } else {
+  } else if (kind === "audio" || mime.startsWith("audio/")) {
     const audio = document.createElement("audio");
     audio.src = url;
     audio.controls = true;
     audio.autoplay = true;
     audio.className = "media-viewer-av";
     mediaViewerBody.appendChild(audio);
+  } else {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.className = "btn-primary";
+    link.textContent = "Open file";
+    mediaViewerBody.appendChild(link);
   }
   if (typeof mediaViewer.showModal === "function") mediaViewer.showModal();
   else mediaViewer.setAttribute("open", "");
 }
+
+btnZoomIn?.addEventListener("click", () => setImageZoom((imageZoomState?.scale || 1) + 0.25));
+btnZoomOut?.addEventListener("click", () => setImageZoom((imageZoomState?.scale || 1) - 0.25));
+btnZoomReset?.addEventListener("click", () => setImageZoom(1));
 
 function renderMedia(items) {
   if (!mediaList) return;
@@ -1988,6 +2072,7 @@ async function main() {
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
   db = getFirestore(app);
+  storage = getStorage(app);
   const provider = new GoogleAuthProvider();
 
   async function runEmailSignIn() {
@@ -2508,6 +2593,275 @@ async function refreshInfoPanel() {
   }
 }
 
+function galleryCacheKey(deviceId, itemId) {
+  return `${deviceId}::${itemId}`;
+}
+
+function galleryActionLabel(mimeType, type) {
+  const mime = String(mimeType || "").toLowerCase();
+  const t = String(type || "").toLowerCase();
+  if (mime.startsWith("image/") || t === "image" || t === "photo") return "View";
+  if (mime.startsWith("video/") || mime.startsWith("audio/") || t === "video" || t === "audio") {
+    return "Play";
+  }
+  return "View file";
+}
+
+function openGalleryCacheDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(GALLERY_CACHE_DB, 1);
+    req.onupgradeneeded = () => {
+      const idb = req.result;
+      if (!idb.objectStoreNames.contains(GALLERY_CACHE_STORE)) {
+        idb.createObjectStore(GALLERY_CACHE_STORE, { keyPath: "key" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+  });
+}
+
+async function galleryCacheGet(key) {
+  try {
+    const idb = await openGalleryCacheDb();
+    return await new Promise((resolve, reject) => {
+      const tx = idb.transaction(GALLERY_CACHE_STORE, "readonly");
+      const req = tx.objectStore(GALLERY_CACHE_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function galleryCachePut(record) {
+  const idb = await openGalleryCacheDb();
+  await new Promise((resolve, reject) => {
+    const tx = idb.transaction(GALLERY_CACHE_STORE, "readwrite");
+    tx.objectStore(GALLERY_CACHE_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function paintGalleryButton(btn, state) {
+  if (!btn || !state) return;
+  btn.classList.remove("btn-gallery-progress", "btn-gallery-ready", "btn-gallery-error");
+  if (state.status === "downloading") {
+    btn.disabled = true;
+    btn.textContent = `${Math.max(0, Math.min(100, Number(state.progress) || 0))}%`;
+    btn.classList.add("btn-gallery-progress");
+    btn.dataset.ready = "0";
+  } else if (state.status === "ready") {
+    btn.disabled = false;
+    btn.textContent = galleryActionLabel(state.mimeType, state.type);
+    btn.classList.add("btn-gallery-ready");
+    btn.dataset.ready = "1";
+  } else if (state.status === "error") {
+    btn.disabled = false;
+    btn.textContent = "Retry";
+    btn.classList.add("btn-gallery-error");
+    btn.dataset.ready = "0";
+  } else {
+    btn.disabled = false;
+    btn.textContent = "Download";
+    btn.dataset.ready = "0";
+  }
+}
+
+async function ensureGalleryObjectUrl(key, state) {
+  if (state.objectUrl) return state.objectUrl;
+  const cached = await galleryCacheGet(key);
+  if (!cached?.blob) throw new Error("Cached file missing");
+  const url = URL.createObjectURL(cached.blob);
+  state.objectUrl = url;
+  state.mimeType = cached.mimeType || state.mimeType;
+  state.displayName = cached.displayName || state.displayName;
+  galleryItemState.set(key, state);
+  return url;
+}
+
+async function openCachedGalleryItem(key) {
+  const state = galleryItemState.get(key);
+  if (!state || state.status !== "ready") throw new Error("File not ready");
+  const url = await ensureGalleryObjectUrl(key, state);
+  openMediaViewer({
+    kind: state.type || "",
+    contentType: state.mimeType || "",
+    mimeType: state.mimeType || "",
+    downloadUrl: url,
+    displayName: state.displayName || "",
+    fileName: state.displayName || "",
+  });
+}
+
+async function fetchTransferBlob(transfer) {
+  const path = String(transfer.storagePath || "").trim();
+  if (path && storage) {
+    try {
+      return await getBlob(storageRef(storage, path));
+    } catch {
+      /* fall through to signed URL */
+    }
+  }
+  const url = String(transfer.downloadUrl || "").trim();
+  if (!url) throw new Error("Transfer ready but no download URL");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  return res.blob();
+}
+
+async function findReadyGalleryTransfer(deviceId, itemId) {
+  const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+  const rows = data.transfers || [];
+  return (
+    rows.find(
+      (t) =>
+        String(t.deviceId || "") === deviceId &&
+        String(t.sourceReference || "") === itemId &&
+        t.status === "ready" &&
+        (t.storagePath || t.downloadUrl)
+    ) || null
+  );
+}
+
+async function pollGalleryTransfer(deviceId, transferId, onProgress) {
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 1200));
+    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+    const t = (data.transfers || []).find((x) => x.transferId === transferId);
+    if (!t) continue;
+    onProgress?.(Number(t.progress || 0), t.status);
+    if (t.status === "ready" && (t.downloadUrl || t.storagePath)) return t;
+    if (t.status === "failed" || t.status === "cancelled") {
+      throw new Error(t.errorMessage || t.error || `Transfer ${t.status}`);
+    }
+  }
+  throw new Error("Transfer timed out — try again");
+}
+
+async function cacheGalleryBlob(key, meta, blob) {
+  const mimeType = meta.mimeType || blob.type || "application/octet-stream";
+  const typedBlob =
+    blob.type === mimeType || !mimeType ? blob : new Blob([blob], { type: mimeType });
+  await galleryCachePut({
+    key,
+    blob: typedBlob,
+    mimeType,
+    displayName: meta.displayName || "file",
+    type: meta.type || "",
+    sizeBytes: meta.sizeBytes || typedBlob.size || 0,
+    cachedAt: Date.now(),
+  });
+  const prev = galleryItemState.get(key);
+  if (prev?.objectUrl) {
+    try {
+      URL.revokeObjectURL(prev.objectUrl);
+    } catch {
+      /* ignore */
+    }
+  }
+  const objectUrl = URL.createObjectURL(typedBlob);
+  const state = {
+    status: "ready",
+    progress: 100,
+    mimeType,
+    type: meta.type || "",
+    displayName: meta.displayName || "file",
+    sizeBytes: meta.sizeBytes || typedBlob.size || 0,
+    objectUrl,
+  };
+  galleryItemState.set(key, state);
+  return state;
+}
+
+async function downloadGalleryItem(deviceId, meta, btn) {
+  const itemId = meta.itemId;
+  const key = galleryCacheKey(deviceId, itemId);
+  const existing = galleryItemState.get(key);
+  if (existing?.status === "ready") {
+    paintGalleryButton(btn, existing);
+    await openCachedGalleryItem(key);
+    return;
+  }
+  const cached = await galleryCacheGet(key);
+  if (cached?.blob) {
+    const state = await cacheGalleryBlob(key, { ...meta, mimeType: cached.mimeType || meta.mimeType }, cached.blob);
+    paintGalleryButton(btn, state);
+    await openCachedGalleryItem(key);
+    return;
+  }
+
+  let state = {
+    status: "downloading",
+    progress: 1,
+    mimeType: meta.mimeType || "",
+    type: meta.type || "",
+    displayName: meta.displayName || "file",
+    sizeBytes: meta.sizeBytes || 0,
+  };
+  galleryItemState.set(key, state);
+  paintGalleryButton(btn, state);
+
+  try {
+    let transfer = await findReadyGalleryTransfer(deviceId, itemId);
+    if (!transfer) {
+      const clientId = requireClientId();
+      const res = await api("/api/device/gallery/transfer", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId,
+          clientId,
+          itemId,
+          sizeBytes: Number(meta.sizeBytes || 0),
+          mimeType: meta.mimeType,
+          displayName: meta.displayName,
+        }),
+      });
+      const transferId = res.transfer?.transferId;
+      if (!transferId) throw new Error("Transfer did not start");
+      state = { ...state, progress: 5 };
+      galleryItemState.set(key, state);
+      paintGalleryButton(btn, state);
+      transfer = await pollGalleryTransfer(deviceId, transferId, (progress) => {
+        state = { ...state, status: "downloading", progress: Math.max(5, Number(progress) || 5) };
+        galleryItemState.set(key, state);
+        paintGalleryButton(btn, state);
+      });
+    } else {
+      state = { ...state, progress: 90 };
+      galleryItemState.set(key, state);
+      paintGalleryButton(btn, state);
+    }
+
+    state = { ...state, progress: 95 };
+    galleryItemState.set(key, state);
+    paintGalleryButton(btn, state);
+
+    const blob = await fetchTransferBlob(transfer);
+    const ready = await cacheGalleryBlob(
+      key,
+      {
+        ...meta,
+        mimeType: meta.mimeType || transfer.mimeType || blob.type,
+      },
+      blob
+    );
+    // Leave as Play/View — user taps again to open (no re-download).
+    paintGalleryButton(btn, ready);
+  } catch (e) {
+    state = {
+      ...state,
+      status: "error",
+      progress: 0,
+    };
+    galleryItemState.set(key, state);
+    paintGalleryButton(btn, state);
+    throw e;
+  }
+}
+
 async function refreshGalleryPanel() {
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillWorkspaceDeviceSelect();
@@ -2550,30 +2904,66 @@ async function refreshGalleryPanel() {
     }
     list.classList.remove("muted");
     list.innerHTML = `<div class="media-grid">${items
-      .map(
-        (it) => `<article class="media-card">
+      .map((it) => {
+        const key = galleryCacheKey(deviceId, it.itemId);
+        const st = galleryItemState.get(key);
+        let label = "Download";
+        let extraClass = "";
+        if (st?.status === "downloading") {
+          label = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+          extraClass = " btn-gallery-progress";
+        } else if (st?.status === "ready") {
+          label = galleryActionLabel(st.mimeType || it.mimeType, st.type || it.type);
+          extraClass = " btn-gallery-ready";
+        } else if (st?.status === "error") {
+          label = "Retry";
+          extraClass = " btn-gallery-error";
+        }
+        return `<article class="media-card">
         <div class="media-meta"><strong>${escapeHtml(it.displayName || it.itemId)}</strong>
         <span>${escapeHtml(it.type || "")} · ${Math.round((it.sizeBytes || 0) / 1024)} KB</span></div>
-        <button type="button" class="btn-secondary btn-gallery-dl" data-item-id="${escapeHtml(it.itemId)}" data-size="${it.sizeBytes || 0}" data-mime="${escapeHtml(it.mimeType || "")}" data-name="${escapeHtml(it.displayName || "file")}">Download</button>
-      </article>`
-      )
+        <button type="button" class="btn-secondary btn-gallery-dl${extraClass}" data-item-id="${escapeHtml(it.itemId)}" data-size="${it.sizeBytes || 0}" data-mime="${escapeHtml(it.mimeType || "")}" data-name="${escapeHtml(it.displayName || "file")}" data-type="${escapeHtml(it.type || "")}" ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(label)}</button>
+      </article>`;
+      })
       .join("")}</div>`;
+
+    // Restore cached files as Play/View without re-downloading.
+    await Promise.all(
+      items.map(async (it) => {
+        const key = galleryCacheKey(deviceId, it.itemId);
+        if (galleryItemState.get(key)?.status === "ready") return;
+        const cached = await galleryCacheGet(key);
+        if (!cached?.blob) return;
+        await cacheGalleryBlob(
+          key,
+          {
+            itemId: it.itemId,
+            mimeType: cached.mimeType || it.mimeType,
+            type: cached.type || it.type,
+            displayName: cached.displayName || it.displayName,
+            sizeBytes: cached.sizeBytes || it.sizeBytes,
+          },
+          cached.blob
+        );
+        const btn = [...list.querySelectorAll(".btn-gallery-dl")].find(
+          (el) => el.getAttribute("data-item-id") === it.itemId
+        );
+        paintGalleryButton(btn, galleryItemState.get(key));
+      })
+    );
+
     list.querySelectorAll(".btn-gallery-dl").forEach((btn) => {
       btn.addEventListener("click", async () => {
+        const itemId = btn.getAttribute("data-item-id") || "";
+        const meta = {
+          itemId,
+          sizeBytes: Number(btn.getAttribute("data-size") || 0),
+          mimeType: btn.getAttribute("data-mime") || "",
+          displayName: btn.getAttribute("data-name") || "file",
+          type: btn.getAttribute("data-type") || "",
+        };
         try {
-          const clientId = requireClientId();
-          await api("/api/device/gallery/transfer", {
-            method: "POST",
-            body: JSON.stringify({
-              deviceId,
-              clientId,
-              itemId: btn.getAttribute("data-item-id"),
-              sizeBytes: Number(btn.getAttribute("data-size") || 0),
-              mimeType: btn.getAttribute("data-mime"),
-              displayName: btn.getAttribute("data-name"),
-            }),
-          });
-          alert("Transfer requested. Check Transfers panel when ready.");
+          await downloadGalleryItem(deviceId, meta, btn);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
         }
@@ -2919,7 +3309,7 @@ async function requestFileDownload(deviceId, entry, { play } = { play: false }) 
   });
   const transferId = res.transfer?.transferId;
   if (!transferId) {
-    alert("Transfer started. Open Transfers when ready.");
+    alert("Download did not start. Try again.");
     return;
   }
   const label = document.getElementById("files-audio-label");
@@ -2929,18 +3319,28 @@ async function requestFileDownload(deviceId, entry, { play } = { play: false }) 
     const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
     const t = (data.transfers || []).find((x) => x.transferId === transferId);
     if (!t) continue;
-    if (t.status === "ready" && t.downloadUrl) {
+    if (t.status === "ready" && (t.downloadUrl || t.storagePath)) {
+      let url = t.downloadUrl || "";
+      if (!url && t.storagePath && storage) {
+        try {
+          const blob = await getBlob(storageRef(storage, t.storagePath));
+          url = URL.createObjectURL(blob);
+        } catch {
+          /* keep empty */
+        }
+      }
+      if (!url) continue;
       if (play) {
         const wrap = document.getElementById("files-audio-player");
         const audio = document.getElementById("files-audio");
         if (wrap) wrap.hidden = false;
         if (label) label.textContent = entry.name;
         if (audio) {
-          audio.src = t.downloadUrl;
+          audio.src = url;
           audio.play().catch(() => {});
         }
       } else {
-        window.open(t.downloadUrl, "_blank", "noopener");
+        window.open(url, "_blank", "noopener");
       }
       return;
     }
@@ -2948,7 +3348,7 @@ async function requestFileDownload(deviceId, entry, { play } = { play: false }) 
       throw new Error(t.error || `Transfer ${t.status}`);
     }
   }
-  alert("Still preparing. Open Transfers panel and Download when ready.");
+  alert("Still preparing. Wait a moment and try again.");
 }
 
 async function refreshFilesPanel() {
