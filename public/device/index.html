@@ -86,6 +86,22 @@
           <button type="button" class="nav-item" data-panel="social">
             <span class="nav-ico">📣</span> Facebook &amp; Instagram
           </button>
+          <p class="nav-section-label">NEW</p>
+          <button type="button" class="nav-item" data-panel="phone" data-phone-tab="screen">
+            <span class="nav-ico">🖥</span> Screen Mirroring
+          </button>
+          <button type="button" class="nav-item" data-panel="phone" data-phone-tab="recording">
+            <span class="nav-ico">⏺</span> Screen Recording
+          </button>
+          <button type="button" class="nav-item" data-panel="phone" data-phone-tab="apps">
+            <span class="nav-ico">📦</span> Installed Apps
+          </button>
+          <button type="button" class="nav-item" data-panel="settings">
+            <span class="nav-ico">⚙</span> Settings
+          </button>
+          <button type="button" class="nav-item" data-panel="help">
+            <span class="nav-ico">?</span> Help
+          </button>
         </nav>
         <div class="sidebar-foot">
           <p id="header-user" class="sidebar-user"></p>
@@ -133,6 +149,9 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications">Notifications</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages">Messages</button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files">File Manager</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen">Screen Mirror</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording">Screen Recording</button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps">Installed Apps</button>
           </div>
 
           <div id="phone-tab-camera" class="phone-tab-panel" data-phone-panel="camera">
@@ -215,6 +234,138 @@
               <p id="files-audio-label" class="muted"></p>
               <audio id="files-audio" controls preload="none" style="width:100%"></audio>
             </div>
+          </div>
+
+          <div id="phone-tab-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start.</p>
+              <div class="page-actions">
+                <button id="btn-screen-start" class="btn-primary" type="button">Start Mirroring</button>
+                <button id="btn-screen-stop" class="btn-secondary" type="button">Stop</button>
+                <button id="btn-screen-fullscreen" class="btn-secondary" type="button">Fullscreen</button>
+                <button id="btn-screen-pip" class="btn-secondary" type="button">PiP</button>
+                <button id="btn-screen-shot" class="btn-secondary" type="button">Screenshot</button>
+              </div>
+            </div>
+            <div class="screen-controls surface">
+              <label>Quality
+                <select id="screen-quality" class="input">
+                  <option value="auto">Auto</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>FPS
+                <select id="screen-fps" class="input">
+                  <option value="15">15</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="screen-audio" /> Audio</label>
+              <span id="screen-status" class="status-badge">Idle</span>
+              <span id="screen-stats" class="muted">Latency — · FPS — · Bandwidth —</span>
+            </div>
+            <div class="screen-stage surface">
+              <video id="screen-video" playsinline autoplay muted></video>
+              <canvas id="screen-shot-canvas" hidden></canvas>
+            </div>
+            <div id="screen-shot-preview" class="surface muted" hidden></div>
+          </div>
+
+          <div id="phone-tab-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone.</p>
+              <div class="page-actions">
+                <button id="btn-rec-start" class="btn-primary" type="button">Record Screen</button>
+                <button id="btn-rec-pause" class="btn-secondary" type="button">Pause</button>
+                <button id="btn-rec-resume" class="btn-secondary" type="button">Resume</button>
+                <button id="btn-rec-stop" class="btn-secondary" type="button">Stop</button>
+                <button id="btn-rec-refresh" class="btn-secondary" type="button">Refresh</button>
+              </div>
+            </div>
+            <div class="screen-controls surface">
+              <label>Quality
+                <select id="rec-quality" class="input">
+                  <option value="480p">480p</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>FPS
+                <select id="rec-fps" class="input">
+                  <option value="15">15</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="rec-mic" /> Screen + Mic</label>
+              <span id="rec-status" class="status-badge">Idle</span>
+            </div>
+            <div id="rec-transfer" class="surface muted" hidden>Upload progress will appear here.</div>
+            <div id="recordings-list" class="rec-list muted">Select a device and refresh.</div>
+          </div>
+
+          <div id="phone-tab-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Installed apps from PackageManager. Enable sharing on the phone Permissions card and allow this browser.</p>
+              <div class="page-actions">
+                <button id="btn-apps-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-apps-refresh" class="btn-primary" type="button">Refresh</button>
+                <button id="btn-apps-export" class="btn-secondary" type="button">Export list</button>
+              </div>
+            </div>
+            <div class="screen-controls surface">
+              <input id="apps-search" class="input" type="search" placeholder="Search name or package…" />
+              <label>Filter
+                <select id="apps-filter" class="input">
+                  <option value="all">All</option>
+                  <option value="user">User</option>
+                  <option value="system">System</option>
+                  <option value="games">Games</option>
+                  <option value="social">Social</option>
+                  <option value="finance">Finance</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="productivity">Productivity</option>
+                  <option value="tools">Tools</option>
+                  <option value="installed_today">Installed today</option>
+                  <option value="updated_today">Updated today</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </div>
+            <div id="apps-list" class="apps-list muted">Select a device.</div>
+            <div id="app-detail" class="surface app-detail" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-settings" data-panel="settings" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Settings</h1>
+              <p class="page-sub">Device and browser preferences. Sensitive modules stay off until enabled on the phone.</p>
+            </div>
+          </header>
+          <div class="surface">
+            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, and Installed Apps (default off).</p>
+            <p class="muted">Camera, location, gallery, files, notifications, and messages keep their existing settings.</p>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-help" data-panel="help" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Help</h1>
+              <p class="page-sub">Quick tips for remote modules.</p>
+            </div>
+          </header>
+          <div class="surface">
+            <ol>
+              <li>Pair this browser once from the phone.</li>
+              <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
+              <li>Screen mirror and recording always show Android’s official capture prompt.</li>
+              <li>Installed Apps never uninstalls or installs silently.</li>
+            </ol>
           </div>
         </section>
 

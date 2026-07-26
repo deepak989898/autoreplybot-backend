@@ -66,6 +66,11 @@ export default async function handler(req, res) {
   if (path === "notifications/sync") return handleNotificationsSync(req, res);
   if (path === "messages") return handleMessagesList(req, res);
   if (path === "messages/sync") return handleMessagesSync(req, res);
+  if (path === "apps") return handleAppsList(req, res);
+  if (path === "apps/sync") return handleAppsSync(req, res);
+  if (path === "apps/detail") return handleAppDetail(req, res);
+  if (path === "recordings") return handleRecordingsList(req, res);
+  if (path === "recordings/command") return handleRecordingsCommand(req, res);
   if (path === "files") return handleFilesList(req, res);
   if (path === "files/command") return handleFilesCommand(req, res);
   if (path === "transfers") return handleTransfersList(req, res);
@@ -111,6 +116,9 @@ function sanitizeDevice(id, data) {
     galleryAccessEnabled: Boolean(data.galleryAccessEnabled),
     notificationMirrorEnabled: Boolean(data.notificationMirrorEnabled),
     messagesSharingEnabled: Boolean(data.messagesSharingEnabled),
+    screenMirrorEnabled: Boolean(data.screenMirrorEnabled),
+    screenRecordEnabled: Boolean(data.screenRecordEnabled),
+    installedAppsSharingEnabled: Boolean(data.installedAppsSharingEnabled),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
     storageUsedBytes: Number(data.storageUsedBytes || 0),
     storageTotalBytes: Number(data.storageTotalBytes || 0),
@@ -137,6 +145,7 @@ function sanitizeSession(id, data) {
     terminationReason: String(data.terminationReason || data.endReason || ""),
     androidStartupState: String(data.androidStartupState || ""),
     autoApproved: Boolean(data.autoApproved),
+    sessionKind: String(data.sessionKind || "camera"),
   };
 }
 
@@ -156,6 +165,8 @@ function normalizeCapabilities(caps) {
     if (c === "camera" || c === "video" || c === "cam") out.push("camera");
     else if (c === "microphone" || c === "mic" || c === "audio" || c === "voice") {
       out.push("microphone");
+    } else if (c === "screenmirror" || c === "screen_mirror" || c === "screen") {
+      out.push("screenMirror");
     }
   }
   return [...new Set(out)];
@@ -319,7 +330,7 @@ async function handleSessionRequest(req, res) {
     }
     if (capabilities.length === 0) {
       return res.status(400).json({
-        error: "Select camera and/or microphone",
+        error: "Select camera, microphone, and/or screen mirror",
         code: "BAD_CAPABILITIES",
       });
     }
@@ -447,6 +458,14 @@ async function handleSessionRequest(req, res) {
 
     const wantCamera = capabilities.includes("camera");
     const wantMic = capabilities.includes("microphone");
+    const wantScreen = capabilities.includes("screenMirror");
+    if (!wantCamera && !wantMic && !wantScreen) {
+      return res.status(400).json({
+        error: "Select camera, microphone, and/or screen mirror",
+        code: "BAD_CAPABILITIES",
+      });
+    }
+    const sessionKind = wantScreen && !wantCamera ? "screen" : "camera";
     if (wantCamera && device.cameraAvailable === false) {
       return res.status(400).json({
         error: "Camera permission must be restored in Android settings.",
@@ -462,10 +481,14 @@ async function handleSessionRequest(req, res) {
       });
     }
 
+    // Screen mirror always needs an explicit MediaProjection consent UI on the phone.
     const autoApprove =
-      Boolean(client.autoApproveSessions) && signatureValid && !Boolean(client.revoked);
+      Boolean(client.autoApproveSessions) &&
+      signatureValid &&
+      !Boolean(client.revoked) &&
+      !wantScreen;
 
-    await endActiveSessionsForDevice(uid, deviceId, "replaced_by_new_request");
+    await endActiveSessionsForDevice(uid, deviceId, "replaced_by_new_request", sessionKind);
 
     const requestId = randomBytes(16).toString("hex");
     const now = Date.now();
@@ -491,6 +514,7 @@ async function handleSessionRequest(req, res) {
         autoApproved: true,
         androidStartupState: androidState,
         requestId,
+        sessionKind,
       };
       const requestDoc = {
         requestId,
@@ -507,6 +531,7 @@ async function handleSessionRequest(req, res) {
         sessionId,
         autoApproved: true,
         androidStartupState: androidState,
+        sessionKind,
       };
 
       await db()
@@ -598,6 +623,7 @@ async function handleSessionRequest(req, res) {
       preferredQuality: quality,
       sessionId: "",
       autoApproved: false,
+      sessionKind,
     };
     await db()
       .collection(R.COL_USERS)
@@ -1273,6 +1299,261 @@ async function handleMessagesSync(req, res) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return clientError(res, e, "MESSAGES_SYNC_FAILED");
+  }
+}
+
+async function handleAppsList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const q = String(req.query?.q || "").trim().toLowerCase();
+    const filter = String(req.query?.filter || "all").trim().toLowerCase();
+    const limit = Math.min(500, Math.max(1, Number(req.query?.limit || 300)));
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_INSTALLED_APPS)
+      .orderBy("appName", "asc")
+      .limit(limit)
+      .get();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const dayStart = startOfDay.getTime();
+    let items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        appId: d.id,
+        packageName: String(data.packageName || ""),
+        appName: String(data.appName || ""),
+        versionName: String(data.versionName || ""),
+        versionCode: Number(data.versionCode || 0),
+        firstInstallTime: Number(data.firstInstallTime || 0),
+        lastUpdateTime: Number(data.lastUpdateTime || 0),
+        isSystem: Boolean(data.isSystem),
+        enabled: data.enabled !== false,
+        targetSdk: Number(data.targetSdk || 0),
+        minSdk: Number(data.minSdk || 0),
+        category: String(data.category || "other"),
+        permissionCount: Number(data.permissionCount || 0),
+        installSource: String(data.installSource || ""),
+        supportedAbis: Array.isArray(data.supportedAbis) ? data.supportedAbis : [],
+        favorite: Boolean(data.favorite),
+        syncedAt: Number(data.syncedAt || 0),
+      };
+    });
+    if (q) {
+      items = items.filter(
+        (a) =>
+          a.appName.toLowerCase().includes(q) || a.packageName.toLowerCase().includes(q)
+      );
+    }
+    if (filter === "system") items = items.filter((a) => a.isSystem);
+    else if (filter === "user") items = items.filter((a) => !a.isSystem);
+    else if (filter === "disabled") items = items.filter((a) => !a.enabled);
+    else if (filter === "games" || filter === "social" || filter === "finance"
+      || filter === "shopping" || filter === "productivity" || filter === "tools") {
+      items = items.filter((a) => a.category === filter);
+    } else if (filter === "installed_today") {
+      items = items.filter((a) => a.firstInstallTime >= dayStart);
+    } else if (filter === "updated_today") {
+      items = items.filter((a) => a.lastUpdateTime >= dayStart);
+    }
+    return res.status(200).json({ ok: true, items, count: items.length });
+  } catch (e) {
+    return clientError(res, e, "APPS_LIST_FAILED");
+  }
+}
+
+async function handleAppDetail(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    const packageName = String(req.query?.packageName || "").trim();
+    const appId = String(req.query?.appId || "").trim();
+    if (!deviceId || (!packageName && !appId)) {
+      return res.status(400).json({ error: "deviceId and packageName/appId required", code: "BAD_REQUEST" });
+    }
+    const col = db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_INSTALLED_APPS);
+    let docSnap = null;
+    if (appId && ID_RE.test(appId)) {
+      docSnap = await col.doc(appId).get();
+    }
+    if ((!docSnap || !docSnap.exists) && packageName) {
+      const q = await col.where("packageName", "==", packageName).limit(1).get();
+      docSnap = q.empty ? null : q.docs[0];
+    }
+    if (!docSnap || !docSnap.exists) {
+      return res.status(404).json({ error: "App not found", code: "NOT_FOUND" });
+    }
+    const data = docSnap.data() || {};
+    return res.status(200).json({
+      ok: true,
+      app: {
+        appId: docSnap.id,
+        ...data,
+        packageName: String(data.packageName || ""),
+        appName: String(data.appName || ""),
+      },
+    });
+  } catch (e) {
+    return clientError(res, e, "APP_DETAIL_FAILED");
+  }
+}
+
+async function handleAppsSync(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "APPS_INDEX",
+      {},
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_APPS_SYNC,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "APPS_SYNC_FAILED");
+  }
+}
+
+async function handleRecordingsList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit || 40)));
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_SCREEN_RECORDINGS)
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+    const items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        recordingId: d.id,
+        displayName: String(data.displayName || ""),
+        status: String(data.status || ""),
+        durationMs: Number(data.durationMs || 0),
+        sizeBytes: Number(data.sizeBytes || 0),
+        quality: String(data.quality || ""),
+        fps: Number(data.fps || 0),
+        withMic: Boolean(data.withMic),
+        createdAt: Number(data.createdAt || 0),
+        completedAt: Number(data.completedAt || 0),
+        transferId: String(data.transferId || ""),
+        downloadUrl: String(data.downloadUrl || ""),
+        errorMessage: String(data.errorMessage || ""),
+      };
+    });
+    return res.status(200).json({ ok: true, items });
+  } catch (e) {
+    return clientError(res, e, "RECORDINGS_LIST_FAILED");
+  }
+}
+
+async function handleRecordingsCommand(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const op = String(body.op || "").trim().toUpperCase();
+    const actionMap = {
+      START: "SCREEN_RECORD_START",
+      STOP: "SCREEN_RECORD_STOP",
+      PAUSE: "SCREEN_RECORD_PAUSE",
+      RESUME: "SCREEN_RECORD_RESUME",
+    };
+    const action = actionMap[op];
+    if (!action) {
+      return res.status(400).json({ error: "op must be START|STOP|PAUSE|RESUME", code: "BAD_OP" });
+    }
+    let transfer = null;
+    const payload = {
+      quality: String(body.quality || "720p").slice(0, 16),
+      fps: Math.min(60, Math.max(15, Number(body.fps || 30))),
+      withMic: Boolean(body.withMic),
+      autoUpload: body.autoUpload !== false,
+      recordingId: String(body.recordingId || "").slice(0, 64),
+    };
+    if (op === "START") {
+      transfer = await createTransfer(uid, {
+        deviceId,
+        clientId,
+        operation: "screen_record_upload",
+        sourceType: "screen_recording",
+        sourceReference: "pending",
+        mimeType: "video/mp4",
+        displayName: `screen-${Date.now()}.mp4`,
+        sizeBytes: 0,
+      });
+      payload.transferId = transfer.transferId;
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      action,
+      payload,
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_SCREEN_RECORD,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId, op },
+    });
+    return res.status(200).json({ ok: true, command: cmd, transfer });
+  } catch (e) {
+    return clientError(res, e, "RECORDINGS_COMMAND_FAILED");
   }
 }
 

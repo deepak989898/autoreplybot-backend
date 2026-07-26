@@ -184,6 +184,9 @@ function setPhoneTab(tabId) {
   if (activePhoneTab === "notifications") refreshNotificationsPanel().catch(() => {});
   if (activePhoneTab === "messages") refreshMessagesPanel().catch(() => {});
   if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
+  if (activePhoneTab === "screen") updateScreenStatusUi();
+  if (activePhoneTab === "recording") refreshRecordingsPanel().catch(() => {});
+  if (activePhoneTab === "apps") refreshAppsPanel().catch(() => {});
 }
 
 function onWorkspaceDeviceChanged() {
@@ -271,8 +274,13 @@ let firebaseUid = null;
 let publicIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
 /** @type {Map<string, LiveSession>} */
 const liveByDevice = new Map();
+/** Independent screen-mirror sessions (do not share camera liveByDevice). */
+/** @type {Map<string, LiveSession>} */
+const screenLiveByDevice = new Map();
 /** @type {Map<string, object>} */
 let deviceById = new Map();
+/** @type {ReturnType<typeof setInterval> | null} */
+let screenStatsTimer = null;
 
 /**
  * @typedef {object} LiveSession
@@ -1854,7 +1862,9 @@ async function main() {
   document.querySelectorAll(".nav-item, .nav-jump").forEach((btn) => {
     btn.addEventListener("click", () => {
       const panel = btn.dataset.panel;
+      const phoneTab = btn.dataset.phoneTab;
       if (panel) showPanel(panel);
+      if (phoneTab) setPhoneTab(phoneTab);
     });
   });
 
@@ -2611,3 +2621,532 @@ document.getElementById("btn-files-list")?.addEventListener("click", async () =>
 });
 document.getElementById("btn-transfers-refresh")?.addEventListener("click", () => refreshTransfersPanel());
 document.getElementById("btn-multiview-refresh")?.addEventListener("click", () => refreshMultiViewPanel());
+
+/* —— Screen Mirror / Recording / Installed Apps —— */
+
+function setScreenStatus(label) {
+  const el = document.getElementById("screen-status");
+  if (el) el.textContent = label;
+}
+
+function updateScreenStatusUi() {
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!deviceId) {
+    setScreenStatus("Idle");
+    return;
+  }
+  const live = screenLiveByDevice.get(deviceId);
+  if (!live) setScreenStatus("Idle");
+  else if (!live.sessionId) setScreenStatus("Waiting for Permission");
+  else if (live.pc?.connectionState === "connected") setScreenStatus("Mirroring");
+  else setScreenStatus("Preparing");
+}
+
+async function startScreenMirror() {
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!deviceId) throw new Error("Select a device");
+  const clientId = requireClientId();
+  if (screenLiveByDevice.has(deviceId)) {
+    throw new Error("Screen mirror already active for this device");
+  }
+  setScreenStatus("Preparing");
+  await ensureBrowserIdentity();
+  const withAudio = Boolean(document.getElementById("screen-audio")?.checked);
+  const capabilities = withAudio ? ["screenMirror", "microphone"] : ["screenMirror"];
+  const quality = document.getElementById("screen-quality")?.value || "720p";
+  const fps = Number(document.getElementById("screen-fps")?.value || 30);
+  const timestamp = Date.now();
+  const nonce = randomNonce();
+  const signature = await signMessage(
+    canonicalSessionRequest({ clientId, deviceId, timestamp, nonce, capabilities })
+  );
+  const created = await api("/api/device/session/request", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId,
+      clientId,
+      capabilities,
+      quality,
+      fps,
+      timestamp,
+      nonce,
+      signature,
+    }),
+  });
+  const requestId = created.requestId;
+  if (!requestId) throw new Error("No requestId");
+  /** @type {LiveSession} */
+  const live = {
+    deviceId,
+    requestId,
+    sessionId: created.sessionId || undefined,
+    pc: null,
+    unsubRequest: null,
+    unsubSignals: null,
+    unsubSession: null,
+    expiryTimer: null,
+    seenSignals: new Set(),
+    remoteDescriptionSet: false,
+    pendingIce: [],
+    root: null,
+    connectionLabel: "waiting",
+  };
+  screenLiveByDevice.set(deviceId, live);
+  setScreenStatus("Waiting for Permission");
+  const reqRef = doc(db, "users", firebaseUid, "sessionRequests", requestId);
+  live.unsubRequest = onSnapshot(reqRef, async (snap) => {
+    if (!snap.exists()) return;
+    const data = snap.data() || {};
+    const status = String(data.status || "");
+    if (status === "rejected" || status === "expired" || status === "cancelled") {
+      setScreenStatus(status === "rejected" ? "Permission Revoked" : "Disconnected");
+      cleanupScreenLive(deviceId, false);
+      return;
+    }
+    if (status === "approved") {
+      const sessionId = String(data.sessionId || "").trim();
+      if (!sessionId || (live.sessionId === sessionId && live.pc)) return;
+      live.sessionId = sessionId;
+      setScreenStatus("Preparing");
+      try {
+        await beginScreenWebRtc(live);
+      } catch (e) {
+        setScreenStatus("Disconnected");
+        alert(e instanceof Error ? e.message : String(e));
+        cleanupScreenLive(deviceId, true);
+      }
+    }
+  });
+}
+
+/**
+ * @param {LiveSession} live
+ */
+async function beginScreenWebRtc(live) {
+  const { deviceId, sessionId } = live;
+  if (!sessionId || !firebaseUid || !db) throw new Error("Missing session");
+  if (live.unsubRequest) {
+    live.unsubRequest();
+    live.unsubRequest = null;
+  }
+  const iceServers = await loadIceServers();
+  const pc = new RTCPeerConnection({ iceServers });
+  live.pc = pc;
+  const videoEl = document.getElementById("screen-video");
+  pc.ontrack = (ev) => {
+    if (!videoEl || !ev.track) return;
+    let stream = videoEl.srcObject;
+    if (!(stream instanceof MediaStream)) {
+      stream = new MediaStream();
+      videoEl.srcObject = stream;
+    }
+    stream.addTrack(ev.track);
+    videoEl.play().catch(() => {});
+    setScreenStatus("Mirroring");
+    startScreenStats(pc);
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "failed") setScreenStatus("Disconnected");
+    if (pc.connectionState === "connected") setScreenStatus("Mirroring");
+  };
+  pc.onicecandidate = async (ev) => {
+    if (!ev.candidate || !live.sessionId) return;
+    try {
+      await writeSignal(live.sessionId, "ice", "client", {
+        candidate: ev.candidate.candidate,
+        sdpMid: ev.candidate.sdpMid,
+        sdpMLineIndex: ev.candidate.sdpMLineIndex,
+      });
+    } catch (e) {
+      console.warn("screen ICE write failed", e);
+    }
+  };
+  const sessionRef = doc(db, "users", firebaseUid, "sessions", sessionId);
+  live.unsubSession = onSnapshot(sessionRef, (snap) => {
+    if (!snap.exists()) return;
+    const status = String(snap.data()?.status || "");
+    if (status === "ended" || status === "failed") {
+      setScreenStatus("Disconnected");
+      cleanupScreenLive(deviceId, false);
+    }
+  });
+  const signalsRef = collection(db, "users", firebaseUid, "sessions", sessionId, "signals");
+  const signalsQuery = query(signalsRef, orderBy("createdAt", "asc"));
+  live.unsubSignals = onSnapshot(signalsQuery, async (snap) => {
+    for (const change of snap.docChanges()) {
+      if (change.type === "removed") continue;
+      const data = change.doc.data() || {};
+      const signalId = String(data.signalId || change.doc.id);
+      if (live.seenSignals.has(signalId)) continue;
+      if (String(data.sender || "") !== "device") continue;
+      live.seenSignals.add(signalId);
+      try {
+        await applyDeviceSignal(live, data);
+      } catch (e) {
+        live.seenSignals.delete(signalId);
+        console.warn("screen signal", e);
+      }
+    }
+  });
+}
+
+function cleanupScreenLive(deviceId, endOnServer) {
+  const live = screenLiveByDevice.get(deviceId);
+  if (!live) return;
+  if (live.expiryTimer) clearTimeout(live.expiryTimer);
+  if (live.unsubRequest) live.unsubRequest();
+  if (live.unsubSignals) live.unsubSignals();
+  if (live.unsubSession) live.unsubSession();
+  if (live.pc) {
+    try {
+      live.pc.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  const videoEl = document.getElementById("screen-video");
+  if (videoEl) videoEl.srcObject = null;
+  if (screenStatsTimer) {
+    clearInterval(screenStatsTimer);
+    screenStatsTimer = null;
+  }
+  const sessionId = live.sessionId;
+  screenLiveByDevice.delete(deviceId);
+  if (endOnServer && sessionId) {
+    api("/api/device/session/end", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, reason: "screen_client_stop" }),
+    }).catch(() => {});
+  }
+  updateScreenStatusUi();
+}
+
+function startScreenStats(pc) {
+  if (screenStatsTimer) clearInterval(screenStatsTimer);
+  const statsEl = document.getElementById("screen-stats");
+  screenStatsTimer = setInterval(async () => {
+    if (!statsEl || !pc) return;
+    try {
+      const report = await pc.getStats();
+      let fps = "—";
+      let bitrate = "—";
+      report.forEach((r) => {
+        if (r.type === "inbound-rtp" && r.kind === "video") {
+          if (r.framesPerSecond != null) fps = String(Math.round(r.framesPerSecond));
+          if (r.bytesReceived != null && r.timestamp) {
+            bitrate = `${Math.round((r.bytesReceived * 8) / 1000)} kb total`;
+          }
+        }
+      });
+      statsEl.textContent = `Latency — · FPS ${fps} · Bandwidth ${bitrate}`;
+    } catch {
+      /* ignore */
+    }
+  }, 2000);
+}
+
+async function refreshRecordingsPanel() {
+  const list = document.getElementById("recordings-list");
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "Select a device.";
+    list.classList.add("muted");
+    return;
+  }
+  try {
+    const data = await api(`/api/device/recordings?deviceId=${encodeURIComponent(deviceId)}`);
+    const items = data.items || [];
+    if (!items.length) {
+      list.textContent = "No recordings yet.";
+      list.classList.add("muted");
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = items
+      .map((it) => {
+        const when = it.createdAt ? new Date(it.createdAt).toLocaleString() : "—";
+        const dur = it.durationMs ? `${Math.round(it.durationMs / 1000)}s` : "—";
+        const size = it.sizeBytes ? `${(it.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : "—";
+        return `<div class="rec-row surface">
+          <div><strong>${escapeHtml(it.displayName || it.recordingId)}</strong>
+          <span class="status-badge">${escapeHtml(it.status || "")}</span></div>
+          <div class="muted">${when} · ${dur} · ${size} · ${escapeHtml(it.quality || "")}</div>
+          <div class="page-actions">
+            ${it.transferId ? `<button type="button" class="btn-secondary btn-rec-dl" data-transfer="${escapeHtml(it.transferId)}">Download</button>` : ""}
+          </div>
+        </div>`;
+      })
+      .join("");
+    list.querySelectorAll(".btn-rec-dl").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const transferId = btn.getAttribute("data-transfer");
+        if (!transferId) return;
+        try {
+          const t = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+          const row = (t.items || []).find((x) => x.transferId === transferId);
+          if (row?.downloadUrl) window.open(row.downloadUrl, "_blank");
+          else alert("Download not ready yet — check Transfers.");
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        }
+      });
+    });
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+    list.classList.add("muted");
+  }
+}
+
+async function refreshAppsPanel() {
+  const list = document.getElementById("apps-list");
+  const detail = document.getElementById("app-detail");
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!list) return;
+  if (detail) detail.hidden = true;
+  if (!deviceId) {
+    list.textContent = "Select a device.";
+    list.classList.add("muted");
+    return;
+  }
+  const q = document.getElementById("apps-search")?.value || "";
+  const filter = document.getElementById("apps-filter")?.value || "all";
+  try {
+    const url =
+      `/api/device/apps?deviceId=${encodeURIComponent(deviceId)}` +
+      `&q=${encodeURIComponent(q)}&filter=${encodeURIComponent(filter)}`;
+    const data = await api(url);
+    const items = data.items || [];
+    if (!items.length) {
+      list.textContent = "No apps indexed yet. Tap Sync from phone.";
+      list.classList.add("muted");
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = items
+      .map(
+        (a) => `<button type="button" class="app-row surface" data-package="${escapeHtml(a.packageName)}">
+          <strong>${escapeHtml(a.appName || a.packageName)}</strong>
+          <span class="muted">${escapeHtml(a.packageName)}</span>
+          <span class="muted">v${escapeHtml(a.versionName || "?")} · ${a.isSystem ? "System" : "User"} · ${escapeHtml(a.category || "")}</span>
+        </button>`
+      )
+      .join("");
+    list.querySelectorAll(".app-row").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pkg = btn.getAttribute("data-package");
+        if (pkg) openAppDetail(deviceId, pkg);
+      });
+    });
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+    list.classList.add("muted");
+  }
+}
+
+async function openAppDetail(deviceId, packageName) {
+  const detail = document.getElementById("app-detail");
+  if (!detail) return;
+  detail.hidden = false;
+  detail.textContent = "Loading…";
+  try {
+    const data = await api(
+      `/api/device/apps/detail?deviceId=${encodeURIComponent(deviceId)}&packageName=${encodeURIComponent(packageName)}`
+    );
+    const a = data.app || {};
+    const perms = Array.isArray(a.permissions) ? a.permissions.slice(0, 40) : [];
+    detail.innerHTML = `
+      <h2>${escapeHtml(a.appName || packageName)}</h2>
+      <p><code>${escapeHtml(a.packageName || packageName)}</code></p>
+      <p>Version ${escapeHtml(a.versionName || "?")} (${a.versionCode || 0})</p>
+      <p>Installed ${a.firstInstallTime ? new Date(a.firstInstallTime).toLocaleString() : "—"}</p>
+      <p>Updated ${a.lastUpdateTime ? new Date(a.lastUpdateTime).toLocaleString() : "—"}</p>
+      <p>Target SDK ${a.targetSdk || "—"} · Min SDK ${a.minSdk || "—"}</p>
+      <p>Install source: ${escapeHtml(a.installSource || "—")}</p>
+      <p>ABI: ${(a.supportedAbis || []).map(escapeHtml).join(", ") || "—"}</p>
+      <p>Permissions (${a.permissionCount || perms.length}):</p>
+      <ul>${perms.map((p) => `<li><code>${escapeHtml(p)}</code></li>`).join("")}</ul>
+      <div class="page-actions">
+        <button type="button" class="btn-secondary" id="btn-copy-pkg">Copy package</button>
+      </div>`;
+    detail.querySelector("#btn-copy-pkg")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(String(a.packageName || packageName));
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch (e) {
+    detail.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+document.getElementById("btn-screen-start")?.addEventListener("click", async () => {
+  try {
+    await startScreenMirror();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
+      alert(
+        "Screen mirroring not allowed for this browser.\n\n" +
+          "Phone → Trusted Browsers → Permissions → allow Screen Mirroring.\n\n" +
+          msg
+      );
+    } else alert(msg);
+    setScreenStatus("Idle");
+  }
+});
+document.getElementById("btn-screen-stop")?.addEventListener("click", () => {
+  if (selectedWorkspaceDeviceId) cleanupScreenLive(selectedWorkspaceDeviceId, true);
+  setScreenStatus("Idle");
+});
+document.getElementById("btn-screen-fullscreen")?.addEventListener("click", () => {
+  const v = document.getElementById("screen-video");
+  if (v?.requestFullscreen) v.requestFullscreen().catch(() => {});
+});
+document.getElementById("btn-screen-pip")?.addEventListener("click", () => {
+  const v = document.getElementById("screen-video");
+  if (v && document.pictureInPictureEnabled) {
+    v.requestPictureInPicture().catch(() => {});
+  }
+});
+document.getElementById("btn-screen-shot")?.addEventListener("click", () => {
+  const v = document.getElementById("screen-video");
+  const canvas = document.getElementById("screen-shot-canvas");
+  const preview = document.getElementById("screen-shot-preview");
+  if (!v || !canvas || !v.videoWidth) {
+    alert("No live frame yet");
+    return;
+  }
+  canvas.width = v.videoWidth;
+  canvas.height = v.videoHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(v, 0, 0);
+  const url = canvas.toDataURL("image/jpeg", 0.92);
+  if (preview) {
+    preview.hidden = false;
+    preview.innerHTML = `<img src="${url}" alt="Screenshot" style="max-width:100%;border-radius:12px" />
+      <a class="btn-secondary" href="${url}" download="screen-${Date.now()}.jpg">Download</a>`;
+  }
+});
+
+document.getElementById("btn-rec-start")?.addEventListener("click", async () => {
+  try {
+    const deviceId = selectedWorkspaceDeviceId;
+    const clientId = requireClientId();
+    const quality = document.getElementById("rec-quality")?.value || "720p";
+    const fps = Number(document.getElementById("rec-fps")?.value || 30);
+    const withMic = Boolean(document.getElementById("rec-mic")?.checked);
+    const status = document.getElementById("rec-status");
+    if (status) status.textContent = "Waiting for Permission";
+    await api("/api/device/recordings/command", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, op: "START", quality, fps, withMic }),
+    });
+    if (status) status.textContent = "Recording";
+    const transferBox = document.getElementById("rec-transfer");
+    if (transferBox) {
+      transferBox.hidden = false;
+      transferBox.textContent = "Recording started on phone. Upload appears in Transfers when stopped.";
+    }
+    setTimeout(() => refreshRecordingsPanel(), 4000);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/screenRecord|CAPABILITY_DENIED/i.test(msg)) {
+      alert("Enable Screen Recording for this browser on the phone Trusted Browsers list.\n\n" + msg);
+    } else alert(msg);
+  }
+});
+document.getElementById("btn-rec-pause")?.addEventListener("click", async () => {
+  try {
+    await api("/api/device/recordings/command", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId: selectedWorkspaceDeviceId,
+        clientId: requireClientId(),
+        op: "PAUSE",
+      }),
+    });
+    const status = document.getElementById("rec-status");
+    if (status) status.textContent = "Paused";
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-rec-resume")?.addEventListener("click", async () => {
+  try {
+    await api("/api/device/recordings/command", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId: selectedWorkspaceDeviceId,
+        clientId: requireClientId(),
+        op: "RESUME",
+      }),
+    });
+    const status = document.getElementById("rec-status");
+    if (status) status.textContent = "Recording";
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
+  try {
+    await api("/api/device/recordings/command", {
+      method: "POST",
+      body: JSON.stringify({
+        deviceId: selectedWorkspaceDeviceId,
+        clientId: requireClientId(),
+        op: "STOP",
+      }),
+    });
+    const status = document.getElementById("rec-status");
+    if (status) status.textContent = "Uploading";
+    setTimeout(() => refreshRecordingsPanel(), 5000);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("btn-rec-refresh")?.addEventListener("click", () => refreshRecordingsPanel());
+
+document.getElementById("btn-apps-refresh")?.addEventListener("click", () => refreshAppsPanel());
+document.getElementById("btn-apps-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId = selectedWorkspaceDeviceId;
+    const clientId = requireClientId();
+    await api("/api/device/apps/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshAppsPanel(), 4000);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/installedAppsList|CAPABILITY_DENIED|APPS_DISABLED/i.test(msg)) {
+      alert(
+        "Installed apps not allowed yet.\n\n" +
+          "1) Phone → Permissions → Installed apps sharing ON\n" +
+          "2) Trusted Browsers → allow Installed Apps\n\n" +
+          msg
+      );
+    } else alert(msg);
+  }
+});
+document.getElementById("btn-apps-export")?.addEventListener("click", async () => {
+  try {
+    const deviceId = selectedWorkspaceDeviceId;
+    const data = await api(`/api/device/apps?deviceId=${encodeURIComponent(deviceId)}&limit=500`);
+    const blob = new Blob([JSON.stringify(data.items || [], null, 2)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `apps-${deviceId}.json`;
+    a.click();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
+document.getElementById("apps-search")?.addEventListener("input", () => {
+  clearTimeout(window.__appsSearchT);
+  window.__appsSearchT = setTimeout(() => refreshAppsPanel(), 300);
+});
+document.getElementById("apps-filter")?.addEventListener("change", () => refreshAppsPanel());
