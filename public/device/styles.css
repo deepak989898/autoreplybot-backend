@@ -265,28 +265,42 @@ button, input, select, textarea {
 }
 
 .nav-item {
+  --nav-accent: #5b5ce2;
+  --nav-accent-soft: #eef0ff;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   text-align: left;
   background: transparent;
   border: 0;
-  border-radius: 10px;
-  padding: 11px 12px;
+  border-radius: 12px;
+  padding: 10px 10px;
   color: var(--text);
   cursor: pointer;
   font-size: 0.92rem;
   font-weight: 500;
   text-decoration: none;
   position: relative;
+  transition: background 0.15s ease, transform 0.12s ease;
 }
 
-.nav-item:hover { background: #f5f6fb; text-decoration: none; }
+.nav-item[data-panel="phone"] { --nav-accent: #2563eb; --nav-accent-soft: #dbeafe; }
+.nav-item[data-panel="pair"] { --nav-accent: #0891b2; --nav-accent-soft: #cffafe; }
+.nav-item[data-panel="security"] { --nav-accent: #16a34a; --nav-accent-soft: #dcfce7; }
+.nav-item[data-panel="multiview"] { --nav-accent: #7c3aed; --nav-accent-soft: #ede9fe; }
+.nav-item[data-panel="transfers"] { --nav-accent: #ea580c; --nav-accent-soft: #ffedd5; }
+.nav-item[data-panel="social"] { --nav-accent: #db2777; --nav-accent-soft: #fce7f3; }
+.nav-item[data-panel="settings"] { --nav-accent: #64748b; --nav-accent-soft: #e2e8f0; }
+
+.nav-item:hover {
+  background: var(--nav-accent-soft);
+  text-decoration: none;
+}
 
 .nav-item.active {
-  background: var(--brand-soft);
-  color: var(--brand);
+  background: var(--nav-accent-soft);
+  color: var(--nav-accent);
   font-weight: 700;
 }
 
@@ -298,14 +312,31 @@ button, input, select, textarea {
   bottom: 8px;
   width: 3px;
   border-radius: 99px;
-  background: var(--brand);
+  background: var(--nav-accent);
 }
 
 .nav-ico {
-  width: 1.25rem;
-  text-align: center;
-  opacity: 0.85;
-  font-size: 0.9rem;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--nav-accent);
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(28, 31, 46, 0.12);
+}
+
+.nav-ico svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.nav-label {
+  flex: 1;
+  line-height: 1.25;
 }
 
 .sidebar-foot {
@@ -370,19 +401,59 @@ button, input, select, textarea {
 
 .page-head h1 {
   margin: 0 0 6px;
-  font-size: 1.65rem;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+  background: linear-gradient(120deg, #2563eb 0%, #7c3aed 45%, #db2777 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-.page-sub {
+.page-head h2,
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 1.2rem;
+  color: #1e293b;
+}
+
+.page-sub,
+.tab-intro {
   margin: 0;
-  color: var(--muted);
-  max-width: 40rem;
+  color: #475569;
+  max-width: 42rem;
+  line-height: 1.45;
+}
+
+.page-sub strong {
+  color: #7c3aed;
 }
 
 .page-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.page-actions .btn-primary {
+  background: linear-gradient(135deg, #5b5ce2, #7c3aed);
+  box-shadow: 0 4px 14px rgba(91, 92, 226, 0.28);
+}
+
+.page-actions .btn-secondary {
+  background: #fff;
+  border: 1px solid transparent;
+  background-image:
+    linear-gradient(#fff, #fff),
+    linear-gradient(135deg, #93c5fd, #c4b5fd);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  color: #3730a3;
+}
+
+.page-actions .btn-secondary:hover {
+  background-image:
+    linear-gradient(#eef2ff, #eef2ff),
+    linear-gradient(135deg, #60a5fa, #a78bfa);
 }
 
 .surface {
@@ -926,6 +997,26 @@ button, input, select, textarea {
   align-items: center;
   margin-bottom: 12px;
   padding: 12px 14px;
+  border: 1px solid #e9e5ff;
+  background: linear-gradient(180deg, #faf9ff, #fff);
+}
+
+.screen-controls .btn-primary,
+.rec-actions .btn-primary {
+  background: linear-gradient(135deg, #7c3aed, #5b5ce2);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.28);
+}
+
+.screen-controls .btn-secondary,
+.rec-actions .btn-secondary {
+  background: #fff;
+  border: 1px solid #ddd6fe;
+  color: #5b21b6;
+}
+
+.screen-controls .btn-secondary:hover,
+.rec-actions .btn-secondary:hover {
+  background: #f5f3ff;
 }
 
 .screen-controls label {
@@ -962,9 +1053,10 @@ button, input, select, textarea {
   align-items: center;
   padding: 4px 10px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #2b6cff22, #00c2a822);
+  background: #dbeafe;
+  color: #1d4ed8;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .apps-list,
@@ -1074,13 +1166,21 @@ button, input, select, textarea {
 
 .device-picker-bar {
   margin-bottom: 14px;
-  padding: 14px 16px;
+  padding: 16px 18px;
+  border: 1px solid #ddd6fe;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f8f7ff 100%);
+  box-shadow: 0 8px 22px rgba(91, 92, 226, 0.06);
 }
 
 .device-picker-label {
   display: block;
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 8px;
+  color: #5b5ce2;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .device-picker-row {
@@ -1093,58 +1193,125 @@ button, input, select, textarea {
 .device-picker-select {
   flex: 1 1 240px;
   min-width: 200px;
+  border-color: #c7d2fe;
 }
 
 .device-picker-hint {
   margin: 8px 0 0;
+  color: #64748b;
+}
+
+#btn-add-device.btn-primary,
+#btn-refresh.btn-secondary {
+  border-radius: 11px;
+}
+
+#btn-add-device.btn-primary {
+  background: linear-gradient(135deg, #5b5ce2, #9333ea);
+  box-shadow: 0 4px 14px rgba(91, 92, 226, 0.3);
+}
+
+#btn-refresh.btn-secondary {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #4338ca;
 }
 
 .add-device-help {
   margin-bottom: 14px;
+  border: 1px solid #bbf7d0;
+  background: linear-gradient(180deg, #f0fdf4, #fff);
+}
+
+.add-device-help h2 {
+  color: #15803d;
 }
 
 .add-device-steps {
   margin: 8px 0 14px 1.2rem;
   line-height: 1.55;
+  color: #334155;
 }
 
 .phone-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 4px 0 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  margin: 4px 0 16px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #e9e5ff;
+  background: linear-gradient(180deg, #faf9ff 0%, #ffffff 100%);
 }
 
 .phone-tab {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: inherit;
+  --tab-accent: #6c5ce7;
+  --tab-soft: #ede9fe;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
   border-radius: 999px;
-  padding: 8px 14px;
+  padding: 8px 14px 8px 10px;
   cursor: pointer;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.phone-tab .tab-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tab-accent);
+  box-shadow: 0 0 0 3px var(--tab-soft);
+  flex-shrink: 0;
+}
+
+.phone-tab[data-phone-tab="camera"] { --tab-accent: #2563eb; --tab-soft: #dbeafe; }
+.phone-tab[data-phone-tab="location"] { --tab-accent: #059669; --tab-soft: #d1fae5; }
+.phone-tab[data-phone-tab="info"] { --tab-accent: #0ea5e9; --tab-soft: #e0f2fe; }
+.phone-tab[data-phone-tab="gallery"] { --tab-accent: #d97706; --tab-soft: #fef3c7; }
+.phone-tab[data-phone-tab="notifications"] { --tab-accent: #ea580c; --tab-soft: #ffedd5; }
+.phone-tab[data-phone-tab="messages"] { --tab-accent: #0891b2; --tab-soft: #cffafe; }
+.phone-tab[data-phone-tab="files"] { --tab-accent: #4f46e5; --tab-soft: #e0e7ff; }
+.phone-tab[data-phone-tab="screen"] { --tab-accent: #7c3aed; --tab-soft: #ede9fe; }
+.phone-tab[data-phone-tab="recording"] { --tab-accent: #dc2626; --tab-soft: #fee2e2; }
+.phone-tab[data-phone-tab="apps"] { --tab-accent: #db2777; --tab-soft: #fce7f3; }
+
 .phone-tab:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tab-soft);
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .phone-tab.active {
-  background: var(--accent, #6c5ce7);
+  background: var(--tab-accent);
   border-color: transparent;
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.16);
+}
+
+.phone-tab.active .tab-dot {
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.28);
 }
 
 .phone-tab-panel {
   min-height: 120px;
 }
 
-.tab-intro {
+.phone-tab-panel > .page-sub,
+.phone-tab-panel > .tab-intro {
   margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border-left: 3px solid #8b5cf6;
 }
 
 .tab-toolbar {
@@ -1154,6 +1321,10 @@ button, input, select, textarea {
   gap: 10px;
   align-items: flex-start;
   margin-bottom: 12px;
+}
+
+.tab-toolbar .page-sub {
+  padding: 8px 0;
 }
 
 .device-info-view {
