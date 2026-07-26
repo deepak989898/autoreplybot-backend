@@ -178,7 +178,7 @@ function setPhoneTab(tabId) {
     // ensure device card visible for selection
     if (cachedDevices.length) renderDevices(cachedDevices, cachedClients);
   }
-  if (activePhoneTab === "location") refreshLocationPanel().catch(() => {});
+  if (activePhoneTab === "location") openLocationTab().catch(() => {});
   if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
   if (activePhoneTab === "gallery") refreshGalleryPanel().catch(() => {});
   if (activePhoneTab === "notifications") refreshNotificationsPanel().catch(() => {});
@@ -212,6 +212,7 @@ function ensureSocialFrame() {
 }
 
 function setLoggedInUi(user) {
+  setAuthBusy(false);
   if (viewLogin) {
     viewLogin.hidden = true;
     viewLogin.setAttribute("hidden", "");
@@ -233,6 +234,7 @@ function setLoggedInUi(user) {
 }
 
 function setLoggedOutUi() {
+  setAuthBusy(false);
   if (viewApp) {
     viewApp.hidden = true;
     viewApp.setAttribute("hidden", "");
@@ -1947,6 +1949,33 @@ function authFormCredentials() {
   return { email, password };
 }
 
+function setAuthBusy(busy, label) {
+  const buttons = [btnLoginEmail, btnLogin, btnRegisterEmail].filter(Boolean);
+  for (const btn of buttons) {
+    btn.disabled = Boolean(busy);
+    btn.classList.remove("is-loading");
+  }
+  if (btnLoginEmail) {
+    if (busy) {
+      if (!btnLoginEmail.dataset.label) {
+        btnLoginEmail.dataset.label = "Sign In";
+      }
+      btnLoginEmail.textContent = label || "Signing in...";
+      btnLoginEmail.classList.add("is-loading");
+    } else {
+      btnLoginEmail.classList.remove("is-loading");
+      btnLoginEmail.textContent = btnLoginEmail.dataset.label || "Sign In";
+    }
+  }
+  if (btnLogin && !busy) {
+    btnLogin.classList.remove("is-loading");
+    if (btnLogin.dataset.label) btnLogin.textContent = btnLogin.dataset.label;
+  }
+  if (busy && authStatus) {
+    authStatus.textContent = label || "Signing in...";
+  }
+}
+
 async function main() {
   const cfg = await loadConfig();
   if (!cfg.firebase?.apiKey) {
@@ -1961,36 +1990,65 @@ async function main() {
   db = getFirestore(app);
   const provider = new GoogleAuthProvider();
 
+  async function runEmailSignIn() {
+    try {
+      const { email, password } = authFormCredentials();
+      setAuthBusy(true, "Signing in...");
+      await signInWithEmailAndPassword(auth, email, password);
+      // Keep loading until setLoggedInUi runs from onAuthStateChanged.
+    } catch (e) {
+      setAuthBusy(false);
+      authStatus.textContent = friendlyAuthError(e);
+    }
+  }
+
   if (btnLoginEmail) {
     btnLoginEmail.addEventListener("click", () => {
-      Promise.resolve()
-        .then(() => authFormCredentials())
-        .then(({ email, password }) => signInWithEmailAndPassword(auth, email, password))
-        .catch((e) => {
-          authStatus.textContent = friendlyAuthError(e);
-        });
+      runEmailSignIn();
     });
   }
+  authPassword?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      runEmailSignIn();
+    }
+  });
   if (btnRegisterEmail) {
-    btnRegisterEmail.addEventListener("click", () => {
-      Promise.resolve()
-        .then(() => authFormCredentials())
-        .then(({ email, password }) => {
-          if (password.length < 6) {
-            throw new Error("Password must be at least 6 characters");
-          }
-          return createUserWithEmailAndPassword(auth, email, password);
-        })
-        .catch((e) => {
-          authStatus.textContent = friendlyAuthError(e);
-        });
+    btnRegisterEmail.addEventListener("click", async () => {
+      try {
+        const { email, password } = authFormCredentials();
+        if (password.length < 6) {
+          throw new Error("Password must be at least 6 characters");
+        }
+        setAuthBusy(true, "Creating account...");
+        await createUserWithEmailAndPassword(auth, email, password);
+      } catch (e) {
+        setAuthBusy(false);
+        authStatus.textContent = friendlyAuthError(e);
+      }
     });
   }
-  btnLogin.addEventListener("click", () =>
-    signInWithPopup(auth, provider).catch((e) => {
+  btnLogin.addEventListener("click", async () => {
+    setAuthBusy(true, "Opening Google...");
+    if (btnLogin) {
+      btnLogin.dataset.label = btnLogin.dataset.label || "Sign in with Google";
+      btnLogin.textContent = "Opening Google...";
+      btnLogin.classList.add("is-loading");
+    }
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (e) {
       authStatus.textContent = friendlyAuthError(e);
-    })
-  );
+    } finally {
+      if (viewLogin && !viewLogin.hidden) {
+        setAuthBusy(false);
+        if (btnLogin) {
+          btnLogin.classList.remove("is-loading");
+          btnLogin.textContent = btnLogin.dataset.label || "Sign in with Google";
+        }
+      }
+    }
+  });
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   document.getElementById("workspace-device-select")?.addEventListener("change", () => {
@@ -2093,7 +2151,106 @@ function requireClientId() {
   return clientId;
 }
 
-async function refreshLocationPanel() {
+let galleryFilter = "all";
+let locationMapZoom = 16;
+let locationMapCoords = null;
+let locationAutoFetchInFlight = false;
+
+function googleMapsEmbedUrl(lat, lon, zoom) {
+  const z = Math.min(20, Math.max(3, Number(zoom) || 16));
+  return (
+    `https://maps.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}` +
+    `&hl=en&z=${z}&t=m&output=embed`
+  );
+}
+
+function googleMapsOpenUrl(lat, lon, zoom) {
+  const z = Math.min(20, Math.max(3, Number(zoom) || 16));
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}&z=${z}`;
+}
+
+function renderLocationCard(deviceId, device, loc) {
+  const body = document.getElementById("location-panel-body");
+  if (!body || !loc) return;
+  const lat = Number(loc.latitude);
+  const lon = Number(loc.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    body.textContent = "Invalid coordinates from phone.";
+    return;
+  }
+  locationMapCoords = { lat, lon };
+  if (!Number.isFinite(locationMapZoom)) locationMapZoom = 16;
+  const embed = googleMapsEmbedUrl(lat, lon, locationMapZoom);
+  const openUrl = googleMapsOpenUrl(lat, lon, locationMapZoom);
+  const mode = String(device.locationSharingMode || loc.sharingMode || "");
+  const updated = loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—";
+  const acc = loc.accuracyMeters != null ? `${loc.accuracyMeters} m` : "—";
+  body.classList.remove("muted");
+  body.innerHTML = `
+    <div class="location-map-card">
+      <div class="location-map-meta">
+        <div>
+          <strong>${escapeHtml(device.deviceName || deviceId)}</strong>
+          <span class="muted"> · mode ${escapeHtml(mode)}</span>
+          <p class="location-coords">Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${escapeHtml(acc)}</p>
+          <p class="muted">Updated ${escapeHtml(updated)}</p>
+        </div>
+        <div class="location-map-actions">
+          <button type="button" class="btn-secondary" id="btn-map-zoom-out" title="Zoom out">−</button>
+          <span class="location-zoom-label" id="location-zoom-label">Zoom ${locationMapZoom}</span>
+          <button type="button" class="btn-secondary" id="btn-map-zoom-in" title="Zoom in">+</button>
+          <a class="btn-secondary" href="${openUrl}" target="_blank" rel="noopener">Open in Google Maps</a>
+        </div>
+      </div>
+      <div class="location-map-frame-wrap">
+        <iframe
+          id="location-map-frame"
+          class="location-map-frame"
+          title="Google Map — current phone location"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+          src="${embed}"
+          allowfullscreen></iframe>
+      </div>
+    </div>`;
+  document.getElementById("btn-map-zoom-in")?.addEventListener("click", () => {
+    locationMapZoom = Math.min(20, locationMapZoom + 1);
+    applyLocationMapZoom();
+  });
+  document.getElementById("btn-map-zoom-out")?.addEventListener("click", () => {
+    locationMapZoom = Math.max(3, locationMapZoom - 1);
+    applyLocationMapZoom();
+  });
+}
+
+function applyLocationMapZoom() {
+  if (!locationMapCoords) return;
+  const frame = document.getElementById("location-map-frame");
+  const label = document.getElementById("location-zoom-label");
+  if (label) label.textContent = `Zoom ${locationMapZoom}`;
+  if (frame) {
+    frame.src = googleMapsEmbedUrl(
+      locationMapCoords.lat,
+      locationMapCoords.lon,
+      locationMapZoom
+    );
+  }
+}
+
+async function requestCurrentLocationSilent(deviceId) {
+  const clientId = requireClientId();
+  await api("/api/device/location/request", {
+    method: "POST",
+    body: JSON.stringify({ deviceId, clientId }),
+  });
+}
+
+async function openLocationTab() {
+  await refreshLocationPanel({ autoRequest: true });
+}
+
+async function refreshLocationPanel(opts = {}) {
+  const autoRequest = Boolean(opts.autoRequest);
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillWorkspaceDeviceSelect();
   syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
@@ -2104,34 +2261,93 @@ async function refreshLocationPanel() {
     body.textContent = "No devices registered.";
     return;
   }
-  body.textContent = "Loading location…";
+  if (!body.querySelector(".location-map-card")) {
+    body.classList.add("muted");
+    body.textContent = "Loading location…";
+  }
   try {
-    const data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
-    const loc = data.location;
+    let data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
+    let loc = data.location;
     const device = data.device || {};
     if (!device.locationSharingEnabled) {
-      body.innerHTML = `<p class="error">Location sharing is disabled on the phone.</p>`;
+      body.innerHTML =
+        `<p class="error">Location sharing is disabled on the phone. Turn it on under Device Management → Location Sharing.</p>`;
       return;
     }
+
+    if (loc && Number.isFinite(Number(loc.latitude))) {
+      renderLocationCard(deviceId, device, loc);
+    }
+
+    if (autoRequest && !locationAutoFetchInFlight) {
+      locationAutoFetchInFlight = true;
+      try {
+        await requestCurrentLocationSilent(deviceId);
+        for (let i = 0; i < 5; i++) {
+          await new Promise((r) => setTimeout(r, 1200));
+          data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
+          loc = data.location;
+          if (loc && Number.isFinite(Number(loc.latitude))) {
+            renderLocationCard(deviceId, data.device || device, loc);
+          }
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!loc) {
+          if (/locationCurrent|CAPABILITY_DENIED|lacks capability/i.test(msg)) {
+            body.innerHTML =
+              `<p class="error">Allow location for this browser on the phone: Trusted Browsers → Permissions → current &amp; live location.</p>`;
+          } else {
+            body.innerHTML = `<p class="error">${escapeHtml(msg)}</p>`;
+          }
+          return;
+        }
+      } finally {
+        locationAutoFetchInFlight = false;
+      }
+    }
+
     if (!loc) {
-      body.textContent = "No location yet. Request current location.";
+      body.innerHTML =
+        `<p class="muted">Waiting for GPS fix... Tap <strong>Update location</strong> if the map does not appear.</p>`;
       return;
     }
-    const maps = `https://www.openstreetmap.org/?mlat=${loc.latitude}&mlon=${loc.longitude}#map=16/${loc.latitude}/${loc.longitude}`;
-    body.innerHTML = `
-      <p><strong>${escapeHtml(device.deviceName || deviceId)}</strong> · mode ${escapeHtml(String(device.locationSharingMode || loc.sharingMode || ""))}</p>
-      <p>Lat ${loc.latitude} · Lon ${loc.longitude} · accuracy ${loc.accuracyMeters ?? "—"} m</p>
-      <p>Updated ${loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—"}</p>
-      <p><a href="${maps}" target="_blank" rel="noopener">Open in OpenStreetMap</a></p>`;
+    renderLocationCard(deviceId, data.device || device, loc);
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
   }
+}
+
+function formatEpochDateTime(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return "Not available";
+  const epoch = n < 1e12 ? n * 1000 : n;
+  const d = new Date(epoch);
+  if (Number.isNaN(d.getTime())) return "Not available";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+}
+
+function isEpochTimestampKey(key) {
+  const k = String(key || "");
+  return /^(lastSyncAt|syncedAt|collectedAt|capturedAt|updatedAt|createdAt|timestamp)$/i.test(k)
+    || /(At|Time|Timestamp)$/.test(k);
 }
 
 function formatInfoValue(key, value) {
   if (value == null || value === "") return "Not available";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") {
+    if (isEpochTimestampKey(key) && value > 1e11) {
+      return formatEpochDateTime(value);
+    }
     if (/bytes|bytes$/i.test(key) || /Bytes$/.test(key) || key.toLowerCase().includes("bytes")) {
       return formatBytes(value);
     }
@@ -2146,6 +2362,9 @@ function formatInfoValue(key, value) {
   if (s === "granted") return "Granted";
   if (s === "denied") return "Denied";
   if (s === "unknown") return "Unknown";
+  if (isEpochTimestampKey(key) && /^\d{12,}$/.test(s)) {
+    return formatEpochDateTime(s);
+  }
   return s;
 }
 
@@ -2300,12 +2519,32 @@ async function refreshGalleryPanel() {
     list.textContent = "No devices.";
     return;
   }
-  list.textContent = "Loading gallery index…";
+  document.querySelectorAll(".gallery-filter").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-gallery-filter") === galleryFilter);
+  });
+  list.classList.add("muted");
+  list.textContent = "Loading gallery index...";
   try {
-    const data = await api(`/api/device/gallery?deviceId=${encodeURIComponent(deviceId)}&limit=60`);
+    const typeQ =
+      galleryFilter && galleryFilter !== "all"
+        ? `&type=${encodeURIComponent(galleryFilter)}`
+        : "";
+    const data = await api(
+      `/api/device/gallery?deviceId=${encodeURIComponent(deviceId)}&limit=80${typeQ}`
+    );
     const items = data.items || [];
     if (!items.length) {
-      list.textContent = "No gallery items indexed. Enable Gallery Access on the phone, then Request index.";
+      const label =
+        galleryFilter === "image"
+          ? "images"
+          : galleryFilter === "audio"
+            ? "audio"
+            : galleryFilter === "video"
+              ? "videos"
+              : galleryFilter === "file"
+                ? "other files"
+                : "items";
+      list.textContent = `No ${label} indexed. Enable Gallery Access on the phone, then Request index.`;
       list.classList.add("muted");
       return;
     }
@@ -2349,10 +2588,78 @@ function formatNotifDate(ms) {
   const n = Number(ms || 0);
   if (!n) return "—";
   try {
-    return new Date(n).toLocaleString();
+    return new Date(n).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
   } catch {
     return String(n);
   }
+}
+
+function notifDayKey(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "unknown";
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function notifDayLabel(dayKey) {
+  if (!dayKey || dayKey === "unknown") return "Unknown date";
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startToday - startThat) / 86400000);
+  const pretty = date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  if (diffDays === 0) return `Today · ${pretty}`;
+  if (diffDays === 1) return `Yesterday · ${pretty}`;
+  if (diffDays > 1) return `Previous · ${pretty}`;
+  return pretty;
+}
+
+function groupItemsByDay(items, getTimestamp) {
+  const groups = new Map();
+  const tsOf = typeof getTimestamp === "function"
+    ? getTimestamp
+    : (it) => it?.[getTimestamp || "postedAt"];
+  for (const it of items || []) {
+    const key = notifDayKey(tsOf(it));
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  return [...groups.entries()].sort((a, b) => {
+    if (a[0] === "unknown") return 1;
+    if (b[0] === "unknown") return -1;
+    return b[0].localeCompare(a[0]);
+  });
+}
+
+function renderNotifCard(it) {
+  const title = escapeHtml(it.title || "(No title)");
+  const message = escapeHtml(it.message || "");
+  const app = escapeHtml(it.appLabel || it.packageName || "App");
+  const when = escapeHtml(formatNotifDate(it.postedAt));
+  return `<article class="notif-card">
+    <div class="notif-card-head">
+      <strong class="notif-title">${title}</strong>
+      <time class="notif-time">${when}</time>
+    </div>
+    <p class="notif-message">${message || '<span class="muted">(No message text)</span>'}</p>
+    <div class="notif-meta"><span>${app}</span></div>
+  </article>`;
 }
 
 async function refreshNotificationsPanel() {
@@ -2367,7 +2674,7 @@ async function refreshNotificationsPanel() {
     list.textContent = "No devices.";
     return;
   }
-  list.textContent = "Loading notifications…";
+  list.textContent = "Loading notifications...";
   try {
     const data = await api(
       `/api/device/notifications?deviceId=${encodeURIComponent(deviceId)}&limit=80`
@@ -2385,22 +2692,46 @@ async function refreshNotificationsPanel() {
       return;
     }
     list.classList.remove("muted");
-    list.innerHTML = `<div class="notif-grid">${items
-      .map((it) => {
-        const title = escapeHtml(it.title || "(No title)");
-        const message = escapeHtml(it.message || "");
-        const app = escapeHtml(it.appLabel || it.packageName || "App");
-        const when = escapeHtml(formatNotifDate(it.postedAt));
-        return `<article class="notif-card">
-          <div class="notif-card-head">
-            <strong class="notif-title">${title}</strong>
-            <time class="notif-time" datetime="">${when}</time>
+    const groups = groupItemsByDay(items, "postedAt");
+    list.innerHTML = `<div class="notif-day-list">${groups
+      .map(([dayKey, dayItems], index) => {
+        const open = index === 0 ? " is-open" : "";
+        const hidden = index === 0 ? "" : " hidden";
+        const chevron = index === 0 ? "▲" : "▼";
+        const count = dayItems.length;
+        return `<section class="notif-day-group${open}" data-day="${escapeHtml(dayKey)}">
+          <button type="button" class="notif-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+            <span class="notif-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+            <span class="notif-day-count">${count}</span>
+            <span class="notif-day-chevron" aria-hidden="true">${chevron}</span>
+          </button>
+          <div class="notif-day-body"${hidden}>
+            <div class="notif-grid">${dayItems.map(renderNotifCard).join("")}</div>
           </div>
-          <p class="notif-message">${message || "<span class=\"muted\">(No message text)</span>"}</p>
-          <div class="notif-meta"><span>${app}</span></div>
-        </article>`;
+        </section>`;
       })
       .join("")}</div>`;
+
+    list.querySelectorAll(".notif-day-header").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const group = btn.closest(".notif-day-group");
+        const body = group?.querySelector(".notif-day-body");
+        const chevron = btn.querySelector(".notif-day-chevron");
+        if (!group || !body) return;
+        const opening = body.hasAttribute("hidden");
+        if (opening) {
+          body.removeAttribute("hidden");
+          group.classList.add("is-open");
+          btn.setAttribute("aria-expanded", "true");
+          if (chevron) chevron.textContent = "▲";
+        } else {
+          body.setAttribute("hidden", "");
+          group.classList.remove("is-open");
+          btn.setAttribute("aria-expanded", "false");
+          if (chevron) chevron.textContent = "▼";
+        }
+      });
+    });
   } catch (e) {
     list.textContent = e instanceof Error ? e.message : String(e);
   }
@@ -2418,7 +2749,7 @@ async function refreshMessagesPanel() {
     list.textContent = "No devices.";
     return;
   }
-  list.textContent = "Loading messages…";
+  list.textContent = "Loading messages...";
   try {
     const data = await api(
       `/api/device/messages?deviceId=${encodeURIComponent(deviceId)}&limit=100`
@@ -2434,24 +2765,63 @@ async function refreshMessagesPanel() {
       return;
     }
     list.classList.remove("muted");
-    list.innerHTML = `<div class="msg-grid">${items
-      .map((it) => {
-        const name = escapeHtml(it.senderName || "");
-        const number = escapeHtml(it.address || "(unknown)");
-        const who = name ? `${name} · ${number}` : number;
-        const body = escapeHtml(it.body || "");
-        const when = escapeHtml(formatNotifDate(it.date));
-        const kind = escapeHtml(it.type || "inbox");
-        return `<article class="msg-card">
+    const groups = groupItemsByDay(items, "date");
+    list.innerHTML = `<div class="msg-day-list">${groups
+      .map(([dayKey, dayItems], index) => {
+        const open = index === 0 ? " is-open" : "";
+        const hidden = index === 0 ? "" : " hidden";
+        const chevron = index === 0 ? "▲" : "▼";
+        const count = dayItems.length;
+        return `<section class="msg-day-group${open}" data-day="${escapeHtml(dayKey)}">
+          <button type="button" class="msg-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+            <span class="msg-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+            <span class="msg-day-count">${count}</span>
+            <span class="msg-day-chevron" aria-hidden="true">${chevron}</span>
+          </button>
+          <div class="msg-day-body"${hidden}>
+            <div class="msg-grid">${dayItems
+              .map((it) => {
+                const name = escapeHtml(it.senderName || "");
+                const number = escapeHtml(it.address || "(unknown)");
+                const who = name ? `${name} · ${number}` : number;
+                const body = escapeHtml(it.body || "");
+                const when = escapeHtml(formatNotifDate(it.date));
+                const kind = escapeHtml(it.type || "inbox");
+                return `<article class="msg-card">
           <div class="msg-card-head">
             <strong class="msg-who">${who}</strong>
             <time class="msg-time">${when}</time>
           </div>
-          <p class="msg-body">${body || "<span class=\"muted\">(empty)</span>"}</p>
+          <p class="msg-body">${body || '<span class="muted">(empty)</span>'}</p>
           <div class="msg-meta"><span>${kind}</span></div>
         </article>`;
+              })
+              .join("")}</div>
+          </div>
+        </section>`;
       })
       .join("")}</div>`;
+
+    list.querySelectorAll(".msg-day-header").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const group = btn.closest(".msg-day-group");
+        const body = group?.querySelector(".msg-day-body");
+        const chevron = btn.querySelector(".msg-day-chevron");
+        if (!group || !body) return;
+        const opening = body.hasAttribute("hidden");
+        if (opening) {
+          body.removeAttribute("hidden");
+          group.classList.add("is-open");
+          btn.setAttribute("aria-expanded", "true");
+          if (chevron) chevron.textContent = "▲";
+        } else {
+          body.setAttribute("hidden", "");
+          group.classList.remove("is-open");
+          btn.setAttribute("aria-expanded", "false");
+          if (chevron) chevron.textContent = "▼";
+        }
+      });
+    });
   } catch (e) {
     list.textContent = e instanceof Error ? e.message : String(e);
   }
@@ -2767,16 +3137,12 @@ async function refreshMultiViewPanel() {
       .join("")}</div>`;
 }
 
-document.getElementById("btn-loc-refresh")?.addEventListener("click", () => refreshLocationPanel());
+document.getElementById("btn-loc-refresh")?.addEventListener("click", () =>
+  refreshLocationPanel({ autoRequest: false })
+);
 document.getElementById("btn-loc-current")?.addEventListener("click", async () => {
   try {
-    const deviceId = selectedWorkspaceDeviceId || document.getElementById("location-device-select")?.value;
-    const clientId = requireClientId();
-    await api("/api/device/location/request", {
-      method: "POST",
-      body: JSON.stringify({ deviceId, clientId }),
-    });
-    setTimeout(() => refreshLocationPanel(), 2500);
+    await refreshLocationPanel({ autoRequest: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (/locationCurrent|CAPABILITY_DENIED|lacks capability/i.test(msg)) {
@@ -2828,6 +3194,12 @@ document.getElementById("btn-info-refresh")?.addEventListener("click", async () 
     alert(e instanceof Error ? e.message : String(e));
   }
 });
+document.querySelectorAll(".gallery-filter").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    galleryFilter = btn.getAttribute("data-gallery-filter") || "all";
+    refreshGalleryPanel().catch(() => {});
+  });
+});
 document.getElementById("btn-gallery-refresh")?.addEventListener("click", () => refreshGalleryPanel());
 document.getElementById("btn-gallery-index")?.addEventListener("click", async () => {
   try {
@@ -2835,7 +3207,7 @@ document.getElementById("btn-gallery-index")?.addEventListener("click", async ()
     const clientId = requireClientId();
     await api("/api/device/gallery/index", {
       method: "POST",
-      body: JSON.stringify({ deviceId, clientId, mediaType: "all" }),
+      body: JSON.stringify({ deviceId, clientId, mediaType: galleryFilter === "file" ? "all" : (galleryFilter || "all") }),
     });
     setTimeout(() => refreshGalleryPanel(), 3000);
   } catch (e) {

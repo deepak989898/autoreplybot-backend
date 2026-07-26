@@ -163,10 +163,10 @@
 
           <div id="phone-tab-location" class="phone-tab-panel" data-phone-panel="location" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Phone must enable Location Sharing and allow this browser.</p>
+              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on; this browser needs location permission in Trusted Browsers.</p>
               <div class="page-actions">
-                <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh</button>
-                <button id="btn-loc-current" class="btn-primary" type="button">Request current</button>
+                <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh map</button>
+                <button id="btn-loc-current" class="btn-primary" type="button">Update location</button>
                 <button id="btn-loc-live" class="btn-secondary" type="button">Live 15m</button>
                 <button id="btn-loc-stop" class="btn-secondary" type="button">Stop</button>
               </div>
@@ -193,6 +193,13 @@
                 <button id="btn-gallery-index" class="btn-secondary" type="button">Request index</button>
                 <button id="btn-gallery-refresh" class="btn-primary" type="button">Refresh</button>
               </div>
+            </div>
+            <div class="gallery-filters" role="group" aria-label="Gallery filters">
+              <button type="button" class="gallery-filter active" data-gallery-filter="all">All</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="image">Images</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="audio">Audio</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="video">Video</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="file">Files</button>
             </div>
             <select id="gallery-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="gallery-list" class="media-gallery muted">Select a device.</div>

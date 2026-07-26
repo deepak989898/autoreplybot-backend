@@ -1073,6 +1073,16 @@ async function handleGalleryList(req, res) {
     items = items.filter((it) => it.deleted !== true);
     if (type === "image" || type === "video" || type === "audio") {
       items = items.filter((it) => String(it.type || "") === type);
+    } else if (type === "file" || type === "files" || type === "other" || type === "document") {
+      items = items.filter((it) => {
+        const t = String(it.type || "").toLowerCase();
+        const mime = String(it.mimeType || "").toLowerCase();
+        if (t === "image" || t === "video" || t === "audio") return false;
+        if (mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/")) {
+          return false;
+        }
+        return true;
+      });
     }
     items = items.slice(0, limit);
     return res.status(200).json({ ok: true, items });

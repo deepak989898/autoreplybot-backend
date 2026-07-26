@@ -200,6 +200,37 @@ button, input, select, textarea {
 }
 
 .login-card .btn-primary { margin-bottom: 10px; }
+
+.login-card .btn-primary.is-loading,
+.login-card .btn-google.is-loading {
+  position: relative;
+  opacity: 0.92;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.login-card .btn-primary.is-loading::before,
+.login-card .btn-google.is-loading::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.55em;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  vertical-align: -0.15em;
+  animation: login-spin 0.7s linear infinite;
+}
+
+.login-card .btn-google.is-loading::before {
+  border: 2px solid rgba(28, 31, 46, 0.2);
+  border-top-color: var(--brand);
+}
+
+@keyframes login-spin {
+  to { transform: rotate(360deg); }
+}
 .login-register {
   margin: 16px 0 8px;
   text-align: center;
@@ -882,6 +913,43 @@ button, input, select, textarea {
   max-width: 520px;
 }
 
+.gallery-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.gallery-filter {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.gallery-filter[data-gallery-filter="all"] { --gf: #64748b; --gf-soft: #f1f5f9; }
+.gallery-filter[data-gallery-filter="image"] { --gf: #d97706; --gf-soft: #fef3c7; }
+.gallery-filter[data-gallery-filter="audio"] { --gf: #0891b2; --gf-soft: #cffafe; }
+.gallery-filter[data-gallery-filter="video"] { --gf: #dc2626; --gf-soft: #fee2e2; }
+.gallery-filter[data-gallery-filter="file"] { --gf: #4f46e5; --gf-soft: #e0e7ff; }
+
+.gallery-filter:hover {
+  background: var(--gf-soft, #f8fafc);
+  border-color: transparent;
+}
+
+.gallery-filter.active {
+  background: var(--gf, #64748b);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.14);
+}
+
 .media-gallery {
   min-height: 120px;
 }
@@ -1327,8 +1395,122 @@ button, input, select, textarea {
   padding: 8px 0;
 }
 
+.location-map-card {
+  display: grid;
+  gap: 12px;
+}
+
+.location-map-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.location-coords {
+  margin: 6px 0 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.location-map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.location-map-actions .btn-secondary {
+  min-width: 40px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.location-zoom-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1565c0;
+  min-width: 4.5rem;
+  text-align: center;
+}
+
+.location-map-frame-wrap {
+  position: relative;
+  width: 100%;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #bbdefb;
+  background: #e3f2fd;
+  box-shadow: 0 8px 24px rgba(21, 101, 192, 0.12);
+  min-height: 360px;
+}
+
+.location-map-frame {
+  display: block;
+  width: 100%;
+  height: min(62vh, 480px);
+  min-height: 360px;
+  border: 0;
+}
+
 .device-info-view {
   padding: 16px 18px;
+}
+
+.notif-day-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notif-day-group {
+  border: 1px solid #ffedd5;
+  border-radius: 14px;
+  background: #fff7ed;
+  overflow: hidden;
+}
+
+.notif-day-group.is-open {
+  background: #fff;
+  border-color: #fdba74;
+  box-shadow: 0 6px 18px rgba(234, 88, 12, 0.08);
+}
+
+.notif-day-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: linear-gradient(135deg, #ea580c, #f59e0b);
+  color: #fff;
+  padding: 12px 14px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.notif-day-title {
+  flex: 1;
+  font-weight: 700;
+}
+
+.notif-day-count {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.notif-day-chevron {
+  font-size: 0.85rem;
+  opacity: 0.95;
+}
+
+.notif-day-body {
+  padding: 12px;
 }
 
 .notif-list {
@@ -1377,6 +1559,61 @@ button, input, select, textarea {
 .notif-meta {
   font-size: 0.82rem;
   color: var(--muted, #9aa3b5);
+}
+
+.msg-day-list {
+  display: grid;
+  gap: 10px;
+}
+
+.msg-day-group {
+  border: 1px solid #a5f3fc;
+  border-radius: 14px;
+  background: #ecfeff;
+  overflow: hidden;
+}
+
+.msg-day-group.is-open {
+  background: #fff;
+  border-color: #22d3ee;
+  box-shadow: 0 6px 18px rgba(8, 145, 178, 0.1);
+}
+
+.msg-day-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: linear-gradient(135deg, #0891b2, #06b6d4);
+  color: #fff;
+  padding: 12px 14px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.msg-day-title {
+  flex: 1;
+  font-weight: 700;
+}
+
+.msg-day-count {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.msg-day-chevron {
+  font-size: 0.85rem;
+}
+
+.msg-day-body {
+  padding: 12px;
 }
 
 .msg-list {
