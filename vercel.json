@@ -11,6 +11,22 @@
       "schedule": "0 9 * * *"
     }
   ],
+  "headers": [
+    {
+      "source": "/device/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
+      ]
+    },
+    {
+      "source": "/device/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/device/" }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/pair/:action",

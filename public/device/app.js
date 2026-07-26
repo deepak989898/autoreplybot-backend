@@ -85,6 +85,47 @@ let activePhoneTab = "camera";
 /** @type {ReturnType<typeof setInterval> | null} */
 let messagesLiveTimer = null;
 
+const PANEL_TITLES = {
+  phone: "My Phone",
+  pair: "Pair Browser",
+  security: "Trusted Browsers",
+  multiview: "Multi Device View",
+  social: "Facebook & Instagram",
+  settings: "Settings",
+  sessions: "Sessions",
+  media: "Media",
+};
+
+function setNavDrawerOpen(open) {
+  const shell = document.getElementById("view-app");
+  const backdrop = document.getElementById("nav-backdrop");
+  const hamburger = document.getElementById("btn-nav-open");
+  if (!shell) return;
+  shell.classList.toggle("nav-open", Boolean(open));
+  if (backdrop) backdrop.hidden = !open;
+  if (hamburger) hamburger.setAttribute("aria-expanded", open ? "true" : "false");
+  document.body.style.overflow = open ? "hidden" : "";
+}
+
+function closeNavDrawer() {
+  setNavDrawerOpen(false);
+}
+
+function wireNavDrawer() {
+  const openBtn = document.getElementById("btn-nav-open");
+  const closeBtn = document.getElementById("btn-nav-close");
+  const backdrop = document.getElementById("nav-backdrop");
+  openBtn?.addEventListener("click", () => setNavDrawerOpen(true));
+  closeBtn?.addEventListener("click", () => closeNavDrawer());
+  backdrop?.addEventListener("click", () => closeNavDrawer());
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeNavDrawer();
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 980) closeNavDrawer();
+  });
+}
+
 function showPanel(panelId) {
   let id = String(panelId || "phone");
   if (id === "home" || id === "devices" || id === "location" || id === "info"
@@ -98,6 +139,9 @@ function showPanel(panelId) {
   document.querySelectorAll(".nav-item[data-panel]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.panel === id);
   });
+  const titleEl = document.getElementById("mobile-topbar-panel");
+  if (titleEl) titleEl.textContent = PANEL_TITLES[id] || "Menu";
+  closeNavDrawer();
   const hasLive = [...liveByDevice.values()].some((l) => l.pc);
   if (id === "phone") {
     refreshDashboard().catch(() => {});
@@ -240,6 +284,7 @@ function setLoggedInUi(user) {
 
 function setLoggedOutUi() {
   setAuthBusy(false);
+  closeNavDrawer();
   if (viewApp) {
     viewApp.hidden = true;
     viewApp.setAttribute("hidden", "");
@@ -2176,6 +2221,8 @@ async function main() {
     });
   }
 
+  wireNavDrawer();
+
   document.querySelectorAll(".nav-item, .nav-jump").forEach((btn) => {
     btn.addEventListener("click", () => {
       const panel = btn.dataset.panel;
@@ -2221,6 +2268,97 @@ async function main() {
 main().catch((e) => {
   authStatus.textContent = e instanceof Error ? e.message : String(e);
 });
+
+/* ——— PWA install + service worker ——— */
+let deferredInstallPrompt = null;
+
+function isIosDevice() {
+  const ua = navigator.userAgent || "";
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function isStandaloneDisplay() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    /** @type {Navigator & { standalone?: boolean }} */ (navigator).standalone === true
+  );
+}
+
+function updatePwaInstallUi() {
+  const loginBtn = document.getElementById("btn-install-pwa");
+  const appBtn = document.getElementById("btn-install-pwa-app");
+  const iosHint = document.getElementById("pwa-ios-hint");
+  const standalone = isStandaloneDisplay();
+
+  if (standalone) {
+    if (loginBtn) loginBtn.hidden = true;
+    if (appBtn) appBtn.hidden = true;
+    if (iosHint) iosHint.hidden = true;
+    return;
+  }
+
+  if (deferredInstallPrompt) {
+    if (loginBtn) loginBtn.hidden = false;
+    if (appBtn) appBtn.hidden = false;
+    if (iosHint) iosHint.hidden = true;
+    return;
+  }
+
+  // iOS has no beforeinstallprompt — show Add to Home Screen tip on login.
+  if (isIosDevice()) {
+    if (loginBtn) loginBtn.hidden = true;
+    if (appBtn) appBtn.hidden = true;
+    if (iosHint) iosHint.hidden = false;
+    return;
+  }
+
+  if (loginBtn) loginBtn.hidden = true;
+  if (appBtn) appBtn.hidden = true;
+  if (iosHint) iosHint.hidden = true;
+}
+
+async function promptPwaInstall() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  try {
+    await deferredInstallPrompt.userChoice;
+  } finally {
+    deferredInstallPrompt = null;
+    updatePwaInstallUi();
+  }
+}
+
+function setupPwa() {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    updatePwaInstallUi();
+  });
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    updatePwaInstallUi();
+  });
+
+  document.getElementById("btn-install-pwa")?.addEventListener("click", () => {
+    promptPwaInstall();
+  });
+  document.getElementById("btn-install-pwa-app")?.addEventListener("click", () => {
+    promptPwaInstall();
+  });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .register("/device/sw.js", { scope: "/device/" })
+      .catch((err) => console.warn("Service worker registration failed", err));
+  }
+
+  updatePwaInstallUi();
+}
+
+setupPwa();
 
 function fillDeviceSelect(selectEl) {
   if (!selectEl) return;
