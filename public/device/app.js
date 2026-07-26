@@ -215,24 +215,14 @@ function fillWorkspaceDeviceSelect() {
 
 function setPhoneTab(tabId) {
   activePhoneTab = String(tabId || "camera");
-  let activeTabBtn = null;
   document.querySelectorAll(".phone-tab").forEach((btn) => {
     const on = btn.dataset.phoneTab === activePhoneTab;
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-selected", on ? "true" : "false");
-    if (on) activeTabBtn = btn;
   });
   document.querySelectorAll(".phone-tab-panel").forEach((panel) => {
     panel.hidden = panel.dataset.phonePanel !== activePhoneTab;
   });
-  // Keep the selected feature tab visible in the horizontal scroller on phones.
-  if (activeTabBtn && window.matchMedia("(max-width: 980px)").matches) {
-    try {
-      activeTabBtn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-    } catch {
-      /* older browsers */
-    }
-  }
   if (activePhoneTab === "camera") {
     // ensure device card visible for selection
     if (cachedDevices.length) renderDevices(cachedDevices, cachedClients);
