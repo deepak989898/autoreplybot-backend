@@ -69,6 +69,8 @@ export default async function handler(req, res) {
   if (path === "apps") return handleAppsList(req, res);
   if (path === "apps/sync") return handleAppsSync(req, res);
   if (path === "apps/detail") return handleAppDetail(req, res);
+  if (path === "apps/blocks") return handleAppsBlocks(req, res);
+  if (path === "apps/control") return handleAppsControl(req, res);
   if (path === "recordings") return handleRecordingsList(req, res);
   if (path === "recordings/command") return handleRecordingsCommand(req, res);
   if (path === "files") return handleFilesList(req, res);
@@ -119,6 +121,7 @@ function sanitizeDevice(id, data) {
     screenMirrorEnabled: Boolean(data.screenMirrorEnabled),
     screenRecordEnabled: Boolean(data.screenRecordEnabled),
     installedAppsSharingEnabled: Boolean(data.installedAppsSharingEnabled),
+    appControlEnabled: Boolean(data.appControlEnabled),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
     storageUsedBytes: Number(data.storageUsedBytes || 0),
     storageTotalBytes: Number(data.storageTotalBytes || 0),
@@ -1450,6 +1453,151 @@ async function handleAppsSync(req, res) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return clientError(res, e, "APPS_SYNC_FAILED");
+  }
+}
+
+async function handleAppsBlocks(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_APP_BLOCKS)
+      .limit(200)
+      .get();
+    const now = Date.now();
+    const items = snap.docs
+      .map((d) => {
+        const data = d.data() || {};
+        const expiresAt = Number(data.expiresAt || 0);
+        const status = String(data.status || "");
+        const active =
+          status === "active" && (expiresAt <= 0 || expiresAt > now);
+        return {
+          blockId: d.id,
+          packageName: String(data.packageName || ""),
+          appName: String(data.appName || ""),
+          mode: String(data.mode || "app"),
+          status: active ? "active" : status === "active" ? "expired" : status || "cleared",
+          durationMs: Number(data.durationMs || 0),
+          expiresAt,
+          createdAt: Number(data.createdAt || 0),
+          updatedAt: Number(data.updatedAt || 0),
+          accessibilityReady: Boolean(data.accessibilityReady),
+          deviceAdminReady: Boolean(data.deviceAdminReady),
+          note: String(data.note || ""),
+        };
+      })
+      .filter((b) => b.packageName)
+      .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    return res.status(200).json({
+      ok: true,
+      items,
+      activeCount: items.filter((b) => b.status === "active").length,
+    });
+  } catch (e) {
+    return clientError(res, e, "APP_BLOCKS_LIST_FAILED");
+  }
+}
+
+async function handleAppsControl(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const op = String(body.op || "").trim().toUpperCase();
+    const packageName = String(body.packageName || "").trim();
+    const appName = String(body.appName || "").trim();
+    const mode = String(body.mode || "app").trim().toLowerCase();
+    let durationMinutes = Number(body.durationMinutes);
+    if (!Number.isFinite(durationMinutes)) durationMinutes = 30;
+    // 0 = until manually unblocked; max 7 days
+    if (durationMinutes < 0) durationMinutes = 0;
+    if (durationMinutes > 7 * 24 * 60) durationMinutes = 7 * 24 * 60;
+    const durationMs = durationMinutes > 0 ? Math.round(durationMinutes * 60 * 1000) : 0;
+
+    if (!deviceId || !clientId) {
+      return res.status(400).json({ error: "deviceId and clientId required", code: "BAD_REQUEST" });
+    }
+    if (!["BLOCK", "UNBLOCK", "SYNC", "CAMERA_LOCK", "CAMERA_UNLOCK"].includes(op)) {
+      return res.status(400).json({
+        error: "op must be BLOCK, UNBLOCK, SYNC, CAMERA_LOCK, or CAMERA_UNLOCK",
+        code: "BAD_REQUEST",
+      });
+    }
+
+    let action = "APP_BLOCKS_SYNC";
+    /** @type {Record<string, unknown>} */
+    let payload = {};
+    if (op === "SYNC") {
+      action = "APP_BLOCKS_SYNC";
+      payload = {};
+    } else if (op === "CAMERA_LOCK") {
+      action = "APP_BLOCK";
+      payload = {
+        packageName: "__camera_hardware__",
+        appName: "Camera hardware",
+        mode: "camera_hw",
+        durationMs,
+      };
+    } else if (op === "CAMERA_UNLOCK") {
+      action = "APP_UNBLOCK";
+      payload = {
+        packageName: "__camera_hardware__",
+        mode: "camera_hw",
+      };
+    } else if (op === "BLOCK") {
+      if (!packageName) {
+        return res.status(400).json({ error: "packageName required", code: "BAD_REQUEST" });
+      }
+      action = "APP_BLOCK";
+      payload = {
+        packageName,
+        appName: appName || packageName,
+        mode: mode === "camera_hw" ? "camera_hw" : "app",
+        durationMs,
+      };
+    } else {
+      if (!packageName) {
+        return res.status(400).json({ error: "packageName required", code: "BAD_REQUEST" });
+      }
+      action = "APP_UNBLOCK";
+      payload = { packageName, mode: mode === "camera_hw" ? "camera_hw" : "app" };
+    }
+
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      action,
+      payload,
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_APP_CONTROL,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId, op, packageName: payload.packageName || "" },
+    });
+    return res.status(200).json({ ok: true, command: cmd, durationMs });
+  } catch (e) {
+    return clientError(res, e, "APP_CONTROL_FAILED");
   }
 }
 

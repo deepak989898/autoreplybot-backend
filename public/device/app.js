@@ -2463,6 +2463,70 @@ function isAudioEntry(entry) {
   return mime.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac|wma)$/i.test(name);
 }
 
+/** @type {{ grantId: string, relativePath: string }} */
+let filesBrowse = { grantId: "", relativePath: "" };
+
+function normalizeFilesPath(path) {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .trim();
+}
+
+function parentFilesPath(relativePath) {
+  const p = normalizeFilesPath(relativePath);
+  const i = p.lastIndexOf("/");
+  return i < 0 ? "" : p.slice(0, i);
+}
+
+function entryParentPath(entry) {
+  if (entry && Object.prototype.hasOwnProperty.call(entry, "parentRelativePath")) {
+    return normalizeFilesPath(entry.parentRelativePath);
+  }
+  return parentFilesPath(entry?.relativePath || entry?.name || "");
+}
+
+function updateFilesBreadcrumb() {
+  const el = document.getElementById("files-breadcrumb");
+  const up = document.getElementById("btn-files-up");
+  const path = normalizeFilesPath(filesBrowse.relativePath);
+  if (el) {
+    el.textContent = path ? `Path: Root / ${path.replace(/\//g, " / ")}` : "Path: Root";
+  }
+  if (up) up.hidden = !path;
+}
+
+/**
+ * Ask phone to list a folder, then refresh the panel.
+ * @param {string} deviceId
+ * @param {string} grantId
+ * @param {string} relativePath
+ */
+async function listFilesFolder(deviceId, grantId, relativePath = "") {
+  const clientId = requireClientId();
+  const path = normalizeFilesPath(relativePath);
+  filesBrowse = { grantId, relativePath: path };
+  updateFilesBreadcrumb();
+  await api("/api/device/files/command", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId,
+      clientId,
+      action: "FILE_LIST",
+      folderGrantId: grantId,
+      relativePath: path,
+      payload: { folderGrantId: grantId, relativePath: path },
+    }),
+  });
+  // Wait for phone to write index, then show.
+  for (let i = 0; i < 8; i++) {
+    await new Promise((r) => setTimeout(r, 700));
+    await refreshFilesPanel();
+    const body = document.getElementById("files-panel-body");
+    if (body && !/Loading|Empty — tap List/i.test(body.textContent || "")) break;
+  }
+}
+
 async function requestFileDownload(deviceId, entry, { play } = { play: false }) {
   const clientId = requireClientId();
   const res = await api("/api/device/files/command", {
@@ -2528,43 +2592,110 @@ async function refreshFilesPanel() {
     body.textContent = "No devices.";
     return;
   }
+  updateFilesBreadcrumb();
   body.textContent = "Loading…";
   try {
     const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
     const folders = data.folders || [];
-    const entries = data.entries || [];
+    const allEntries = (data.entries || []).filter(
+      (e) => e && (e.name || e.relativePath) && e.count == null
+    );
+    if (!filesBrowse.grantId && folders[0]?.grantId) {
+      filesBrowse.grantId = String(folders[0].grantId);
+    }
+    const grantId = filesBrowse.grantId || String(folders[0]?.grantId || "");
+    const curPath = normalizeFilesPath(filesBrowse.relativePath);
+    const entries = allEntries
+      .filter((e) => {
+        if (grantId && e.folderGrantId && String(e.folderGrantId) !== grantId) return false;
+        return entryParentPath(e) === curPath;
+      })
+      .sort((a, b) => {
+        const ad = a.isDirectory ? 0 : 1;
+        const bd = b.isDirectory ? 0 : 1;
+        if (ad !== bd) return ad - bd;
+        return String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+          sensitivity: "base",
+        });
+      });
+
     body.innerHTML = `
       <h3>Authorized folders</h3>
-      <ul>${folders.length ? folders.map((f) => `<li>${escapeHtml(f.displayName || f.grantId)} · ${f.connected === false ? "disconnected" : "connected"} · <code>${escapeHtml(f.grantId || "")}</code></li>`).join("") : "<li>None — add a folder on the phone Permissions card</li>"}</ul>
-      <h3>Files</h3>
+      <ul>${
+        folders.length
+          ? folders
+              .map(
+                (f) =>
+                  `<li><button type="button" class="btn-secondary btn-grant-root" data-grant="${escapeHtml(f.grantId || "")}">${escapeHtml(f.displayName || f.grantId)}</button> · ${f.connected === false ? "disconnected" : "connected"}</li>`
+              )
+              .join("")
+          : "<li>None — add a folder on the phone Permissions card</li>"
+      }</ul>
+      <h3>${curPath ? `Contents of ${escapeHtml(curPath)}` : "Files (root)"}</h3>
       ${
         entries.length
           ? `<div class="files-grid">${entries
-              .slice(0, 120)
-              .map((e) => {
+              .slice(0, 160)
+              .map((e, idx) => {
                 if (e.isDirectory) {
-                  return `<article class="file-card"><strong>${escapeHtml(e.name || "")}</strong><span class="muted">Folder</span></article>`;
+                  return `<button type="button" class="file-card file-folder" data-folder-idx="${idx}">
+                    <span class="folder-ico" aria-hidden="true">📁</span>
+                    <strong>${escapeHtml(e.name || "")}</strong>
+                    <span class="muted">Folder — click to open</span>
+                  </button>`;
                 }
                 const audio = isAudioEntry(e);
                 const meta = `${escapeHtml(e.mimeType || "file")} · ${Math.round((e.sizeBytes || 0) / 1024)} KB`;
-                return `<article class="file-card">
+                return `<article class="file-card" data-file-idx="${idx}">
                   <strong>${escapeHtml(e.name || "")}</strong>
                   <span class="muted">${meta}</span>
                   <div class="file-card-actions">
-                    ${audio ? `<button type="button" class="btn-primary btn-file-play" data-json="">Play</button>` : ""}
-                    <button type="button" class="btn-secondary btn-file-dl" data-json="">Download</button>
+                    ${audio ? `<button type="button" class="btn-primary btn-file-play">Play</button>` : ""}
+                    <button type="button" class="btn-secondary btn-file-dl">Download</button>
                   </div>
                 </article>`;
               })
               .join("")}</div>`
-          : `<p class="muted">Empty — tap List folder, wait a few seconds, then Refresh.</p>`
+          : `<p class="muted">${
+              curPath
+                ? "This folder is empty, or still loading — tap List folder / Refresh."
+                : "Empty — tap List folder, wait a few seconds, then open a folder card."
+            }</p>`
       }`;
-    const fileEntries = entries.filter((e) => !e.isDirectory);
-    const fileCards = [...body.querySelectorAll(".file-card")].filter((c) =>
-      c.querySelector("button")
-    );
-    fileCards.forEach((card, i) => {
-      const entry = fileEntries[i];
+
+    body.querySelectorAll(".btn-grant-root").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const g = btn.getAttribute("data-grant") || "";
+        if (!g) return;
+        try {
+          await listFilesFolder(deviceId, g, "");
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        }
+      });
+    });
+
+    body.querySelectorAll(".file-folder").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const idx = Number(btn.getAttribute("data-folder-idx"));
+        const entry = entries[idx];
+        if (!entry) return;
+        const g = String(entry.folderGrantId || grantId || "");
+        const next = normalizeFilesPath(entry.relativePath || entry.name || "");
+        if (!g || !next) return;
+        try {
+          body.textContent = `Opening ${entry.name || next}…`;
+          await listFilesFolder(deviceId, g, next);
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+          refreshFilesPanel().catch(() => {});
+        }
+      });
+    });
+
+    body.querySelectorAll(".file-card[data-file-idx]").forEach((card) => {
+      const idx = Number(card.getAttribute("data-file-idx"));
+      const entry = entries[idx];
       if (!entry) return;
       card.querySelector(".btn-file-play")?.addEventListener("click", async () => {
         try {
@@ -2766,24 +2897,29 @@ document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
   }
 });
 document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());
+document.getElementById("btn-files-up")?.addEventListener("click", async () => {
+  try {
+    const deviceId = selectedWorkspaceDeviceId || document.getElementById("files-device-select")?.value;
+    if (!deviceId) return;
+    let grantId = filesBrowse.grantId;
+    if (!grantId) {
+      const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
+      grantId = (data.folders || [])[0]?.grantId || "";
+    }
+    if (!grantId) throw new Error("No authorized folder on phone");
+    const parent = parentFilesPath(filesBrowse.relativePath);
+    await listFilesFolder(deviceId, grantId, parent);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+});
 document.getElementById("btn-files-list")?.addEventListener("click", async () => {
   try {
     const deviceId = selectedWorkspaceDeviceId || document.getElementById("files-device-select")?.value;
-    const clientId = requireClientId();
     const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
-    const grantId = (data.folders || [])[0]?.grantId;
+    const grantId = filesBrowse.grantId || (data.folders || [])[0]?.grantId;
     if (!grantId) throw new Error("No authorized folder on phone");
-    await api("/api/device/files/command", {
-      method: "POST",
-      body: JSON.stringify({
-        deviceId,
-        clientId,
-        action: "FILE_LIST",
-        folderGrantId: grantId,
-        payload: { folderGrantId: grantId, relativePath: "" },
-      }),
-    });
-    setTimeout(() => refreshFilesPanel(), 2500);
+    await listFilesFolder(deviceId, grantId, filesBrowse.relativePath || "");
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }
@@ -3273,6 +3409,132 @@ async function refreshRecordingsPanel() {
   }
 }
 
+let appsActiveBlocks = [];
+
+function appsBlockDurationMinutes() {
+  const n = Number(document.getElementById("apps-block-duration")?.value || 30);
+  return Number.isFinite(n) ? n : 30;
+}
+
+function formatBlockRemaining(expiresAt) {
+  if (!expiresAt || expiresAt <= 0) return "Until unblocked";
+  const ms = expiresAt - Date.now();
+  if (ms <= 0) return "Expired";
+  const m = Math.ceil(ms / 60000);
+  if (m < 60) return `${m} min left`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h ${rem}m left` : `${h}h left`;
+}
+
+function isPackageBlockedNow(packageName) {
+  return appsActiveBlocks.some(
+    (b) => b.status === "active" && b.packageName === packageName && b.mode !== "camera_hw"
+  );
+}
+
+async function refreshAppsBlocksPanel() {
+  const box = document.getElementById("apps-blocks");
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!box) return;
+  if (!deviceId) {
+    appsActiveBlocks = [];
+    box.textContent = "Select a device.";
+    box.classList.add("muted");
+    return;
+  }
+  try {
+    const data = await api(`/api/device/apps/blocks?deviceId=${encodeURIComponent(deviceId)}`);
+    const items = (data.items || []).filter((b) => b.status === "active");
+    appsActiveBlocks = items;
+    if (!items.length) {
+      box.textContent = "No active blocks.";
+      box.classList.add("muted");
+      return;
+    }
+    box.classList.remove("muted");
+    box.innerHTML = items
+      .map((b) => {
+        const title =
+          b.mode === "camera_hw"
+            ? "Camera hardware"
+            : escapeHtml(b.appName || b.packageName);
+        return `<div class="block-row surface" data-package="${escapeHtml(b.packageName)}">
+          <div>
+            <strong>${title}</strong>
+            <div class="muted">${escapeHtml(b.packageName)} · ${formatBlockRemaining(b.expiresAt)}</div>
+          </div>
+          <button type="button" class="btn-secondary btn-unblock-pkg" data-package="${escapeHtml(b.packageName)}" data-mode="${escapeHtml(b.mode || "app")}">Unblock</button>
+        </div>`;
+      })
+      .join("");
+    box.querySelectorAll(".btn-unblock-pkg").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.getAttribute("data-package");
+        const mode = btn.getAttribute("data-mode") || "app";
+        if (!pkg) return;
+        try {
+          await sendAppControl(
+            mode === "camera_hw" ? "CAMERA_UNLOCK" : "UNBLOCK",
+            pkg,
+            "",
+            mode
+          );
+          await refreshAppsBlocksPanel();
+          await refreshAppsPanel();
+        } catch (e) {
+          alertAppControlError(e);
+        }
+      });
+    });
+  } catch (e) {
+    box.textContent = e instanceof Error ? e.message : String(e);
+    box.classList.add("muted");
+  }
+}
+
+async function sendAppControl(op, packageName = "", appName = "", mode = "app") {
+  const deviceId = selectedWorkspaceDeviceId;
+  const clientId = requireClientId();
+  return api("/api/device/apps/control", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId,
+      clientId,
+      op,
+      packageName,
+      appName,
+      mode,
+      durationMinutes: appsBlockDurationMinutes(),
+    }),
+  });
+}
+
+function alertAppControlError(e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/appControl|CAPABILITY_DENIED/i.test(msg)) {
+    alert(
+      "App Control not allowed for this browser.\n\n" +
+        "Phone → Trusted Browsers → allow App Control.\n\n" +
+        msg
+    );
+  } else if (/ACCESSIBILITY_REQUIRED/i.test(msg)) {
+    alert(
+      "Phone must enable App Control Accessibility.\n\n" +
+        "Phone → Remote Control → Permissions → App Control → Open Accessibility settings.\n\n" +
+        msg
+    );
+  } else if (/DEVICE_ADMIN_REQUIRED/i.test(msg)) {
+    alert(
+      "Camera hardware lock needs Device Admin on the phone.\n\n" +
+        "Phone → Permissions → Enable Device Admin (camera lock).\n\n" +
+        msg
+    );
+  } else {
+    alert(msg);
+  }
+}
+
 async function refreshAppsPanel() {
   const list = document.getElementById("apps-list");
   const detail = document.getElementById("app-detail");
@@ -3287,25 +3549,38 @@ async function refreshAppsPanel() {
   const q = document.getElementById("apps-search")?.value || "";
   const filter = document.getElementById("apps-filter")?.value || "all";
   try {
+    await refreshAppsBlocksPanel();
     const url =
       `/api/device/apps?deviceId=${encodeURIComponent(deviceId)}` +
-      `&q=${encodeURIComponent(q)}&filter=${encodeURIComponent(filter)}`;
+      `&q=${encodeURIComponent(q)}&filter=${encodeURIComponent(filter === "blocked" ? "all" : filter)}`;
     const data = await api(url);
-    const items = data.items || [];
+    let items = data.items || [];
+    if (filter === "blocked") {
+      const blockedPkgs = new Set(
+        appsActiveBlocks.filter((b) => b.mode !== "camera_hw").map((b) => b.packageName)
+      );
+      items = items.filter((a) => blockedPkgs.has(a.packageName));
+    }
     if (!items.length) {
-      list.textContent = "No apps indexed yet. Tap Sync from phone.";
+      list.textContent =
+        filter === "blocked"
+          ? "No blocked apps right now."
+          : "No apps indexed yet. Tap Sync from phone.";
       list.classList.add("muted");
       return;
     }
     list.classList.remove("muted");
     list.innerHTML = items
-      .map(
-        (a) => `<button type="button" class="app-row surface" data-package="${escapeHtml(a.packageName)}">
-          <strong>${escapeHtml(a.appName || a.packageName)}</strong>
+      .map((a) => {
+        const blocked = isPackageBlockedNow(a.packageName);
+        return `<button type="button" class="app-row surface${blocked ? " is-blocked" : ""}" data-package="${escapeHtml(a.packageName)}">
+          <strong>${escapeHtml(a.appName || a.packageName)}${
+            blocked ? '<span class="app-badge-blocked">Blocked</span>' : ""
+          }</strong>
           <span class="muted">${escapeHtml(a.packageName)}</span>
           <span class="muted">v${escapeHtml(a.versionName || "?")} · ${a.isSystem ? "System" : "User"} · ${escapeHtml(a.category || "")}</span>
-        </button>`
-      )
+        </button>`;
+      })
       .join("");
     list.querySelectorAll(".app-row").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -3330,8 +3605,14 @@ async function openAppDetail(deviceId, packageName) {
     );
     const a = data.app || {};
     const perms = Array.isArray(a.permissions) ? a.permissions.slice(0, 40) : [];
+    const blocked = isPackageBlockedNow(a.packageName || packageName);
+    const block = appsActiveBlocks.find(
+      (b) => b.packageName === (a.packageName || packageName) && b.status === "active"
+    );
     detail.innerHTML = `
-      <h2>${escapeHtml(a.appName || packageName)}</h2>
+      <h2>${escapeHtml(a.appName || packageName)}${
+        blocked ? '<span class="app-badge-blocked">Blocked</span>' : ""
+      }</h2>
       <p><code>${escapeHtml(a.packageName || packageName)}</code></p>
       <p>Version ${escapeHtml(a.versionName || "?")} (${a.versionCode || 0})</p>
       <p>Installed ${a.firstInstallTime ? new Date(a.firstInstallTime).toLocaleString() : "—"}</p>
@@ -3339,16 +3620,53 @@ async function openAppDetail(deviceId, packageName) {
       <p>Target SDK ${a.targetSdk || "—"} · Min SDK ${a.minSdk || "—"}</p>
       <p>Install source: ${escapeHtml(a.installSource || "—")}</p>
       <p>ABI: ${(a.supportedAbis || []).map(escapeHtml).join(", ") || "—"}</p>
-      <p>Permissions (${a.permissionCount || perms.length}):</p>
-      <ul>${perms.map((p) => `<li><code>${escapeHtml(p)}</code></li>`).join("")}</ul>
-      <div class="page-actions">
+      ${
+        blocked
+          ? `<p><strong>Block:</strong> ${escapeHtml(formatBlockRemaining(block?.expiresAt || 0))}</p>`
+          : ""
+      }
+      <div class="app-control-actions">
+        <button type="button" class="btn-primary" id="btn-block-app">Block app</button>
+        <button type="button" class="btn-secondary" id="btn-unblock-app" ${blocked ? "" : "disabled"}>Unblock</button>
         <button type="button" class="btn-secondary" id="btn-copy-pkg">Copy package</button>
-      </div>`;
+      </div>
+      <p class="muted">Uses the Block duration above (e.g. 30 minutes). After the timer, the app can open again.</p>
+      <p>Permissions (${a.permissionCount || perms.length}):</p>
+      <ul>${perms.map((p) => `<li><code>${escapeHtml(p)}</code></li>`).join("")}</ul>`;
     detail.querySelector("#btn-copy-pkg")?.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(String(a.packageName || packageName));
       } catch {
         /* ignore */
+      }
+    });
+    detail.querySelector("#btn-block-app")?.addEventListener("click", async () => {
+      try {
+        await sendAppControl(
+          "BLOCK",
+          String(a.packageName || packageName),
+          String(a.appName || packageName),
+          "app"
+        );
+        setTimeout(async () => {
+          await refreshAppsBlocksPanel();
+          await openAppDetail(deviceId, packageName);
+          await refreshAppsPanel();
+        }, 1500);
+      } catch (e) {
+        alertAppControlError(e);
+      }
+    });
+    detail.querySelector("#btn-unblock-app")?.addEventListener("click", async () => {
+      try {
+        await sendAppControl("UNBLOCK", String(a.packageName || packageName), "", "app");
+        setTimeout(async () => {
+          await refreshAppsBlocksPanel();
+          await openAppDetail(deviceId, packageName);
+          await refreshAppsPanel();
+        }, 1200);
+      } catch (e) {
+        alertAppControlError(e);
       }
     });
   } catch (e) {
@@ -3508,6 +3826,23 @@ document.getElementById("btn-rec-refresh")?.addEventListener("click", () => refr
 setRecButtonUi("idle");
 
 document.getElementById("btn-apps-refresh")?.addEventListener("click", () => refreshAppsPanel());
+document.getElementById("btn-blocks-refresh")?.addEventListener("click", () => refreshAppsBlocksPanel());
+document.getElementById("btn-camera-lock")?.addEventListener("click", async () => {
+  try {
+    await sendAppControl("CAMERA_LOCK");
+    setTimeout(() => refreshAppsBlocksPanel(), 1500);
+  } catch (e) {
+    alertAppControlError(e);
+  }
+});
+document.getElementById("btn-camera-unlock")?.addEventListener("click", async () => {
+  try {
+    await sendAppControl("CAMERA_UNLOCK");
+    setTimeout(() => refreshAppsBlocksPanel(), 1200);
+  } catch (e) {
+    alertAppControlError(e);
+  }
+});
 document.getElementById("btn-apps-sync")?.addEventListener("click", async () => {
   try {
     const deviceId = selectedWorkspaceDeviceId;

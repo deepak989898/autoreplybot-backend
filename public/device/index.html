@@ -212,12 +212,14 @@
 
           <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Tap <strong>List folder</strong>, then <strong>Play</strong> / <strong>Download</strong> on an MP3. Transfers open when ready.</p>
+              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Use <strong>Play</strong> / <strong>Download</strong> on media.</p>
               <div class="page-actions">
+                <button id="btn-files-up" class="btn-secondary" type="button" hidden>Up</button>
                 <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
                 <button id="btn-files-list" class="btn-secondary" type="button">List folder</button>
               </div>
             </div>
+            <p id="files-breadcrumb" class="files-breadcrumb muted">Root</p>
             <select id="files-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="files-panel-body" class="surface muted">Select a device.</div>
             <div id="files-audio-player" class="files-audio-player" hidden>
@@ -299,18 +301,36 @@
 
           <div id="phone-tab-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Installed apps from PackageManager. Enable sharing on the phone Permissions card and allow this browser.</p>
+              <p class="page-sub">List apps, block them from opening, set a timer, or lock the camera hardware. Phone must enable App Control (Accessibility) and grant this browser App Control.</p>
               <div class="page-actions">
                 <button id="btn-apps-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-apps-refresh" class="btn-primary" type="button">Refresh</button>
                 <button id="btn-apps-export" class="btn-secondary" type="button">Export list</button>
               </div>
             </div>
+            <div class="screen-controls surface app-control-bar">
+              <label>Block duration
+                <select id="apps-block-duration" class="input">
+                  <option value="15">15 minutes</option>
+                  <option value="30" selected>30 minutes</option>
+                  <option value="60">1 hour</option>
+                  <option value="120">2 hours</option>
+                  <option value="360">6 hours</option>
+                  <option value="1440">24 hours</option>
+                  <option value="0">Until I unblock</option>
+                </select>
+              </label>
+              <button id="btn-camera-lock" class="btn-primary" type="button">Lock camera hardware</button>
+              <button id="btn-camera-unlock" class="btn-secondary" type="button">Unlock camera</button>
+              <button id="btn-blocks-refresh" class="btn-secondary" type="button">Refresh blocks</button>
+            </div>
+            <div id="apps-blocks" class="apps-blocks surface muted">No active blocks.</div>
             <div class="screen-controls surface">
               <input id="apps-search" class="input" type="search" placeholder="Search name or package…" />
               <label>Filter
                 <select id="apps-filter" class="input">
                   <option value="all">All</option>
+                  <option value="blocked">Blocked now</option>
                   <option value="user">User</option>
                   <option value="system">System</option>
                   <option value="games">Games</option>
@@ -338,7 +358,7 @@
             </div>
           </header>
           <div class="surface">
-            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, and Installed Apps (default off).</p>
+            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, and App Control (default off).</p>
             <p class="muted">Camera, location, gallery, files, notifications, and messages keep their existing settings.</p>
           </div>
         </section>
@@ -356,6 +376,7 @@
               <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
               <li>Screen mirror and recording always show Android’s official capture prompt.</li>
               <li>Installed Apps never uninstalls or installs silently.</li>
+              <li>App Control closes blocked apps via Accessibility; Camera Lock needs Device Admin on the phone.</li>
             </ol>
           </div>
         </section>

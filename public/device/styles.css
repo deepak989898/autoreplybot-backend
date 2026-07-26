@@ -968,13 +968,22 @@ button, input, select, textarea {
 }
 
 .apps-list,
-.rec-list {
+.rec-list,
+.apps-blocks {
   display: grid;
   gap: 10px;
 }
 
+.app-control-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
 .app-row,
-.rec-row {
+.rec-row,
+.block-row {
   text-align: left;
   display: grid;
   gap: 4px;
@@ -984,10 +993,37 @@ button, input, select, textarea {
   width: 100%;
 }
 
+.block-row {
+  cursor: default;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.app-row.is-blocked {
+  outline: 1px solid #c0392b55;
+}
+
+.app-badge-blocked {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fdecea;
+  color: #c0392b;
+  font-size: 0.75rem;
+}
+
 .app-detail ul {
   max-height: 220px;
   overflow: auto;
   padding-left: 18px;
+}
+
+.app-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .rec-timer {
@@ -1220,6 +1256,11 @@ button, input, select, textarea {
   color: var(--muted, #9aa3b5);
 }
 
+.files-breadcrumb {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+
 .files-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -1233,6 +1274,26 @@ button, input, select, textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  background: #fff;
+}
+
+.file-card.file-folder {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.file-card.file-folder:hover {
+  border-color: #2b6cff;
+  box-shadow: 0 0 0 3px rgba(43, 108, 255, 0.18);
+}
+
+.file-card.file-folder .folder-ico {
+  font-size: 1.4rem;
+  line-height: 1;
 }
 
 .file-card-actions {
