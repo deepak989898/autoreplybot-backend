@@ -481,12 +481,12 @@ async function handleSessionRequest(req, res) {
       });
     }
 
-    // Screen mirror always needs an explicit MediaProjection consent UI on the phone.
+    // Trusted-browser auto-approve skips the app Approve/Reject gate (same as camera).
+    // Screen still needs Android's MediaProjection system dialog when capture starts.
     const autoApprove =
       Boolean(client.autoApproveSessions) &&
       signatureValid &&
-      !Boolean(client.revoked) &&
-      !wantScreen;
+      !Boolean(client.revoked);
 
     await endActiveSessionsForDevice(uid, deviceId, "replaced_by_new_request", sessionKind);
 
@@ -583,6 +583,8 @@ async function handleSessionRequest(req, res) {
               expiresAt: String(expiresAt),
               cameraEnabled: wantCamera ? "1" : "0",
               microphoneEnabled: wantMic ? "1" : "0",
+              sessionKind,
+              screenMirror: wantScreen ? "1" : "0",
             },
             android: { priority: "high" },
           });
@@ -604,8 +606,10 @@ async function handleSessionRequest(req, res) {
         pushSent,
         autoApproved: true,
         androidState,
-        message:
-          "Request authorized. Tap the notification on your phone to start. Modern Android may require this tap before camera or microphone can start.",
+        sessionKind,
+        message: wantScreen
+          ? "Request auto-authorized. Tap the phone notification to start screen share (Android shows the system capture prompt)."
+          : "Request authorized. Tap the notification on your phone to start. Modern Android may require this tap before camera or microphone can start.",
       });
     }
 

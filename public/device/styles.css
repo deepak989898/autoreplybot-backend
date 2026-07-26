@@ -589,29 +589,99 @@ button, input, select, textarea {
   margin: 0;
 }
 
-.live-controls button.btn-enable-sound {
-  background: #0f766e;
-}
-
 .live-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }
 
 .live-controls button {
-  background: var(--brand);
+  background: #5b4fcf;
   color: #fff;
-  border: 0;
+  border: 2px solid transparent;
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
+  opacity: 0.92;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
 }
 
-.live-controls button[data-cmd="END_SESSION"] {
-  background: var(--danger);
+.live-controls button:hover:not(:disabled) {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.live-controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.live-controls button.is-active {
+  opacity: 1;
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(43, 108, 255, 0.35);
+}
+
+.live-controls button.btn-enable-sound {
+  background: #64748b;
+}
+
+.live-controls button.btn-enable-sound.is-active {
+  background: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.35);
+}
+
+.live-controls button.btn-toggle-off {
+  background: #64748b;
+}
+
+.live-controls button.btn-toggle-on,
+.live-controls button.is-on {
+  background: #0f766e;
+}
+
+.live-controls button.is-recording-active {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.35);
+  animation: rec-pulse 1.4s ease-in-out infinite;
+}
+
+.live-controls button.btn-end-live {
+  background: var(--danger, #c0392b);
+}
+
+.live-rec-badge {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #fdecea;
+  color: #922b21;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.live-rec-badge.is-visible {
+  display: inline-flex;
+}
+
+.live-rec-badge .rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e74c3c;
+  animation: rec-pulse 1s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 /* —— Pair —— */
@@ -918,6 +988,52 @@ button, input, select, textarea {
   max-height: 220px;
   overflow: auto;
   padding-left: 18px;
+}
+
+.rec-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  min-width: 4.5rem;
+}
+
+.rec-actions .btn-primary.is-active,
+.rec-actions .btn-secondary.is-active {
+  outline: 2px solid #2b6cff;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px #2b6cff33;
+}
+
+.rec-actions .btn-danger-active {
+  background: linear-gradient(135deg, #e74c3c, #c0392b) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+
+.rec-actions .btn-paused-active {
+  background: linear-gradient(135deg, #f39c12, #d68910) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+
+.status-badge.is-recording {
+  background: linear-gradient(135deg, #e74c3c33, #e74c3c22);
+  color: #c0392b;
+}
+
+.status-badge.is-paused {
+  background: linear-gradient(135deg, #f39c1233, #f39c1222);
+  color: #b9770e;
+}
+
+.status-badge.is-done {
+  background: linear-gradient(135deg, #27ae6033, #27ae6022);
+  color: #1e8449;
+}
+
+.status-badge.is-failed {
+  background: linear-gradient(135deg, #c0392b33, #c0392b22);
+  color: #922b21;
 }
 
 .device-picker-bar {

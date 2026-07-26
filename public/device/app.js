@@ -283,6 +283,120 @@ let deviceById = new Map();
 let screenStatsTimer = null;
 
 /**
+ * Per-device live control UI state (Camera & Voice buttons).
+ * @typedef {{ speakerOn: boolean, torchOn: boolean, micMuted: boolean, videoRecording: boolean, audioRecording: boolean, videoStartedAt: number, audioStartedAt: number, timerId: ReturnType<typeof setInterval> | null }} LiveControlState
+ */
+/** @type {Map<string, LiveControlState>} */
+const liveControlStateByDevice = new Map();
+
+/** @returns {LiveControlState} */
+function defaultLiveControlState() {
+  return {
+    speakerOn: false,
+    torchOn: false,
+    micMuted: false,
+    videoRecording: false,
+    audioRecording: false,
+    videoStartedAt: 0,
+    audioStartedAt: 0,
+    timerId: null,
+  };
+}
+
+/** @param {string} deviceId */
+function getLiveControlState(deviceId) {
+  let s = liveControlStateByDevice.get(deviceId);
+  if (!s) {
+    s = defaultLiveControlState();
+    liveControlStateByDevice.set(deviceId, s);
+  }
+  return s;
+}
+
+function formatLiveRecClock(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** @param {string} deviceId */
+function applyLiveControlUi(deviceId) {
+  const panel = deviceList?.querySelector(
+    `[data-controls-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!panel) return;
+  const st = getLiveControlState(deviceId);
+
+  const speaker = panel.querySelector(".btn-enable-sound");
+  if (speaker) {
+    speaker.classList.toggle("is-active", st.speakerOn);
+    speaker.textContent = st.speakerOn ? "Speaker on" : "Enable speaker";
+  }
+
+  const torch = panel.querySelector('[data-toggle="torch"]');
+  if (torch) {
+    torch.classList.toggle("is-active", st.torchOn);
+    torch.classList.toggle("is-on", st.torchOn);
+    torch.classList.toggle("btn-toggle-off", !st.torchOn);
+    torch.textContent = st.torchOn ? "Torch: ON" : "Torch: OFF";
+    torch.setAttribute("aria-pressed", st.torchOn ? "true" : "false");
+  }
+
+  const mic = panel.querySelector('[data-toggle="mic"]');
+  if (mic) {
+    mic.classList.toggle("is-active", st.micMuted);
+    mic.classList.toggle("btn-toggle-off", !st.micMuted);
+    mic.textContent = st.micMuted ? "Mic: MUTED" : "Mic: ON";
+    mic.setAttribute("aria-pressed", st.micMuted ? "true" : "false");
+  }
+
+  const video = panel.querySelector('[data-toggle="video-rec"]');
+  if (video) {
+    video.classList.toggle("is-active", st.videoRecording);
+    video.classList.toggle("is-recording-active", st.videoRecording);
+    video.textContent = st.videoRecording ? "Stop video" : "Start video";
+    video.setAttribute("aria-pressed", st.videoRecording ? "true" : "false");
+  }
+
+  const audio = panel.querySelector('[data-toggle="audio-rec"]');
+  if (audio) {
+    audio.classList.toggle("is-active", st.audioRecording);
+    audio.classList.toggle("is-recording-active", st.audioRecording);
+    audio.textContent = st.audioRecording ? "Stop audio file" : "Record audio file";
+    audio.setAttribute("aria-pressed", st.audioRecording ? "true" : "false");
+  }
+
+  const badge = panel.querySelector(".live-rec-badge");
+  const badgeText = panel.querySelector(".live-rec-label");
+  const recording = st.videoRecording || st.audioRecording;
+  if (badge) badge.classList.toggle("is-visible", recording);
+  if (badgeText && recording) {
+    const kind = st.videoRecording && st.audioRecording
+      ? "Video + audio"
+      : st.videoRecording
+        ? "Video"
+        : "Audio file";
+    const started = st.videoRecording ? st.videoStartedAt : st.audioStartedAt;
+    badgeText.textContent = `${kind} · ${formatLiveRecClock(Date.now() - started)}`;
+  }
+
+  if (recording && !st.timerId) {
+    st.timerId = setInterval(() => applyLiveControlUi(deviceId), 500);
+  } else if (!recording && st.timerId) {
+    clearInterval(st.timerId);
+    st.timerId = null;
+  }
+}
+
+/** @param {string} deviceId */
+function resetLiveControlState(deviceId) {
+  const st = liveControlStateByDevice.get(deviceId);
+  if (st?.timerId) clearInterval(st.timerId);
+  liveControlStateByDevice.delete(deviceId);
+}
+
+/**
  * @typedef {object} LiveSession
  * @property {string} deviceId
  * @property {string} [requestId]
@@ -452,18 +566,18 @@ function renderDevices(devices, clients) {
               (browser autoplay may block sound). “Start audio” only saves a file on the phone — it is not live voice.
             </p>
             <div class="live-controls" data-controls-for="${id}">
-              <button type="button" class="btn-enable-sound" data-device-id="${id}">Enable speaker</button>
+              <span class="live-rec-badge" aria-live="polite">
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span class="live-rec-label">Recording · 00:00</span>
+              </span>
+              <button type="button" class="btn-enable-sound" data-device-id="${id}" aria-pressed="false">Enable speaker</button>
               <button type="button" data-cmd="SWITCH_CAMERA">Switch camera</button>
-              <button type="button" data-cmd="TORCH_ON">Torch on</button>
-              <button type="button" data-cmd="TORCH_OFF">Torch off</button>
-              <button type="button" data-cmd="MIC_MUTE">Mute mic</button>
-              <button type="button" data-cmd="MIC_UNMUTE">Unmute mic</button>
+              <button type="button" data-toggle="torch" aria-pressed="false">Torch: OFF</button>
+              <button type="button" data-toggle="mic" aria-pressed="false">Mic: ON</button>
               <button type="button" data-cmd="CAPTURE_PHOTO">Capture photo</button>
-              <button type="button" data-cmd="START_VIDEO_RECORDING">Start video</button>
-              <button type="button" data-cmd="STOP_VIDEO_RECORDING">Stop video</button>
-              <button type="button" data-cmd="START_AUDIO_RECORDING" title="Saves an audio file on the phone; may pause live mic">Record audio file</button>
-              <button type="button" data-cmd="STOP_AUDIO_RECORDING">Stop audio file</button>
-              <button type="button" data-cmd="END_SESSION">End session</button>
+              <button type="button" data-toggle="video-rec" aria-pressed="false">Start video</button>
+              <button type="button" data-toggle="audio-rec" aria-pressed="false" title="Saves an audio file on the phone; may pause live mic">Record audio file</button>
+              <button type="button" class="btn-end-live" data-cmd="END_SESSION">End session</button>
             </div>
           </div>
         </div>
@@ -493,22 +607,71 @@ function renderDevices(devices, clients) {
   });
   deviceList.querySelectorAll(".live-controls").forEach((panel) => {
     const deviceId = panel.getAttribute("data-controls-for");
+    if (!deviceId) return;
+    applyLiveControlUi(deviceId);
     panel.querySelectorAll("button[data-cmd]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const action = btn.getAttribute("data-cmd");
-        if (!deviceId || !action) return;
-        if (action === "START_AUDIO_RECORDING") {
-          const ok = window.confirm(
-            "Record audio file saves sound on the phone only.\n\n" +
-              "Live voice should already play here when Connect used Camera + mic.\n" +
-              "Recording may interrupt live microphone until you stop the file.\n\nContinue?"
-          );
-          if (!ok) return;
+        if (!action) return;
+        if (action === "SWITCH_CAMERA" || action === "CAPTURE_PHOTO") {
+          btn.classList.add("is-active");
+          setTimeout(() => btn.classList.remove("is-active"), 450);
         }
-        sendCommand(deviceId, action);
+        sendCommand(deviceId, action).catch(() => {});
+      });
+    });
+    panel.querySelectorAll("button[data-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const toggle = btn.getAttribute("data-toggle");
+        if (!toggle) return;
+        handleLiveToggle(deviceId, toggle).catch(() => {});
       });
     });
   });
+}
+
+/**
+ * @param {string} deviceId
+ * @param {string} toggle
+ */
+async function handleLiveToggle(deviceId, toggle) {
+  const st = getLiveControlState(deviceId);
+  if (toggle === "torch") {
+    const next = !st.torchOn;
+    await sendCommand(deviceId, next ? "TORCH_ON" : "TORCH_OFF");
+    st.torchOn = next;
+  } else if (toggle === "mic") {
+    const nextMuted = !st.micMuted;
+    await sendCommand(deviceId, nextMuted ? "MIC_MUTE" : "MIC_UNMUTE");
+    st.micMuted = nextMuted;
+  } else if (toggle === "video-rec") {
+    if (!st.videoRecording) {
+      await sendCommand(deviceId, "START_VIDEO_RECORDING");
+      st.videoRecording = true;
+      st.videoStartedAt = Date.now();
+    } else {
+      await sendCommand(deviceId, "STOP_VIDEO_RECORDING");
+      st.videoRecording = false;
+      st.videoStartedAt = 0;
+    }
+  } else if (toggle === "audio-rec") {
+    if (!st.audioRecording) {
+      const ok = window.confirm(
+        "Record audio file saves sound on the phone only.\n\n" +
+          "Live voice should already play here when Connect used Camera + mic.\n" +
+          "Recording may interrupt live microphone until you stop the file.\n\nContinue?"
+      );
+      if (!ok) return;
+      await sendCommand(deviceId, "START_AUDIO_RECORDING");
+      st.audioRecording = true;
+      st.audioStartedAt = Date.now();
+    } else {
+      await sendCommand(deviceId, "STOP_AUDIO_RECORDING");
+      st.audioRecording = false;
+      st.audioStartedAt = 0;
+    }
+  }
+  applyLiveControlUi(deviceId);
 }
 
 function setDeviceStatus(deviceId, text) {
@@ -723,6 +886,9 @@ async function enableSpeaker(deviceId) {
       videoEl.muted = true;
       await videoEl.play().catch(() => {});
     }
+    const st = getLiveControlState(deviceId);
+    st.speakerOn = true;
+    applyLiveControlUi(deviceId);
     setConnectionLabel(deviceId, CONN.CONNECTED, "speaker enabled");
   } catch (e) {
     setDeviceError(
@@ -767,13 +933,14 @@ async function loadIceServers() {
  */
 async function sendCommand(deviceId, action) {
   if (action === "END_SESSION") {
+    resetLiveControlState(deviceId);
     await endLiveSession(deviceId, "client_ended");
     return;
   }
   const live = liveByDevice.get(deviceId);
   if (!live?.sessionId || !firebaseUid || !db) {
     setDeviceError(deviceId, "No active session for commands.");
-    return;
+    throw new Error("No active session for commands.");
   }
   const now = Date.now();
   const commandId = crypto.randomUUID().replaceAll("-", "");
@@ -793,6 +960,7 @@ async function sendCommand(deviceId, action) {
     setConnectionLabel(deviceId, CONN.CONNECTED, `command ${action} sent`);
   } catch (e) {
     setDeviceError(deviceId, e instanceof Error ? e.message : String(e));
+    throw e;
   }
 }
 
@@ -1187,6 +1355,7 @@ async function endLiveSession(deviceId, reason) {
  * @param {boolean} endOnServer
  */
 function cleanupLive(deviceId, endOnServer) {
+  resetLiveControlState(deviceId);
   const live = liveByDevice.get(deviceId);
   if (!live) {
     setConnectUi(deviceId, { connecting: false, live: false });
@@ -2692,7 +2861,11 @@ async function startScreenMirror() {
     connectionLabel: "waiting",
   };
   screenLiveByDevice.set(deviceId, live);
-  setScreenStatus("Waiting for Permission");
+  setScreenStatus(
+    created.autoApproved
+      ? "Auto-approved — tap phone notification / system capture prompt"
+      : "Waiting for Permission"
+  );
   const reqRef = doc(db, "users", firebaseUid, "sessionRequests", requestId);
   live.unsubRequest = onSnapshot(reqRef, async (snap) => {
     if (!snap.exists()) return;
@@ -2847,10 +3020,132 @@ function startScreenStats(pc) {
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let recordingsPollTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let recLocalTimer = null;
+/** @type {number} */
+let recLocalStartedAt = 0;
+/** @type {number} */
+let recLocalPausedMs = 0;
+/** @type {number} */
+let recLocalPauseAt = 0;
+/** @type {string} */
+let recUiState = "idle"; // idle | recording | paused | stopping | uploading | completed | failed
+
+function formatRecTime(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function setRecTimerDisplay(ms) {
+  const el = document.getElementById("rec-timer");
+  if (el) el.textContent = formatRecTime(ms);
+}
+
+function localRecElapsedMs() {
+  if (!recLocalStartedAt) return 0;
+  const now = Date.now();
+  const pauseExtra = recUiState === "paused" && recLocalPauseAt ? now - recLocalPauseAt : 0;
+  return Math.max(0, now - recLocalStartedAt - recLocalPausedMs - pauseExtra);
+}
+
+function stopLocalRecTimer() {
+  if (recLocalTimer) {
+    clearInterval(recLocalTimer);
+    recLocalTimer = null;
+  }
+}
+
+function startLocalRecTimer(fromMs = 0) {
+  stopLocalRecTimer();
+  recLocalStartedAt = Date.now() - Math.max(0, fromMs);
+  recLocalPausedMs = 0;
+  recLocalPauseAt = 0;
+  setRecTimerDisplay(fromMs);
+  recLocalTimer = setInterval(() => {
+    if (recUiState === "recording") setRecTimerDisplay(localRecElapsedMs());
+  }, 250);
+}
 
 function setRecStatus(label) {
   const el = document.getElementById("rec-status");
-  if (el) el.textContent = label;
+  if (!el) return;
+  el.textContent = label;
+  el.classList.remove("is-recording", "is-paused", "is-done", "is-failed");
+  const s = String(label || "").toLowerCase();
+  if (s.includes("record")) el.classList.add("is-recording");
+  else if (s.includes("pause")) el.classList.add("is-paused");
+  else if (s.includes("complete") || s.includes("encoding") || s.includes("upload")) {
+    el.classList.add("is-done");
+  } else if (s.includes("fail")) el.classList.add("is-failed");
+}
+
+function setRecButtonUi(state) {
+  recUiState = state;
+  const start = document.getElementById("btn-rec-start");
+  const pause = document.getElementById("btn-rec-pause");
+  const resume = document.getElementById("btn-rec-resume");
+  const stop = document.getElementById("btn-rec-stop");
+  [start, pause, resume, stop].forEach((b) => {
+    if (!b) return;
+    b.classList.remove("is-active", "btn-danger-active", "btn-paused-active");
+  });
+  const recordingLike = state === "recording" || state === "paused" || state === "stopping"
+      || state === "uploading";
+  if (start) {
+    start.disabled = recordingLike;
+    start.classList.toggle("is-active", state === "idle" || state === "completed" || state === "failed");
+  }
+  if (pause) {
+    pause.hidden = state === "paused";
+    pause.disabled = state !== "recording";
+    pause.classList.toggle("is-active", state === "recording");
+  }
+  if (resume) {
+    resume.hidden = state !== "paused";
+    resume.disabled = state !== "paused";
+    resume.classList.toggle("is-active", state === "paused");
+    resume.classList.toggle("btn-paused-active", state === "paused");
+  }
+  if (stop) {
+    stop.disabled = !(state === "recording" || state === "paused" || state === "stopping");
+    stop.classList.toggle("is-active", state === "recording" || state === "paused");
+    stop.classList.toggle("btn-danger-active", state === "recording" || state === "paused" || state === "stopping");
+  }
+}
+
+function applyRecUiFromStatus(status, durationMs) {
+  const s = String(status || "Idle");
+  setRecStatus(s);
+  if (/^Recording$/i.test(s)) {
+    setRecButtonUi("recording");
+    if (!recLocalTimer) startLocalRecTimer(Number(durationMs) || 0);
+    else if (durationMs > localRecElapsedMs()) setRecTimerDisplay(durationMs);
+  } else if (/^Paused$/i.test(s)) {
+    if (recUiState === "recording" && !recLocalPauseAt) {
+      recLocalPauseAt = Date.now();
+    }
+    setRecButtonUi("paused");
+    stopLocalRecTimer();
+    setRecTimerDisplay(Number(durationMs) || localRecElapsedMs());
+  } else if (/Encoding|Uploading/i.test(s)) {
+    setRecButtonUi(s.toLowerCase().includes("upload") ? "uploading" : "stopping");
+    stopLocalRecTimer();
+    if (durationMs) setRecTimerDisplay(durationMs);
+  } else if (/^Completed$/i.test(s)) {
+    setRecButtonUi("completed");
+    stopLocalRecTimer();
+    if (durationMs) setRecTimerDisplay(durationMs);
+  } else if (/^Failed$/i.test(s)) {
+    setRecButtonUi("failed");
+    stopLocalRecTimer();
+    if (durationMs) setRecTimerDisplay(durationMs);
+  } else {
+    setRecButtonUi("idle");
+    stopLocalRecTimer();
+    if (!durationMs) setRecTimerDisplay(0);
+  }
 }
 
 function stopRecordingsPoll() {
@@ -2873,7 +3168,7 @@ function startRecordingsPoll(maxMs = 90000) {
     } catch {
       /* keep polling briefly */
     }
-  }, 2500);
+  }, 1000);
 }
 
 async function refreshRecordingsPanel() {
@@ -2892,21 +3187,27 @@ async function refreshRecordingsPanel() {
     const items = data.items || [];
     const latest = items[0];
     if (latest?.status) {
-      setRecStatus(String(latest.status));
+      applyRecUiFromStatus(latest.status, Number(latest.durationMs || 0));
       if (transferBox) {
-        if (latest.status === "Uploading" || latest.status === "Encoding") {
+        if (latest.status === "Recording" || latest.status === "Paused") {
           transferBox.hidden = false;
-          transferBox.textContent = `${latest.status}… refresh automatically.`;
+          transferBox.textContent =
+            `${latest.status} · ${formatRecTime(latest.durationMs || localRecElapsedMs())}` +
+            (latest.sizeBytes ? ` · ${(latest.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : "");
+        } else if (latest.status === "Uploading" || latest.status === "Encoding") {
+          transferBox.hidden = false;
+          transferBox.textContent = `${latest.status}… ${formatRecTime(latest.durationMs || 0)} recorded.`;
         } else if (latest.status === "Failed") {
           transferBox.hidden = false;
           transferBox.textContent = `Failed: ${latest.errorMessage || "See phone / Storage rules."}`;
         } else if (latest.status === "Completed") {
           transferBox.hidden = false;
-          transferBox.textContent = "Upload complete. Use Download on the recording below.";
+          transferBox.textContent =
+            `Completed · ${formatRecTime(latest.durationMs || 0)} · use Download below.`;
         }
       }
-    } else {
-      setRecStatus("Idle");
+    } else if (recUiState === "idle") {
+      applyRecUiFromStatus("Idle", 0);
     }
     if (!items.length) {
       list.textContent = "No recordings yet.";
@@ -2917,8 +3218,12 @@ async function refreshRecordingsPanel() {
     list.innerHTML = items
       .map((it) => {
         const when = it.createdAt ? new Date(it.createdAt).toLocaleString() : "—";
-        const dur = it.durationMs ? `${Math.round(it.durationMs / 1000)}s` : "—";
-        const size = it.sizeBytes ? `${(it.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : "—";
+        const liveDur =
+          (/Recording|Paused/i.test(String(it.status || "")) && it === latest)
+            ? Math.max(Number(it.durationMs || 0), localRecElapsedMs())
+            : Number(it.durationMs || 0);
+        const dur = liveDur > 0 ? formatRecTime(liveDur) : "00:00";
+        const size = it.sizeBytes ? `${(it.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : "0.0 MB";
         const err = it.errorMessage
           ? `<div class="muted" style="color:#c0392b">${escapeHtml(it.errorMessage)}</div>`
           : "";
@@ -3107,21 +3412,25 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
     const quality = document.getElementById("rec-quality")?.value || "720p";
     const fps = Number(document.getElementById("rec-fps")?.value || 30);
     const withMic = Boolean(document.getElementById("rec-mic")?.checked);
+    setRecButtonUi("recording");
     setRecStatus("Waiting for Permission");
+    setRecTimerDisplay(0);
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({ deviceId, clientId, op: "START", quality, fps, withMic }),
     });
     setRecStatus("Recording");
+    startLocalRecTimer(0);
     const transferBox = document.getElementById("rec-transfer");
     if (transferBox) {
       transferBox.hidden = false;
-      transferBox.textContent = "Recording on phone — approve capture if prompted, then Stop when done.";
+      transferBox.textContent =
+        "Approve screen capture on the phone, then watch the timer. Tap Stop (red) when finished.";
     }
-    startRecordingsPoll(120000);
+    startRecordingsPoll(180000);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setRecStatus("Failed");
+    applyRecUiFromStatus("Failed", 0);
     if (/screenRecord|CAPABILITY_DENIED/i.test(msg)) {
       alert("Enable Screen Recording for this browser on the phone Trusted Browsers list.\n\n" + msg);
     } else alert(msg);
@@ -3129,6 +3438,11 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
 });
 document.getElementById("btn-rec-pause")?.addEventListener("click", async () => {
   try {
+    if (recLocalPauseAt === 0) recLocalPauseAt = Date.now();
+    setRecButtonUi("paused");
+    setRecStatus("Paused");
+    setRecTimerDisplay(localRecElapsedMs());
+    stopLocalRecTimer();
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({
@@ -3137,13 +3451,24 @@ document.getElementById("btn-rec-pause")?.addEventListener("click", async () => 
         op: "PAUSE",
       }),
     });
-    setRecStatus("Paused");
+    startRecordingsPoll(180000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }
 });
 document.getElementById("btn-rec-resume")?.addEventListener("click", async () => {
   try {
+    if (recLocalPauseAt) {
+      recLocalPausedMs += Date.now() - recLocalPauseAt;
+      recLocalPauseAt = 0;
+    }
+    setRecButtonUi("recording");
+    setRecStatus("Recording");
+    if (!recLocalTimer) {
+      recLocalTimer = setInterval(() => {
+        if (recUiState === "recording") setRecTimerDisplay(localRecElapsedMs());
+      }, 250);
+    }
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({
@@ -3152,13 +3477,18 @@ document.getElementById("btn-rec-resume")?.addEventListener("click", async () =>
         op: "RESUME",
       }),
     });
-    setRecStatus("Recording");
+    startRecordingsPoll(180000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }
 });
 document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
   try {
+    const elapsed = localRecElapsedMs();
+    setRecButtonUi("stopping");
+    setRecStatus("Stopping…");
+    setRecTimerDisplay(elapsed);
+    stopLocalRecTimer();
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({
@@ -3168,13 +3498,14 @@ document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
       }),
     });
     setRecStatus("Encoding");
-    startRecordingsPoll(120000);
+    startRecordingsPoll(180000);
   } catch (e) {
-    setRecStatus("Failed");
+    applyRecUiFromStatus("Failed", localRecElapsedMs());
     alert(e instanceof Error ? e.message : String(e));
   }
 });
 document.getElementById("btn-rec-refresh")?.addEventListener("click", () => refreshRecordingsPanel());
+setRecButtonUi("idle");
 
 document.getElementById("btn-apps-refresh")?.addEventListener("click", () => refreshAppsPanel());
 document.getElementById("btn-apps-sync")?.addEventListener("click", async () => {

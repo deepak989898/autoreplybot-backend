@@ -266,10 +266,10 @@
           <div id="phone-tab-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
             <div class="tab-toolbar">
               <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone.</p>
-              <div class="page-actions">
+              <div class="page-actions rec-actions">
                 <button id="btn-rec-start" class="btn-primary" type="button">Record Screen</button>
                 <button id="btn-rec-pause" class="btn-secondary" type="button">Pause</button>
-                <button id="btn-rec-resume" class="btn-secondary" type="button">Resume</button>
+                <button id="btn-rec-resume" class="btn-secondary" type="button" hidden>Resume</button>
                 <button id="btn-rec-stop" class="btn-secondary" type="button">Stop</button>
                 <button id="btn-rec-refresh" class="btn-secondary" type="button">Refresh</button>
               </div>
@@ -291,6 +291,7 @@
               </label>
               <label class="chk"><input type="checkbox" id="rec-mic" /> Screen + Mic</label>
               <span id="rec-status" class="status-badge">Idle</span>
+              <strong id="rec-timer" class="rec-timer" aria-live="polite">00:00</strong>
             </div>
             <div id="rec-transfer" class="surface muted" hidden>Upload progress will appear here.</div>
             <div id="recordings-list" class="rec-list muted">Select a device and refresh.</div>
