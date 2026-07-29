@@ -1424,13 +1424,32 @@ async function handleCallLogRecordingContent(req, res) {
     if (!exists) {
       return res.status(404).json({ error: "Recording file missing", code: "FILE_MISSING" });
     }
-    const mime = String(data.recordingMimeType || "audio/mp4");
     const [meta] = await file.getMetadata().catch(() => [{}]);
     const size = Number(meta?.size || data.recordingSizeBytes || 0);
-    res.setHeader("Content-Type", mime);
-    res.setHeader("Content-Disposition", `inline; filename="call-${itemId.slice(0, 12)}.m4a"`);
+    const pathLower = storagePath.toLowerCase();
+    const ext = pathLower.endsWith(".3gp") || pathLower.endsWith(".amr")
+      ? (pathLower.endsWith(".amr") ? "amr" : "3gp")
+      : pathLower.endsWith(".mp3")
+        ? "mp3"
+        : pathLower.endsWith(".wav")
+          ? "wav"
+          : "m4a";
+    const storedMime = String(data.recordingMimeType || meta?.contentType || "").trim();
+    const resolvedMime =
+      storedMime && storedMime !== "application/octet-stream"
+        ? storedMime
+        : ext === "3gp" || ext === "amr"
+          ? "audio/3gpp"
+          : ext === "mp3"
+            ? "audio/mpeg"
+            : ext === "wav"
+              ? "audio/wav"
+              : "audio/mp4";
+    res.setHeader("Content-Type", resolvedMime);
+    res.setHeader("Content-Disposition", `inline; filename="call-${itemId.slice(0, 12)}.${ext}"`);
     if (size > 0) res.setHeader("Content-Length", String(size));
     res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("Accept-Ranges", "bytes");
     await new Promise((resolve, reject) => {
       const stream = file.createReadStream();
       stream.on("error", reject);

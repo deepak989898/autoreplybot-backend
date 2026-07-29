@@ -2024,12 +2024,48 @@ function openMediaViewer(item) {
     video.className = "media-viewer-av";
     mediaViewerBody.appendChild(video);
   } else if (kind === "audio" || mime.startsWith("audio/")) {
+    const wrap = document.createElement("div");
+    wrap.className = "media-audio-wrap";
     const audio = document.createElement("audio");
-    audio.src = url;
     audio.controls = true;
     audio.autoplay = true;
+    audio.preload = "metadata";
     audio.className = "media-viewer-av";
-    mediaViewerBody.appendChild(audio);
+    if (mime) {
+      const source = document.createElement("source");
+      source.src = url;
+      source.type = mime;
+      audio.appendChild(source);
+    }
+    audio.src = url;
+    const hint = document.createElement("p");
+    hint.className = "muted media-audio-hint";
+    if (item.browserPlayable === false) {
+      hint.textContent = "This recording is AMR/3GP — Chrome cannot play it. Download and open in VLC.";
+      hint.classList.add("error");
+    } else {
+      hint.textContent = "If the player stays at 0:00, use Download.";
+    }
+    const dl = document.createElement("a");
+    dl.href = url;
+    dl.download = item.fileName || item.displayName || "call-recording";
+    dl.className = "btn-secondary";
+    dl.textContent = "Download audio";
+    dl.style.marginTop = "10px";
+    dl.style.display = "inline-block";
+    audio.addEventListener("error", () => {
+      hint.textContent = "Browser cannot play this audio format. Download and open in VLC.";
+      hint.classList.add("error");
+    });
+    audio.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        hint.textContent = `Duration ${Math.round(audio.duration)}s`;
+      }
+    });
+    wrap.appendChild(audio);
+    wrap.appendChild(hint);
+    wrap.appendChild(dl);
+    mediaViewerBody.appendChild(wrap);
   } else {
     const link = document.createElement("a");
     link.href = url;
@@ -3969,30 +4005,55 @@ async function playCallRecording(deviceId, item, buttonEl) {
     buttonEl.textContent = "Loading…";
   }
   try {
-    let url = String(item.recordingUrl || "").trim();
-    let mime = String(item.recordingMimeType || "audio/mp4");
-    if (!url) {
-      const contentPath =
-        String(item.recordingContentUrl || "").trim() ||
-        `/api/device/call-logs/recording?deviceId=${encodeURIComponent(deviceId)}&itemId=${encodeURIComponent(itemId)}`;
-      const res = await fetch(contentPath, {
-        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Recording HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
-      mime = blob.type || mime;
-      url = URL.createObjectURL(blob);
+    // Always use authenticated content proxy → blob URL.
+    // Firebase signed URLs often fail in <audio> due to CORS (shows 0:00/0:00).
+    const contentPath =
+      String(item.recordingContentUrl || "").trim() ||
+      `/api/device/call-logs/recording?deviceId=${encodeURIComponent(deviceId)}&itemId=${encodeURIComponent(itemId)}`;
+    const res = await fetch(contentPath, {
+      headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Recording HTTP ${res.status}`);
     }
+    const headerMime = String(res.headers.get("content-type") || "").split(";")[0].trim();
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength < 64) {
+      throw new Error("Recording file is empty or too small");
+    }
+    const sniffed = sniffAudioMime(buf, headerMime || item.recordingMimeType || "");
+    const pathHint = String(item.recordingStoragePath || item.fileName || "").toLowerCase();
+    let mime = sniffed.mime;
+    let ext = sniffed.ext;
+    if (!ext) {
+      if (pathHint.endsWith(".3gp")) ext = "3gp";
+      else if (pathHint.endsWith(".amr")) ext = "amr";
+      else if (pathHint.endsWith(".mp3")) ext = "mp3";
+      else if (pathHint.endsWith(".wav")) ext = "wav";
+      else ext = "m4a";
+    }
+    if (!mime || mime === "application/octet-stream") {
+      mime =
+        ext === "3gp" || ext === "amr"
+          ? "audio/3gpp"
+          : ext === "mp3"
+            ? "audio/mpeg"
+            : ext === "wav"
+              ? "audio/wav"
+              : "audio/mp4";
+    }
+    const blob = new Blob([buf], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const browserPlayable = isBrowserPlayableAudio(mime, ext);
     openMediaViewer({
       kind: "audio",
       mimeType: mime,
       contentType: mime,
       downloadUrl: url,
       displayName: `call-${itemId.slice(0, 10)}`,
-      fileName: `call-${itemId.slice(0, 10)}.m4a`,
+      fileName: `call-${itemId.slice(0, 10)}.${ext}`,
+      browserPlayable,
     });
   } finally {
     if (buttonEl) {
@@ -4000,6 +4061,45 @@ async function playCallRecording(deviceId, item, buttonEl) {
       buttonEl.textContent = prev || "▶ Play";
     }
   }
+}
+
+function isBrowserPlayableAudio(mime, ext) {
+  const m = String(mime || "").toLowerCase();
+  const e = String(ext || "").toLowerCase();
+  if (e === "3gp" || e === "amr" || m.includes("3gpp") || m.includes("amr")) return false;
+  return true;
+}
+
+function sniffAudioMime(buf, fallbackMime) {
+  const u8 = new Uint8Array(buf);
+  // AMR: "#!AMR" or "#!AMR-WB"
+  if (u8.length >= 5) {
+    const head = String.fromCharCode(u8[0], u8[1], u8[2], u8[3], u8[4]);
+    if (head.startsWith("#!AMR")) return { mime: "audio/amr", ext: "amr" };
+  }
+  // 3GP/MP4 ftyp box
+  if (u8.length >= 12 && u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+    const brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]).toLowerCase();
+    if (brand.includes("3gp") || brand.includes("3g2")) return { mime: "audio/3gpp", ext: "3gp" };
+    return { mime: "audio/mp4", ext: "m4a" };
+  }
+  // WAV
+  if (u8.length >= 12) {
+    const riff = String.fromCharCode(u8[0], u8[1], u8[2], u8[3]);
+    const wave = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]);
+    if (riff === "RIFF" && wave === "WAVE") return { mime: "audio/wav", ext: "wav" };
+  }
+  // MP3 ID3 or frame sync
+  if (u8.length >= 3) {
+    if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) return { mime: "audio/mpeg", ext: "mp3" };
+    if (u8[0] === 0xff && (u8[1] & 0xe0) === 0xe0) return { mime: "audio/mpeg", ext: "mp3" };
+  }
+  const fb = String(fallbackMime || "").toLowerCase();
+  if (fb.includes("3gpp") || fb.includes("amr")) return { mime: fb || "audio/3gpp", ext: "3gp" };
+  if (fb.includes("mpeg") || fb.includes("mp3")) return { mime: "audio/mpeg", ext: "mp3" };
+  if (fb.includes("wav")) return { mime: "audio/wav", ext: "wav" };
+  if (fb.includes("mp4") || fb.includes("m4a") || fb.includes("aac")) return { mime: "audio/mp4", ext: "m4a" };
+  return { mime: fb || "audio/mp4", ext: "m4a" };
 }
 
 async function refreshContactsPanel() {
