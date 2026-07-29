@@ -155,6 +155,7 @@ function showPanel(panelId) {
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "social") ensureSocialFrame();
   if (id === "multiview") refreshMultiViewPanel().catch(() => {});
+  if (id === "settings") prepareApkDownloadLink().catch(() => {});
 }
 
 function syncHiddenDeviceSelects(deviceId) {
@@ -4610,44 +4611,83 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
   }
 });
 document.getElementById("btn-msg-refresh")?.addEventListener("click", () => refreshMessagesPanel());
-document.getElementById("btn-download-apk")?.addEventListener("click", () => downloadAndroidApk());
+document.getElementById("btn-download-apk")?.addEventListener("click", (e) => {
+  void downloadAndroidApk(e);
+});
 
-async function downloadAndroidApk() {
+let apkDownloadUrlCache = "";
+let apkDownloadUrlExpiresAt = 0;
+
+async function prepareApkDownloadLink() {
+  if (!idToken) return null;
+  if (apkDownloadUrlCache && Date.now() < apkDownloadUrlExpiresAt) {
+    const btn = document.getElementById("btn-download-apk");
+    if (btn) {
+      btn.href = apkDownloadUrlCache;
+      btn.setAttribute("download", "AutoReplyBot.apk");
+      btn.target = "_blank";
+      btn.rel = "noopener noreferrer";
+    }
+    return apkDownloadUrlCache;
+  }
+  const data = await api("/api/device/app-download");
+  const url = String(data.url || "").trim();
+  if (!url) throw new Error("Download URL missing");
+  apkDownloadUrlCache = url;
+  apkDownloadUrlExpiresAt = Date.now() + 45 * 60 * 1000;
+  const btn = document.getElementById("btn-download-apk");
+  if (btn) {
+    btn.href = url;
+    btn.setAttribute("download", String(data.fileName || "AutoReplyBot.apk"));
+    btn.target = "_blank";
+    btn.rel = "noopener noreferrer";
+    btn.dataset.ready = "1";
+  }
+  return url;
+}
+
+async function downloadAndroidApk(e) {
   const btn = document.getElementById("btn-download-apk");
   const status = document.getElementById("apk-download-status");
-  if (btn) btn.disabled = true;
+  // If href was prefetched to a real Storage URL, let the browser handle the click.
+  const readyHref = String(btn?.href || "");
+  if (
+    btn?.dataset?.ready === "1" &&
+    readyHref &&
+    !readyHref.endsWith("#") &&
+    !readyHref.endsWith("/device/") &&
+    !readyHref.endsWith("/device")
+  ) {
+    if (status) status.textContent = "Download starting… check your browser downloads bar.";
+    return;
+  }
+  e?.preventDefault?.();
+  if (btn) btn.setAttribute("aria-disabled", "true");
   if (status) status.textContent = "Preparing download…";
   try {
-    const data = await api("/api/device/app-download");
-    const url = String(data.url || "").trim();
-    const fileName = String(data.fileName || "AutoReplyBot.apk");
-    if (!url) throw new Error("Download URL missing");
-    if (status) {
-      const size = Number(data.sizeBytes || 0);
-      status.textContent = size
-        ? `Downloading ${fileName} (${formatBytes(size)})…`
-        : `Downloading ${fileName}…`;
+    if (!idToken) throw new Error("Not signed in");
+    // Same-origin redirect: Chrome starts the file download from a real navigation
+    // (avoids cross-origin <a download> being ignored after async fetch).
+    const redirectUrl =
+      `/api/device/app-download?redirect=1&access_token=${encodeURIComponent(idToken)}`;
+    if (status) status.textContent = "Download starting…";
+    // Prefer a new tab so Settings stays open; fall back to same-tab navigation.
+    const opened = window.open(redirectUrl, "_blank");
+    if (!opened) {
+      window.location.assign(redirectUrl);
+      return;
     }
-    // Prefer navigating to signed URL so the browser saves with Content-Disposition
-    // (works for large APKs; no extra confirm step beyond the normal browser download).
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // Fallback for browsers that ignore cross-origin download attribute.
-    setTimeout(() => {
-      if (status) status.textContent = "If the download did not start, check your browser downloads bar.";
-    }, 1200);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    if (status) {
+      status.textContent = "Download started. Check your browser downloads bar.";
+    }
+    // Also warm the direct link for the next click.
+    prepareApkDownloadLink().catch(() => {});
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     if (status) status.textContent = "";
     alert(msg || "Could not download the app");
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) btn.removeAttribute("aria-disabled");
   }
 }
 document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {

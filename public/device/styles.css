@@ -131,8 +131,15 @@ textarea.input {
   background: var(--brand);
   color: #fff;
 }
+a.btn-primary {
+  display: inline-block;
+  text-decoration: none;
+  line-height: 1.2;
+  text-align: center;
+}
 .btn-primary:hover { background: var(--brand-dark); }
-.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary:disabled,
+a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
 
 .btn-secondary {
   background: #fff;

@@ -778,6 +778,51 @@ async function requireAuthed(req) {
   return uid;
 }
 
+function apkObjectPath() {
+  return String(process.env.ANDROID_APK_STORAGE_PATH || "autoreplybot.apk").replace(
+    /^\/+/,
+    ""
+  );
+}
+
+function apkFileName() {
+  return String(process.env.ANDROID_APK_FILE_NAME || "AutoReplyBot.apk").replace(
+    /[^\w.\-() ]+/g,
+    "_"
+  );
+}
+
+/** Build a browser download URL (signed preferred; Firebase token / env fallback). */
+async function resolveApkDownloadUrl(file, objectPath, fileName) {
+  const explicit = String(process.env.ANDROID_APK_DOWNLOAD_URL || "").trim();
+  if (explicit) {
+    return { url: explicit, via: "env" };
+  }
+  try {
+    const [url] = await file.getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires: Date.now() + 60 * 60 * 1000,
+      responseDisposition: `attachment; filename="${fileName}"`,
+      responseType: "application/vnd.android.package-archive",
+    });
+    return { url, via: "signed" };
+  } catch (signErr) {
+    const [meta] = await file.getMetadata().catch(() => [{}]);
+    const token = String(meta?.metadata?.firebaseStorageDownloadTokens || "")
+      .split(",")[0]
+      .trim();
+    if (token) {
+      const bucketName = file.bucket.name;
+      const url =
+        `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucketName)}` +
+        `/o/${encodeURIComponent(objectPath)}?alt=media&token=${encodeURIComponent(token)}`;
+      return { url, via: "token" };
+    }
+    throw signErr;
+  }
+}
+
 /** Signed download for the Android APK uploaded to Storage root (autoreplybot.apk). */
 async function handleAppDownload(req, res) {
   if (req.method !== "GET") {
@@ -785,13 +830,27 @@ async function handleAppDownload(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
+    // Same-origin ?redirect=1 navigations cannot send Authorization headers.
+    // Allow a one-shot access_token query (Referrer-Policy strips it on the 302 hop).
+    let queryToken = String(req.query?.access_token || "").trim();
+    if (!queryToken && typeof req.url === "string") {
+      try {
+        const q = new URL(req.url, "http://localhost").searchParams;
+        queryToken = String(q.get("access_token") || "").trim();
+        if (!req.query) req.query = {};
+        if (req.query.redirect == null && q.get("redirect") != null) {
+          req.query.redirect = q.get("redirect");
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (queryToken) {
+      req.headers.authorization = `Bearer ${queryToken}`;
+    }
     await requireAuthed(req);
-    const objectPath = String(
-      process.env.ANDROID_APK_STORAGE_PATH || "autoreplybot.apk"
-    ).replace(/^\/+/, "");
-    const fileName = String(
-      process.env.ANDROID_APK_FILE_NAME || "AutoReplyBot.apk"
-    ).replace(/[^\w.\-() ]+/g, "_");
+    const objectPath = apkObjectPath();
+    const fileName = apkFileName();
     const file = storageBucket().file(objectPath);
     const [exists] = await file.exists();
     if (!exists) {
@@ -802,20 +861,16 @@ async function handleAppDownload(req, res) {
     }
     const [meta] = await file.getMetadata().catch(() => [{}]);
     const sizeBytes = Number(meta?.size || 0);
-    const [url] = await file.getSignedUrl({
-      action: "read",
-      expires: Date.now() + 60 * 60 * 1000,
-      responseDisposition: `attachment; filename="${fileName}"`,
-      responseType: "application/vnd.android.package-archive",
-    });
-    // Direct redirect starts the browser download with no extra click.
+    const { url, via } = await resolveApkDownloadUrl(file, objectPath, fileName);
     if (String(req.query?.redirect || "") === "1") {
       res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
       return res.redirect(302, url);
     }
     return res.status(200).json({
       ok: true,
       url,
+      via,
       fileName,
       sizeBytes,
       contentType: "application/vnd.android.package-archive",
