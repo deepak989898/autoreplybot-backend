@@ -56,6 +56,12 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
+    match /users/{userId}/devices/{deviceId}/call-recordings/{recordingId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validPrivateTransfer();
+      allow delete: if isOwner(userId);
+    }
+
     match /users/{userId}/devices/{deviceId}/exports/{exportId}/{fileName} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId)

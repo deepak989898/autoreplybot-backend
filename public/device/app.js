@@ -3878,7 +3878,24 @@ async function refreshCallLogsPanel() {
                 const when = escapeHtml(formatCallDateTime(it.date));
                 const dur = escapeHtml(formatCallDuration(it.durationSec));
                 const geo = String(it.geo || "").trim();
-                return `<article class="call-card">
+                const playable = isCallRecordingPlayable(it);
+                const recStatus = String(it.recordingStatus || "none").toLowerCase();
+                const showPlaySlot = type === "incoming" || type === "outgoing";
+                let playHtml = "";
+                if (showPlaySlot) {
+                  if (playable) {
+                    playHtml = `<button type="button" class="btn-call-play" data-item-id="${escapeHtml(it.itemId || "")}" data-device-id="${escapeHtml(deviceId)}" title="Play call recording">▶ Play</button>`;
+                  } else if (recStatus === "uploading" || recStatus === "pending") {
+                    playHtml = `<span class="call-rec-status call-rec-pending">Uploading…</span>`;
+                  } else if (recStatus === "failed") {
+                    playHtml = `<span class="call-rec-status call-rec-failed" title="${escapeHtml(it.recordingError || "Upload failed")}">No recording</span>`;
+                  } else if (Number(it.durationSec || 0) > 0) {
+                    playHtml = `<span class="call-rec-status">No recording yet</span>`;
+                  } else {
+                    playHtml = `<span class="call-rec-status muted">—</span>`;
+                  }
+                }
+                return `<article class="call-card" data-item-id="${escapeHtml(it.itemId || "")}">
           <div class="call-card-head">
             <strong class="call-who">${who}</strong>
             <span class="call-type ${typeCls}">${typeLabel}</span>
@@ -3888,6 +3905,7 @@ async function refreshCallLogsPanel() {
             <span class="call-duration">Duration ${dur}</span>
             ${geo ? `<span class="call-geo">${escapeHtml(geo)}</span>` : ""}
           </div>
+          ${playHtml ? `<div class="call-actions">${playHtml}</div>` : ""}
         </article>`;
               })
               .join("")}</div>
@@ -3916,8 +3934,70 @@ async function refreshCallLogsPanel() {
         }
       });
     });
+    list.querySelectorAll(".btn-call-play").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const itemId = btn.getAttribute("data-item-id") || "";
+        const devId = btn.getAttribute("data-device-id") || deviceId;
+        const row = (items || []).find((x) => String(x.itemId) === itemId);
+        playCallRecording(devId, row || { itemId }, btn).catch((e) => {
+          alert(e instanceof Error ? e.message : String(e));
+        });
+      });
+    });
   } catch (e) {
     list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function isCallRecordingPlayable(it) {
+  if (!it) return false;
+  if (String(it.recordingStatus || "").toLowerCase() !== "ready") return false;
+  return Boolean(
+    String(it.recordingUrl || "").trim() ||
+      String(it.recordingContentUrl || "").trim() ||
+      String(it.recordingStoragePath || "").trim()
+  );
+}
+
+async function playCallRecording(deviceId, item, buttonEl) {
+  const itemId = String(item?.itemId || "").trim();
+  if (!deviceId || !itemId) throw new Error("Missing call recording id");
+  const prev = buttonEl?.textContent;
+  if (buttonEl) {
+    buttonEl.disabled = true;
+    buttonEl.textContent = "Loading…";
+  }
+  try {
+    let url = String(item.recordingUrl || "").trim();
+    let mime = String(item.recordingMimeType || "audio/mp4");
+    if (!url) {
+      const contentPath =
+        String(item.recordingContentUrl || "").trim() ||
+        `/api/device/call-logs/recording?deviceId=${encodeURIComponent(deviceId)}&itemId=${encodeURIComponent(itemId)}`;
+      const res = await fetch(contentPath, {
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Recording HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      mime = blob.type || mime;
+      url = URL.createObjectURL(blob);
+    }
+    openMediaViewer({
+      kind: "audio",
+      mimeType: mime,
+      contentType: mime,
+      downloadUrl: url,
+      displayName: `call-${itemId.slice(0, 10)}`,
+      fileName: `call-${itemId.slice(0, 10)}.m4a`,
+    });
+  } finally {
+    if (buttonEl) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = prev || "▶ Play";
+    }
   }
 }
 

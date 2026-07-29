@@ -1,5 +1,5 @@
 /* AutoReplyBot device dashboard service worker */
-const CACHE_VERSION = "arb-device-v6";
+const CACHE_VERSION = "arb-device-v7";
 const SHELL = [
   "/device/",
   "/device/index.html",

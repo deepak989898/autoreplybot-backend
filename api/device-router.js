@@ -69,6 +69,7 @@ export default async function handler(req, res) {
   if (path === "messages/sync") return handleMessagesSync(req, res);
   if (path === "call-logs") return handleCallLogsList(req, res);
   if (path === "call-logs/sync") return handleCallLogsSync(req, res);
+  if (path === "call-logs/recording") return handleCallLogRecordingContent(req, res);
   if (path === "contacts") return handleContactsList(req, res);
   if (path === "contacts/sync") return handleContactsSync(req, res);
   if (path === "apps") return handleAppsList(req, res);
@@ -1334,7 +1335,7 @@ async function handleCallLogsList(req, res) {
       .orderBy("date", "desc")
       .limit(limit)
       .get();
-    const items = snap.docs.map((d) => {
+    const rawItems = snap.docs.map((d) => {
       const data = d.data() || {};
       return {
         itemId: d.id,
@@ -1348,11 +1349,96 @@ async function handleCallLogsList(req, res) {
         isNew: Boolean(data.isNew),
         geo: String(data.geo || ""),
         syncedAt: Number(data.syncedAt || 0),
+        recordingStatus: String(data.recordingStatus || "none"),
+        recordingStoragePath: String(data.recordingStoragePath || ""),
+        recordingMimeType: String(data.recordingMimeType || ""),
+        recordingSizeBytes: Number(data.recordingSizeBytes || 0),
+        recordingSource: String(data.recordingSource || ""),
+        recordingError: String(data.recordingError || ""),
       };
     });
+    const items = [];
+    for (const it of rawItems) {
+      let recordingUrl = "";
+      if (it.recordingStatus === "ready" && it.recordingStoragePath) {
+        try {
+          const file = storageBucket().file(it.recordingStoragePath);
+          const [exists] = await file.exists();
+          if (exists) {
+            const [url] = await file.getSignedUrl({
+              action: "read",
+              expires: Date.now() + 15 * 60 * 1000,
+            });
+            recordingUrl = url;
+          }
+        } catch {
+          /* signed URL optional; content proxy still works */
+        }
+      }
+      items.push({
+        ...it,
+        recordingUrl,
+        recordingContentUrl:
+          it.recordingStatus === "ready"
+            ? `/api/device/call-logs/recording?deviceId=${encodeURIComponent(deviceId)}&itemId=${encodeURIComponent(it.itemId)}`
+            : "",
+      });
+    }
     return res.status(200).json({ ok: true, items });
   } catch (e) {
     return clientError(res, e, "CALL_LOGS_LIST_FAILED");
+  }
+}
+
+async function handleCallLogRecordingContent(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    const itemId = String(req.query?.itemId || "").trim();
+    if (!deviceId || !itemId) {
+      return res.status(400).json({ error: "deviceId and itemId required", code: "BAD_REQUEST" });
+    }
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_CALL_LOG_ITEMS)
+      .doc(itemId)
+      .get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Call log item not found", code: "NOT_FOUND" });
+    }
+    const data = snap.data() || {};
+    const status = String(data.recordingStatus || "");
+    const storagePath = String(data.recordingStoragePath || "").trim();
+    if (status !== "ready" || !storagePath) {
+      return res.status(404).json({ error: "Recording not available", code: "NO_RECORDING" });
+    }
+    const file = storageBucket().file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ error: "Recording file missing", code: "FILE_MISSING" });
+    }
+    const mime = String(data.recordingMimeType || "audio/mp4");
+    const [meta] = await file.getMetadata().catch(() => [{}]);
+    const size = Number(meta?.size || data.recordingSizeBytes || 0);
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Disposition", `inline; filename="call-${itemId.slice(0, 12)}.m4a"`);
+    if (size > 0) res.setHeader("Content-Length", String(size));
+    res.setHeader("Cache-Control", "private, max-age=60");
+    await new Promise((resolve, reject) => {
+      const stream = file.createReadStream();
+      stream.on("error", reject);
+      stream.on("end", resolve);
+      stream.pipe(res);
+    });
+  } catch (e) {
+    if (!res.headersSent) return clientError(res, e, "CALL_LOG_RECORDING_FAILED");
   }
 }
 
