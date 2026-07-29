@@ -5124,7 +5124,9 @@ function wireRemoteControlUi() {
     const text = document.getElementById("rc-text-input")?.value || "";
     try {
       await sendA11yCommand("A11Y_SET_TEXT", { text });
-      setRcStatus("Text inserted");
+      setRcStatus("Text / password inserted");
+      const input = document.getElementById("rc-text-input");
+      if (input) input.value = "";
     } catch (e) {
       setRcStatus(e instanceof Error ? e.message : String(e));
     }
@@ -5136,6 +5138,11 @@ function wireRemoteControlUi() {
     } catch (e) {
       setRcStatus(e instanceof Error ? e.message : String(e));
     }
+  });
+  document.getElementById("rc-text-show")?.addEventListener("change", (ev) => {
+    const input = document.getElementById("rc-text-input");
+    if (!input) return;
+    input.type = ev.target?.checked ? "text" : "password";
   });
   document.getElementById("rc-tree-search")?.addEventListener("input", (ev) => {
     renderRcTreeList(ev.target?.value || "");
