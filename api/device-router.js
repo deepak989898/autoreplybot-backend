@@ -87,6 +87,7 @@ export default async function handler(req, res) {
   if (path === "command") return handleModuleCommand(req, res);
   if (path === "capability-secret") return handleCapabilitySecret(req, res);
   if (path === "phone-capabilities") return handlePhoneCapabilities(req, res);
+  if (path === "app-download") return handleAppDownload(req, res);
   if (path === "export-inventory") return handleExportInventory(req, res);
   if (path === "bulk") return handleBulk(req, res);
 
@@ -775,6 +776,53 @@ async function requireAuthed(req) {
     throw err;
   }
   return uid;
+}
+
+/** Signed download for the Android APK uploaded to Storage root (autoreplybot.apk). */
+async function handleAppDownload(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requireAuthed(req);
+    const objectPath = String(
+      process.env.ANDROID_APK_STORAGE_PATH || "autoreplybot.apk"
+    ).replace(/^\/+/, "");
+    const fileName = String(
+      process.env.ANDROID_APK_FILE_NAME || "AutoReplyBot.apk"
+    ).replace(/[^\w.\-() ]+/g, "_");
+    const file = storageBucket().file(objectPath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({
+        error: `APK not found in Storage at ${objectPath}. Upload autoreplybot.apk to the bucket root.`,
+        code: "APK_NOT_FOUND",
+      });
+    }
+    const [meta] = await file.getMetadata().catch(() => [{}]);
+    const sizeBytes = Number(meta?.size || 0);
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 60 * 60 * 1000,
+      responseDisposition: `attachment; filename="${fileName}"`,
+      responseType: "application/vnd.android.package-archive",
+    });
+    // Direct redirect starts the browser download with no extra click.
+    if (String(req.query?.redirect || "") === "1") {
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(302, url);
+    }
+    return res.status(200).json({
+      ok: true,
+      url,
+      fileName,
+      sizeBytes,
+      contentType: "application/vnd.android.package-archive",
+    });
+  } catch (e) {
+    return clientError(res, e, "APP_DOWNLOAD_FAILED");
+  }
 }
 
 function clientError(res, e, fallback) {

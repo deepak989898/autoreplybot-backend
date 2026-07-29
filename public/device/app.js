@@ -4610,6 +4610,46 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
   }
 });
 document.getElementById("btn-msg-refresh")?.addEventListener("click", () => refreshMessagesPanel());
+document.getElementById("btn-download-apk")?.addEventListener("click", () => downloadAndroidApk());
+
+async function downloadAndroidApk() {
+  const btn = document.getElementById("btn-download-apk");
+  const status = document.getElementById("apk-download-status");
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = "Preparing download…";
+  try {
+    const data = await api("/api/device/app-download");
+    const url = String(data.url || "").trim();
+    const fileName = String(data.fileName || "AutoReplyBot.apk");
+    if (!url) throw new Error("Download URL missing");
+    if (status) {
+      const size = Number(data.sizeBytes || 0);
+      status.textContent = size
+        ? `Downloading ${fileName} (${formatBytes(size)})…`
+        : `Downloading ${fileName}…`;
+    }
+    // Prefer navigating to signed URL so the browser saves with Content-Disposition
+    // (works for large APKs; no extra confirm step beyond the normal browser download).
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Fallback for browsers that ignore cross-origin download attribute.
+    setTimeout(() => {
+      if (status) status.textContent = "If the download did not start, check your browser downloads bar.";
+    }, 1200);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = "";
+    alert(msg || "Could not download the app");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
   try {
     const deviceId =

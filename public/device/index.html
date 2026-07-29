@@ -320,7 +320,11 @@
 
           <div id="phone-tab-call-logs" class="phone-tab-panel" data-phone-panel="call-logs" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Answered calls: app tries to capture voice, then looks for OnePlus <strong>Phone Call Recording</strong> files. Silent uploads are rejected. Enable Call logs + Phone + Mic + Music/audio, keep “Call recording ready”, and turn ON Phone app Call recording. Duration can include dialing time before connect.</p>
+              <p class="page-sub">
+                <strong>Notification “Call recording ready” = no tap needed</strong> (it only means the monitor is running).
+                Android blocks third‑party call audio, so turn ON <strong>Phone app → Call recording → Always record</strong>,
+                allow Call logs + Phone + Mic + Music/audio, then remake the call. Sync picks up those Phone recordings.
+              </p>
               <div class="page-actions">
                 <button id="btn-call-logs-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-call-logs-refresh" class="btn-primary" type="button">Refresh</button>
@@ -534,7 +538,15 @@
               <p class="page-sub">Device and browser preferences. Sensitive modules stay off until enabled on the phone.</p>
             </div>
           </header>
-          <div class="surface">
+          <div class="surface settings-download-card">
+            <h2 class="settings-section-title">Android app</h2>
+            <p class="muted">Download the latest AutoReplyBot APK and install it on your phone (enable Install unknown apps if asked).</p>
+            <div class="row-gap" style="margin-top:12px;align-items:center;flex-wrap:wrap;">
+              <button id="btn-download-apk" class="btn-primary" type="button">Download App</button>
+              <span id="apk-download-status" class="muted" aria-live="polite"></span>
+            </div>
+          </div>
+          <div class="surface" style="margin-top:12px;">
             <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, and App Control (default off).</p>
             <p class="muted">Camera, location, gallery, files, notifications, messages, call logs, and contacts keep their existing settings.</p>
           </div>

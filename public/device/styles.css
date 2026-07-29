@@ -1213,13 +1213,13 @@ textarea.input {
   margin-top: 8px;
 }
 
-.media-viewer {
-  border: 0;
-  border-radius: 16px;
-  padding: 0;
-  width: min(920px, 94vw);
-  max-height: 90vh;
-  background: #fff;
+.settings-section-title {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.settings-download-card {
+  margin-bottom: 0;
 }
 
 .media-viewer::backdrop {
