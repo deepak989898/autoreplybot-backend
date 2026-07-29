@@ -53,6 +53,23 @@
       color: #6b7289;
     }
   </style>
+  <script>
+    // Hard fallback if app.js fails to load or boot never finishes.
+    setTimeout(function () {
+      var el = document.getElementById("boot-loading");
+      if (!el || el.hidden || el.hasAttribute("hidden")) return;
+      el.hidden = true;
+      el.setAttribute("hidden", "");
+      document.body.classList.remove("is-booting");
+      var login = document.getElementById("view-login");
+      var app = document.getElementById("view-app");
+      if (login && (!app || app.hidden)) {
+        login.hidden = false;
+        login.removeAttribute("hidden");
+        login.style.display = "";
+      }
+    }, 12000);
+  </script>
 </head>
 <body class="device-app is-booting">
   <div id="boot-loading" class="boot-loading" role="status" aria-live="polite" aria-busy="true">

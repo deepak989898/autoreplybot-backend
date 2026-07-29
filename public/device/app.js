@@ -275,6 +275,38 @@ function setBootLoading(show, text) {
     else el.setAttribute("hidden", "");
   }
   document.body.classList.toggle("is-booting", Boolean(show));
+  if (!show && bootLoadingWatchdog) {
+    clearTimeout(bootLoadingWatchdog);
+    bootLoadingWatchdog = null;
+  }
+}
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let bootLoadingWatchdog = null;
+
+function armBootLoadingWatchdog(ms = 12000) {
+  if (bootLoadingWatchdog) clearTimeout(bootLoadingWatchdog);
+  bootLoadingWatchdog = setTimeout(() => {
+    bootLoadingWatchdog = null;
+    const el = document.getElementById("boot-loading");
+    if (el && !el.hidden) {
+      console.warn("Boot loading watchdog — forcing UI");
+      setBootLoading(false);
+      // If neither view is visible, show login as a safe fallback.
+      if (viewApp?.hidden && viewLogin?.hidden) {
+        setLoggedOutUi();
+      }
+    }
+  }, ms);
+}
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label || "Request"} timed out`)), ms);
+    }),
+  ]);
 }
 
 function setLoggedInUi(user) {
@@ -492,9 +524,9 @@ function resetLiveControlState(deviceId) {
  */
 
 async function loadConfig() {
-  const res = await fetch("/api/config");
+  const res = await withTimeout(fetch("/api/config"), 10000, "Config");
   if (!res.ok) throw new Error("Failed to load /api/config");
-  return res.json();
+  return withTimeout(res.json(), 5000, "Config JSON");
 }
 
 async function api(path, options = {}) {
@@ -2187,6 +2219,7 @@ function setAuthBusy(busy, label) {
 
 async function main() {
   setBootLoading(true, "Loading…");
+  armBootLoadingWatchdog(12000);
   const cfg = await loadConfig();
   if (!cfg.firebase?.apiKey) {
     setBootLoading(false);
@@ -2205,6 +2238,7 @@ async function main() {
     return;
   }
   setBootLoading(true, "Checking sign-in…");
+  armBootLoadingWatchdog(12000);
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
   db = getFirestore(app);
@@ -2345,18 +2379,26 @@ async function main() {
       return;
     }
     try {
-      setBootLoading(true, "Loading your devices…");
-      idToken = await user.getIdToken();
+      idToken = await withTimeout(user.getIdToken(), 10000, "Auth token");
       firebaseUid = user.uid;
       setLoggedInUi(user);
+      // Show the app immediately — do not block the spinner on device APIs.
+      setBootLoading(false);
       showPanel("phone");
-      await refreshDashboard();
+      await withTimeout(refreshDashboard(), 15000, "Dashboard").catch((e) => {
+        console.warn("refreshDashboard", e);
+        if (deviceList && !deviceList.querySelector(".device-card")) {
+          deviceList.textContent =
+            e instanceof Error ? e.message : "Could not load devices. Tap Refresh.";
+          deviceList.classList.add("muted");
+        }
+      });
     } catch (e) {
+      setLoggedInUi(user);
+      setBootLoading(false);
       if (authStatus) {
         authStatus.textContent = e instanceof Error ? e.message : String(e);
       }
-    } finally {
-      setBootLoading(false);
     }
   });
 }
