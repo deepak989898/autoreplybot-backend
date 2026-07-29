@@ -131,6 +131,7 @@ function showPanel(panelId) {
   let id = String(panelId || "phone");
   if (id === "home" || id === "devices" || id === "location" || id === "info"
       || id === "gallery" || id === "files" || id === "notifications" || id === "messages"
+      || id === "call-logs" || id === "contacts"
       || id === "transfers") {
     id = "phone";
   }
@@ -163,6 +164,8 @@ function syncHiddenDeviceSelects(deviceId) {
     "gallery-device-select",
     "notifications-device-select",
     "messages-device-select",
+    "call-logs-device-select",
+    "contacts-device-select",
     "files-device-select",
   ]) {
     const el = document.getElementById(id);
@@ -234,6 +237,8 @@ function setPhoneTab(tabId) {
   if (activePhoneTab === "gallery") refreshGalleryPanel().catch(() => {});
   if (activePhoneTab === "notifications") refreshNotificationsPanel().catch(() => {});
   if (activePhoneTab === "messages") refreshMessagesPanel().catch(() => {});
+  if (activePhoneTab === "call-logs") refreshCallLogsPanel().catch(() => {});
+  if (activePhoneTab === "contacts") refreshContactsPanel().catch(() => {});
   if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
   if (activePhoneTab === "screen") updateScreenStatusUi();
   if (activePhoneTab === "recording") refreshRecordingsPanel().catch(() => {});
@@ -3763,6 +3768,205 @@ async function refreshMessagesPanel() {
   }
 }
 
+function callTypeLabel(type) {
+  const t = String(type || "").toLowerCase();
+  const map = {
+    incoming: "Incoming",
+    outgoing: "Outgoing",
+    missed: "Missed",
+    voicemail: "Voicemail",
+    rejected: "Rejected",
+    blocked: "Blocked",
+    answered_externally: "Answered elsewhere",
+  };
+  return map[t] || (t ? t.replace(/_/g, " ") : "Unknown");
+}
+
+function callTypeClass(type) {
+  const t = String(type || "").toLowerCase();
+  if (t === "incoming") return "call-type-incoming";
+  if (t === "outgoing") return "call-type-outgoing";
+  if (t === "missed") return "call-type-missed";
+  if (t === "voicemail") return "call-type-voicemail";
+  if (t === "rejected") return "call-type-rejected";
+  if (t === "blocked") return "call-type-blocked";
+  if (t === "answered_externally") return "call-type-external";
+  return "call-type-other";
+}
+
+function formatCallDateTime(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return String(n);
+  }
+}
+
+function formatCallDuration(sec) {
+  const s = Math.max(0, Number(sec || 0));
+  if (!s) return "0s";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}h ${m}m ${r}s`;
+  if (m > 0) return `${m}m ${r}s`;
+  return `${r}s`;
+}
+
+async function refreshCallLogsPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("call-logs-device-select")?.value;
+  const list = document.getElementById("call-logs-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  list.textContent = "Loading call logs...";
+  try {
+    const data = await api(
+      `/api/device/call-logs?deviceId=${encodeURIComponent(deviceId)}&limit=150`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No call logs yet.\n\n" +
+        "On the phone: Permissions → Call logs → allow.\n" +
+        "Trusted browsers → allow reading call logs.\n" +
+        "Then Sync from phone.";
+      return;
+    }
+    list.classList.remove("muted");
+    const groups = groupItemsByDay(items, "date");
+    list.innerHTML = `<div class="call-day-list">${groups
+      .map(([dayKey, dayItems], index) => {
+        const open = index === 0 ? " is-open" : "";
+        const hidden = index === 0 ? "" : " hidden";
+        const chevron = index === 0 ? "▲" : "▼";
+        const count = dayItems.length;
+        return `<section class="call-day-group${open}" data-day="${escapeHtml(dayKey)}">
+          <button type="button" class="call-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+            <span class="call-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+            <span class="call-day-count">${count}</span>
+            <span class="call-day-chevron" aria-hidden="true">${chevron}</span>
+          </button>
+          <div class="call-day-body"${hidden}>
+            <div class="call-grid">${dayItems
+              .map((it) => {
+                const type = String(it.callType || "incoming");
+                const typeLabel = escapeHtml(callTypeLabel(type));
+                const typeCls = callTypeClass(type);
+                const name = String(it.contactName || "").trim();
+                const number = String(it.number || "").trim() || "(unknown)";
+                const who = name
+                  ? `${escapeHtml(name)} · ${escapeHtml(number)}`
+                  : escapeHtml(number);
+                const when = escapeHtml(formatCallDateTime(it.date));
+                const dur = escapeHtml(formatCallDuration(it.durationSec));
+                const geo = String(it.geo || "").trim();
+                return `<article class="call-card">
+          <div class="call-card-head">
+            <strong class="call-who">${who}</strong>
+            <span class="call-type ${typeCls}">${typeLabel}</span>
+          </div>
+          <div class="call-meta">
+            <time class="call-time">${when}</time>
+            <span class="call-duration">Duration ${dur}</span>
+            ${geo ? `<span class="call-geo">${escapeHtml(geo)}</span>` : ""}
+          </div>
+        </article>`;
+              })
+              .join("")}</div>
+          </div>
+        </section>`;
+      })
+      .join("")}</div>`;
+
+    list.querySelectorAll(".call-day-header").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const group = btn.closest(".call-day-group");
+        const body = group?.querySelector(".call-day-body");
+        const chevron = btn.querySelector(".call-day-chevron");
+        if (!group || !body) return;
+        const opening = body.hasAttribute("hidden");
+        if (opening) {
+          body.removeAttribute("hidden");
+          group.classList.add("is-open");
+          btn.setAttribute("aria-expanded", "true");
+          if (chevron) chevron.textContent = "▲";
+        } else {
+          body.setAttribute("hidden", "");
+          group.classList.remove("is-open");
+          btn.setAttribute("aria-expanded", "false");
+          if (chevron) chevron.textContent = "▼";
+        }
+      });
+    });
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshContactsPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("contacts-device-select")?.value;
+  const list = document.getElementById("contacts-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  const q = String(document.getElementById("contacts-search")?.value || "").trim();
+  list.textContent = "Loading contacts...";
+  try {
+    const qs = new URLSearchParams({ deviceId, limit: "1000" });
+    if (q) qs.set("q", q);
+    const data = await api(`/api/device/contacts?${qs.toString()}`);
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No contacts yet.\n\n" +
+        "On the phone: Permissions → Contacts → allow.\n" +
+        "Trusted browsers → allow reading contacts.\n" +
+        "Then Sync from phone.";
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = `<div class="contacts-grid">${items
+      .map((it) => {
+        const name = escapeHtml(String(it.displayName || "").trim() || "(No name)");
+        const number = escapeHtml(String(it.number || "").trim() || "—");
+        const phoneType = escapeHtml(String(it.phoneType || "other"));
+        return `<article class="contact-card">
+          <strong class="contact-name">${name}</strong>
+          <div class="contact-number">${number}</div>
+          <div class="contact-meta">${phoneType}</div>
+        </article>`;
+      })
+      .join("")}</div>`;
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
 function isAudioEntry(entry) {
   const mime = String(entry.mimeType || "").toLowerCase();
   const name = String(entry.name || "").toLowerCase();
@@ -4213,6 +4417,61 @@ document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
       alert(msg);
     }
   }
+});
+document.getElementById("btn-call-logs-refresh")?.addEventListener("click", () => refreshCallLogsPanel());
+document.getElementById("btn-call-logs-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId =
+      selectedWorkspaceDeviceId || document.getElementById("call-logs-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/call-logs/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshCallLogsPanel(), 3000);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/callLogsList|CAPABILITY_DENIED|CALL_LOGS_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot sync call logs yet.\n\n" +
+          "1) Phone → Permissions → Call logs → allow\n" +
+          "2) Trusted browsers → allow reading call logs\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+document.getElementById("btn-contacts-refresh")?.addEventListener("click", () => refreshContactsPanel());
+document.getElementById("btn-contacts-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId =
+      selectedWorkspaceDeviceId || document.getElementById("contacts-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/contacts/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshContactsPanel(), 3500);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/contactsList|CAPABILITY_DENIED|CONTACTS_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot sync contacts yet.\n\n" +
+          "1) Phone → Permissions → Contacts → allow\n" +
+          "2) Trusted browsers → allow reading contacts\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+let contactsSearchTimer = null;
+document.getElementById("contacts-search")?.addEventListener("input", () => {
+  clearTimeout(contactsSearchTimer);
+  contactsSearchTimer = setTimeout(() => refreshContactsPanel().catch(() => {}), 280);
 });
 document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());
 document.getElementById("btn-files-up")?.addEventListener("click", async () => {

@@ -67,6 +67,10 @@ export default async function handler(req, res) {
   if (path === "notifications/sync") return handleNotificationsSync(req, res);
   if (path === "messages") return handleMessagesList(req, res);
   if (path === "messages/sync") return handleMessagesSync(req, res);
+  if (path === "call-logs") return handleCallLogsList(req, res);
+  if (path === "call-logs/sync") return handleCallLogsSync(req, res);
+  if (path === "contacts") return handleContactsList(req, res);
+  if (path === "contacts/sync") return handleContactsSync(req, res);
   if (path === "apps") return handleAppsList(req, res);
   if (path === "apps/sync") return handleAppsSync(req, res);
   if (path === "apps/detail") return handleAppDetail(req, res);
@@ -1306,6 +1310,175 @@ async function handleMessagesSync(req, res) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return clientError(res, e, "MESSAGES_SYNC_FAILED");
+  }
+}
+
+async function handleCallLogsList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const limit = Math.min(300, Math.max(1, Number(req.query?.limit || 120)));
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_CALL_LOG_ITEMS)
+      .orderBy("date", "desc")
+      .limit(limit)
+      .get();
+    const items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        itemId: d.id,
+        callId: Number(data.callId || 0),
+        number: String(data.number || ""),
+        contactName: String(data.contactName || ""),
+        callType: String(data.callType || "incoming"),
+        callTypeCode: Number(data.callTypeCode || 0),
+        date: Number(data.date || 0),
+        durationSec: Number(data.durationSec || 0),
+        isNew: Boolean(data.isNew),
+        geo: String(data.geo || ""),
+        syncedAt: Number(data.syncedAt || 0),
+      };
+    });
+    return res.status(200).json({ ok: true, items });
+  } catch (e) {
+    return clientError(res, e, "CALL_LOGS_LIST_FAILED");
+  }
+}
+
+async function handleCallLogsSync(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    if (!deviceSnap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "CALL_LOGS_SYNC",
+      { limit: Math.min(300, Math.max(20, Number(body.limit || 150))) },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_CALL_LOGS_SYNC,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "CALL_LOGS_SYNC_FAILED");
+  }
+}
+
+async function handleContactsList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const limit = Math.min(2000, Math.max(1, Number(req.query?.limit || 500)));
+    const q = String(req.query?.q || "").trim().toLowerCase();
+    const snap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_CONTACT_ITEMS)
+      .orderBy("displayName", "asc")
+      .limit(limit)
+      .get();
+    let items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        itemId: d.id,
+        contactId: Number(data.contactId || 0),
+        displayName: String(data.displayName || ""),
+        number: String(data.number || ""),
+        phoneType: String(data.phoneType || "other"),
+        syncedAt: Number(data.syncedAt || 0),
+      };
+    });
+    if (q) {
+      items = items.filter(
+        (it) =>
+          String(it.displayName || "").toLowerCase().includes(q) ||
+          String(it.number || "").toLowerCase().includes(q)
+      );
+    }
+    return res.status(200).json({ ok: true, items });
+  } catch (e) {
+    return clientError(res, e, "CONTACTS_LIST_FAILED");
+  }
+}
+
+async function handleContactsSync(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const deviceSnap = await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .get();
+    if (!deviceSnap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "CONTACTS_SYNC",
+      { limit: Math.min(2000, Math.max(50, Number(body.limit || 1000))) },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_CONTACTS_SYNC,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "CONTACTS_SYNC_FAILED");
   }
 }
 

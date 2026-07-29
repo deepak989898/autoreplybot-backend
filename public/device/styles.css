@@ -1733,6 +1733,8 @@ textarea.input {
 .phone-tab[data-phone-tab="gallery"] { --tab-accent: #d97706; --tab-soft: #fef3c7; }
 .phone-tab[data-phone-tab="notifications"] { --tab-accent: #ea580c; --tab-soft: #ffedd5; }
 .phone-tab[data-phone-tab="messages"] { --tab-accent: #0891b2; --tab-soft: #cffafe; }
+.phone-tab[data-phone-tab="call-logs"] { --tab-accent: #16a34a; --tab-soft: #dcfce7; }
+.phone-tab[data-phone-tab="contacts"] { --tab-accent: #ca8a04; --tab-soft: #fef9c3; }
 .phone-tab[data-phone-tab="files"] { --tab-accent: #4f46e5; --tab-soft: #e0e7ff; }
 .phone-tab[data-phone-tab="screen"] { --tab-accent: #7c3aed; --tab-soft: #ede9fe; }
 .phone-tab[data-phone-tab="recording"] { --tab-accent: #dc2626; --tab-soft: #fee2e2; }
@@ -2050,6 +2052,152 @@ textarea.input {
 .msg-meta {
   font-size: 0.82rem;
   color: var(--muted, #9aa3b5);
+}
+
+.call-list {
+  min-height: 120px;
+}
+
+.call-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.call-day-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.call-day-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 0;
+  background: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.call-day-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.call-day-count {
+  font-size: 0.82rem;
+  color: var(--muted, #64748b);
+  background: #e2e8f0;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.call-day-body {
+  padding: 12px;
+}
+
+.call-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.call-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.call-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.call-who {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.call-type {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.call-type-incoming { color: #15803d; }
+.call-type-outgoing { color: #1d4ed8; }
+.call-type-missed { color: #dc2626; }
+.call-type-rejected { color: #ea580c; }
+.call-type-blocked { color: #7c3aed; }
+.call-type-voicemail { color: #0f766e; }
+.call-type-external { color: #0891b2; }
+.call-type-other { color: #64748b; }
+
+.call-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 0.84rem;
+  color: var(--muted, #64748b);
+}
+
+.call-time {
+  color: #334155;
+  font-weight: 500;
+}
+
+.contacts-search {
+  margin: 0 0 12px;
+  max-width: 420px;
+}
+
+.contacts-list {
+  min-height: 120px;
+}
+
+.contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.contact-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.contact-name {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.contact-number {
+  font-size: 0.95rem;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.contact-meta {
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+  text-transform: capitalize;
 }
 
 .files-breadcrumb {

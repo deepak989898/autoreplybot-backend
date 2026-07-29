@@ -237,6 +237,8 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery" title="Gallery"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Gallery</span><span class="tab-label-short">Gallery</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications" title="Notifications"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Notifications</span><span class="tab-label-short">Alerts</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages" title="Messages"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Messages</span><span class="tab-label-short">SMS</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="call-logs" title="Call Logs"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Call Logs</span><span class="tab-label-short">Calls</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="contacts" title="Contacts"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Contacts</span><span class="tab-label-short">Contacts</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files" title="File Manager"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">File Manager</span><span class="tab-label-short">Files</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror &amp; Remote Control"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording" title="Screen Recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
@@ -314,6 +316,31 @@
             </div>
             <select id="messages-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="messages-list" class="msg-list muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-call-logs" class="phone-tab-panel" data-phone-panel="call-logs" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Call history with type (incoming / outgoing / missed / …), saved name, number, date, and time. Enable Call logs on Permissions, allow this browser, then Sync.</p>
+              <div class="page-actions">
+                <button id="btn-call-logs-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-call-logs-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="call-logs-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="call-logs-list" class="call-list muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-contacts" class="phone-tab-panel" data-phone-panel="contacts" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Phone contacts with name and number. Enable Contacts on Permissions, allow this browser, then Sync.</p>
+              <div class="page-actions">
+                <button id="btn-contacts-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-contacts-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <input id="contacts-search" class="input contacts-search" type="search" placeholder="Search name or number…" autocomplete="off" />
+            <select id="contacts-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="contacts-list" class="contacts-list muted">Select a device.</div>
           </div>
 
           <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
@@ -509,7 +536,7 @@
           </header>
           <div class="surface">
             <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, and App Control (default off).</p>
-            <p class="muted">Camera, location, gallery, files, notifications, and messages keep their existing settings.</p>
+            <p class="muted">Camera, location, gallery, files, notifications, messages, call logs, and contacts keep their existing settings.</p>
           </div>
         </section>
 
