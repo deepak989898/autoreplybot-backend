@@ -2042,9 +2042,10 @@ function openMediaViewer(item) {
     hint.className = "muted media-audio-hint";
     if (item.browserPlayable === false) {
       hint.textContent = "This recording is AMR/3GP — Chrome cannot play it. Download and open in VLC.";
-      hint.classList.add("error");
+      hint.style.color = "#fecaca";
     } else {
-      hint.textContent = "If the player stays at 0:00, use Download.";
+      hint.textContent = "Loading audio…";
+      hint.style.color = "#94a3b8";
     }
     const dl = document.createElement("a");
     dl.href = url;
@@ -2054,14 +2055,48 @@ function openMediaViewer(item) {
     dl.style.marginTop = "10px";
     dl.style.display = "inline-block";
     audio.addEventListener("error", () => {
-      hint.textContent = "Browser cannot play this audio format. Download and open in VLC.";
-      hint.classList.add("error");
+      hint.textContent = "Browser cannot play this audio format. Use Download and open in VLC.";
+      hint.style.color = "#fecaca";
     });
     audio.addEventListener("loadedmetadata", () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
-        hint.textContent = `Duration ${Math.round(audio.duration)}s`;
+        hint.textContent = `File length ${Math.round(audio.duration)}s (may include dialing time before connect)`;
+        hint.style.color = "#94a3b8";
       }
     });
+    // Detect near-silent playback (common when telephony blocked the mic).
+    let silentChecks = 0;
+    let heard = false;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaElementSource(audio);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      analyser.connect(ctx.destination);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!audio || audio.paused) return;
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        if (sum / data.length > 4) heard = true;
+        silentChecks++;
+        if (!heard && silentChecks > 20 && audio.currentTime > 2) {
+          hint.textContent =
+            "This file has little/no voice (phone call mic was silent). Enable OnePlus built-in Call recording, then remake the call.";
+          hint.style.color = "#fecaca";
+          return;
+        }
+        if (!audio.ended && !audio.paused) requestAnimationFrame(tick);
+      };
+      audio.addEventListener("play", () => {
+        ctx.resume().catch(() => {});
+        requestAnimationFrame(tick);
+      });
+    } catch {
+      /* AudioContext optional */
+    }
     wrap.appendChild(audio);
     wrap.appendChild(hint);
     wrap.appendChild(dl);
