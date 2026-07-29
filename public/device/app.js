@@ -2429,17 +2429,31 @@ function isStandaloneDisplay() {
   );
 }
 
-/** Keep the installed PWA / mobile UI in portrait — never rotate with the phone. */
+/** Keep mobile / PWA UI in portrait even if the OS rotates the screen. */
+function isPhoneLikeDevice() {
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const narrow = Math.min(window.screen.width, window.screen.height) <= 520
+    || window.matchMedia("(max-width: 1024px)").matches;
+  const touch = navigator.maxTouchPoints > 0;
+  return (coarse || touch) && narrow;
+}
+
+function applyForcePortraitClass() {
+  const on = isPhoneLikeDevice();
+  document.documentElement.classList.toggle("force-portrait-mobile", on);
+}
+
 function lockPortraitOrientation() {
+  applyForcePortraitClass();
   try {
-    const orient = screen.orientation || screen.mozOrientation || screen.msOrientation;
+    const orient = screen.orientation;
     if (orient && typeof orient.lock === "function") {
-      orient.lock("portrait").catch(() => {
-        orient.lock("portrait-primary").catch(() => {});
+      orient.lock("portrait-primary").catch(() => {
+        orient.lock("portrait").catch(() => {});
       });
     }
   } catch {
-    // Browser may require fullscreen / installed PWA; manifest covers that case.
+    // CSS force-portrait-mobile still keeps the layout upright.
   }
 }
 
@@ -2514,10 +2528,24 @@ function setupPwa() {
 
   updatePwaInstallUi();
   lockPortraitOrientation();
-  window.addEventListener("orientationchange", () => lockPortraitOrientation());
+  window.addEventListener("orientationchange", () => {
+    lockPortraitOrientation();
+    // Re-apply after the browser finishes rotating the visual viewport.
+    setTimeout(lockPortraitOrientation, 50);
+    setTimeout(lockPortraitOrientation, 300);
+  });
+  window.addEventListener("resize", () => applyForcePortraitClass());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") lockPortraitOrientation();
   });
+  // Many Android browsers only allow orientation.lock after a user gesture.
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      lockPortraitOrientation();
+    },
+    { passive: true, once: false }
+  );
 }
 
 setupPwa();

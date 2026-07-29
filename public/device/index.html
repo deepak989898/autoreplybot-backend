@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
   <meta name="theme-color" content="#5b5ce2" />
   <meta name="description" content="AutoReplyBot Remote Camera &amp; Voice — pair your phone and manage live sessions." />
+  <meta name="screen-orientation" content="portrait" />
+  <meta name="x5-orientation" content="portrait" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -17,6 +19,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
+  <script>
+    // Apply before CSS so landscape phones never flash a sideways layout.
+    (function () {
+      try {
+        var touch = navigator.maxTouchPoints > 0;
+        var narrow = Math.min(screen.width, screen.height) <= 520 || window.innerWidth <= 1024;
+        if (touch && narrow) document.documentElement.classList.add("force-portrait-mobile");
+      } catch (e) {}
+    })();
+  </script>
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -51,6 +63,21 @@
       margin: 8px 0 0;
       font-size: 0.92rem;
       color: #6b7289;
+    }
+    /* Early portrait lock (same as styles.css) before stylesheet arrives */
+    @media screen and (max-width: 1024px) and (orientation: landscape) {
+      html.force-portrait-mobile {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        width: 100vh;
+        height: 100vw;
+        overflow-x: hidden;
+        overflow-y: auto;
+        transform: rotate(-90deg);
+        transform-origin: left top;
+        background: #f4f6fb;
+      }
     }
   </style>
   <script>
