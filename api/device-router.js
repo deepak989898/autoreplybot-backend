@@ -1,4 +1,4 @@
-﻿import { randomBytes } from "crypto";
+import { randomBytes } from "crypto";
 import { getMessaging } from "firebase-admin/messaging";
 import { verifyFirebaseIdToken } from "../lib/auth.js";
 import { db } from "../lib/firebase.js";

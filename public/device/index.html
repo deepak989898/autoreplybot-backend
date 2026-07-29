@@ -177,7 +177,7 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications" title="Notifications"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Notifications</span><span class="tab-label-short">Alerts</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages" title="Messages"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Messages</span><span class="tab-label-short">SMS</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files" title="File Manager"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">File Manager</span><span class="tab-label-short">Files</span></button>
-            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror &amp; Remote Control"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording" title="Screen Recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps" title="Installed Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
           </div>
@@ -303,9 +303,46 @@
               <span id="screen-status" class="status-badge">Idle</span>
               <span id="screen-stats" class="muted">Latency — · FPS — · Bandwidth —</span>
             </div>
-            <div class="screen-stage surface">
+            <div class="screen-controls surface rc-toolbar">
+              <label class="chk"><input type="checkbox" id="rc-control-enabled" /> Remote Control</label>
+              <select id="rc-gesture-mode" class="input" title="Gesture mode">
+                <option value="tap" selected>Tap</option>
+                <option value="double">Double tap</option>
+                <option value="long">Long press</option>
+                <option value="swipe">Swipe</option>
+                <option value="drag">Drag</option>
+              </select>
+              <button type="button" class="btn-secondary" id="btn-rc-back">Back</button>
+              <button type="button" class="btn-secondary" id="btn-rc-home">Home</button>
+              <button type="button" class="btn-secondary" id="btn-rc-recents">Recents</button>
+              <button type="button" class="btn-secondary" id="btn-rc-notif">Notifications</button>
+              <button type="button" class="btn-secondary" id="btn-rc-tree">Refresh elements</button>
+              <button type="button" class="btn-danger" id="btn-rc-stop">Emergency Stop</button>
+              <span id="rc-status" class="status-badge">View only</span>
+            </div>
+            <div class="screen-stage surface" id="screen-stage">
               <video id="screen-video" playsinline autoplay muted></video>
+              <div id="rc-touch-marker" class="rc-touch-marker" hidden></div>
               <canvas id="screen-shot-canvas" hidden></canvas>
+            </div>
+            <div class="rc-panels">
+              <div class="surface rc-text-panel">
+                <label>Type on phone
+                  <input id="rc-text-input" class="input" type="text" maxlength="2000" placeholder="Text for focused field" />
+                </label>
+                <div class="row-gap">
+                  <button type="button" class="btn-primary" id="btn-rc-set-text">Insert text</button>
+                  <button type="button" class="btn-secondary" id="btn-rc-clear-text">Clear field</button>
+                </div>
+              </div>
+              <div class="surface rc-tree-panel">
+                <div class="surface-head">
+                  <h2>Element inspector</h2>
+                  <input id="rc-tree-search" class="input" type="search" placeholder="Filter elements" />
+                </div>
+                <p id="rc-tree-meta" class="muted">No tree yet.</p>
+                <div id="rc-tree-list" class="rc-tree-list muted">Start Remote Control, then Refresh elements.</div>
+              </div>
             </div>
             <div id="screen-shot-preview" class="surface muted" hidden></div>
           </div>

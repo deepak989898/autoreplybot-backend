@@ -11,6 +11,7 @@ import {
 import {
   getFirestore,
   doc,
+  getDoc,
   onSnapshot,
   collection,
   setDoc,
@@ -4848,6 +4849,377 @@ document.getElementById("btn-screen-shot")?.addEventListener("click", () => {
       <a class="btn-secondary" href="${url}" download="screen-${Date.now()}.jpg">Download</a>`;
   }
 });
+
+/* ——— Remote Accessibility Control (Screen Mirror companion) ——— */
+let rcSessionActive = false;
+let rcTreeNodes = [];
+let rcDragStart = null;
+let rcLastClickAt = 0;
+let rcCmdUnsub = null;
+
+function setRcStatus(text) {
+  const el = document.getElementById("rc-status");
+  if (el) el.textContent = text;
+}
+
+function isRcEnabled() {
+  return Boolean(document.getElementById("rc-control-enabled")?.checked) && rcSessionActive;
+}
+
+/** object-fit:contain content rect inside the video element */
+function videoContentRect(video) {
+  const rect = video.getBoundingClientRect();
+  const vw = video.videoWidth || 0;
+  const vh = video.videoHeight || 0;
+  if (!vw || !vh || !rect.width || !rect.height) return null;
+  const scale = Math.min(rect.width / vw, rect.height / vh);
+  const dispW = vw * scale;
+  const dispH = vh * scale;
+  const offX = (rect.width - dispW) / 2;
+  const offY = (rect.height - dispH) / 2;
+  return { rect, vw, vh, scale, dispW, dispH, offX, offY };
+}
+
+function clientToNormalized(video, clientX, clientY) {
+  const c = videoContentRect(video);
+  if (!c) return null;
+  const localX = clientX - c.rect.left - c.offX;
+  const localY = clientY - c.rect.top - c.offY;
+  if (localX < 0 || localY < 0 || localX > c.dispW || localY > c.dispH) return null;
+  return {
+    nx: Math.min(1, Math.max(0, localX / c.dispW)),
+    ny: Math.min(1, Math.max(0, localY / c.dispH)),
+    markerX: c.offX + localX,
+    markerY: c.offY + localY,
+  };
+}
+
+function showRcMarker(x, y, ok) {
+  const stage = document.getElementById("screen-stage");
+  const marker = document.getElementById("rc-touch-marker");
+  if (!stage || !marker) return;
+  marker.hidden = false;
+  marker.style.left = `${x}px`;
+  marker.style.top = `${y}px`;
+  marker.style.background = ok === false ? "rgba(220,38,38,0.55)" : "rgba(91,92,226,0.55)";
+  clearTimeout(showRcMarker._t);
+  showRcMarker._t = setTimeout(() => {
+    marker.hidden = true;
+  }, 650);
+}
+
+async function waitModuleCommand(commandId, timeoutMs = 20000) {
+  if (!firebaseUid || !selectedWorkspaceDeviceId || !commandId || !db) {
+    throw new Error("Missing auth/device for command wait");
+  }
+  const ref = doc(
+    db,
+    "users",
+    firebaseUid,
+    "devices",
+    selectedWorkspaceDeviceId,
+    "moduleCommands",
+    commandId
+  );
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (unsub) unsub();
+      reject(new Error("Command timed out"));
+    }, timeoutMs);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() || {};
+        const status = String(data.status || "");
+        if (status === "acked" || status === "failed" || status === "expired" || status === "ignored") {
+          clearTimeout(timer);
+          unsub();
+          resolve(data);
+        }
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+async function sendA11yCommand(action, payload = {}) {
+  const deviceId = selectedWorkspaceDeviceId;
+  const clientId = requireClientId();
+  if (!deviceId) throw new Error("Select a device first");
+  const created = await api("/api/device/command", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId,
+      clientId,
+      action,
+      payload: { ...payload, clientId, normalized: true },
+    }),
+  });
+  const commandId = created?.command?.commandId;
+  if (!commandId) throw new Error("No commandId returned");
+  const result = await waitModuleCommand(commandId);
+  if (result.status === "failed") {
+    const err = new Error(result.errorMessage || result.errorCode || "Command failed");
+    err.code = result.errorCode;
+    throw err;
+  }
+  return result;
+}
+
+async function startRemoteControlSession() {
+  setRcStatus("Starting…");
+  try {
+    await sendA11yCommand("A11Y_START_SESSION", {
+      durationMs: 30 * 60 * 1000,
+    });
+    rcSessionActive = true;
+    setRcStatus("Remote control active");
+  } catch (e) {
+    rcSessionActive = false;
+    const box = document.getElementById("rc-control-enabled");
+    if (box) box.checked = false;
+    const msg = e instanceof Error ? e.message : String(e);
+    setRcStatus("Remote control disabled");
+    if (/ACCESSIBILITY_REQUIRED|MODULE_DISABLED/i.test(msg) || e.code === "ACCESSIBILITY_REQUIRED") {
+      alert(
+        "Accessibility control is disabled on the phone.\n\n" +
+          "1) Phone → Management → Remote Control Setup\n" +
+          "2) Enable the Accessibility service in Android Settings\n" +
+          "3) Turn Remote Control ON in the app\n" +
+          "4) Trusted Browsers → allow Remote Accessibility + Direct Touch\n\n" +
+          msg
+      );
+    } else if (/CAPABILITY_DENIED|remoteAccessibility/i.test(msg)) {
+      alert(
+        "This browser is not allowed to use Remote Control.\n\n" +
+          "Phone → Trusted Browsers → enable Remote Accessibility Control.\n\n" +
+          msg
+      );
+    } else alert(msg);
+  }
+}
+
+async function stopRemoteControlSession(emergency) {
+  try {
+    await sendA11yCommand(emergency ? "A11Y_EMERGENCY_STOP" : "A11Y_STOP_SESSION", {});
+  } catch {
+    /* ignore */
+  }
+  rcSessionActive = false;
+  setRcStatus("View only");
+}
+
+async function refreshRcTree() {
+  setRcStatus("Loading elements…");
+  try {
+    const result = await sendA11yCommand("A11Y_TREE", {});
+    const summary = String(result.resultSummary || "");
+    const m = summary.match(/tree:(\d+)/);
+    const version = m ? m[1] : "";
+    const meta = document.getElementById("rc-tree-meta");
+    if (!version || !db || !firebaseUid || !selectedWorkspaceDeviceId) {
+      if (meta) meta.textContent = summary || "Tree requested";
+      setRcStatus("Remote control active");
+      return;
+    }
+    const treeRef = doc(
+      db,
+      "users",
+      firebaseUid,
+      "devices",
+      selectedWorkspaceDeviceId,
+      "accessibility",
+      `tree_${version}`
+    );
+    const treeSnap = await getDoc(treeRef);
+    const data = treeSnap.exists() ? treeSnap.data() : null;
+    rcTreeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+    if (meta) {
+      meta.textContent = `${data?.packageName || "app"} · ${rcTreeNodes.length} elements · v${version}`;
+    }
+    renderRcTreeList("");
+    setRcStatus("Remote control active");
+  } catch (e) {
+    setRcStatus(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function renderRcTreeList(filter) {
+  const list = document.getElementById("rc-tree-list");
+  if (!list) return;
+  const q = String(filter || "").toLowerCase().trim();
+  const items = rcTreeNodes.filter((n) => {
+    if (!q) return n.clickable || n.editable || n.scrollable || n.checkable;
+    const hay = `${n.text || ""} ${n.contentDescription || ""} ${n.className || ""}`.toLowerCase();
+    return hay.includes(q);
+  }).slice(0, 80);
+  if (!items.length) {
+    list.textContent = "No matching elements.";
+    list.classList.add("muted");
+    return;
+  }
+  list.classList.remove("muted");
+  list.innerHTML = items
+    .map((n) => {
+      const label = escapeHtml(
+        (n.text || n.contentDescription || n.className || "element").slice(0, 80)
+      );
+      const flags = [
+        n.clickable ? "click" : "",
+        n.editable ? "edit" : "",
+        n.scrollable ? "scroll" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<button type="button" class="rc-tree-item" data-node-id="${escapeHtml(n.id)}">
+        <strong>${label}</strong><br/><span class="muted">${escapeHtml(flags || n.className || "")}</span>
+      </button>`;
+    })
+    .join("");
+  list.querySelectorAll(".rc-tree-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const nodeId = btn.getAttribute("data-node-id");
+      if (!nodeId || !isRcEnabled()) return;
+      setRcStatus("Clicking element…");
+      try {
+        await sendA11yCommand("A11Y_NODE_ACTION", { nodeId, nodeAction: "CLICK" });
+        setRcStatus("Element clicked");
+      } catch (e) {
+        setRcStatus(e instanceof Error ? e.message : String(e));
+      }
+    });
+  });
+}
+
+function wireRemoteControlUi() {
+  const video = document.getElementById("screen-video");
+  const toggle = document.getElementById("rc-control-enabled");
+  toggle?.addEventListener("change", async () => {
+    if (toggle.checked) await startRemoteControlSession();
+    else await stopRemoteControlSession(false);
+  });
+  document.getElementById("btn-rc-back")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 1 }).then(() => setRcStatus("Back")).catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-home")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 2 }).then(() => setRcStatus("Home")).catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-recents")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 3 }).then(() => setRcStatus("Recents")).catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-notif")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 4 }).then(() => setRcStatus("Notifications")).catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-tree")?.addEventListener("click", () => refreshRcTree());
+  document.getElementById("btn-rc-stop")?.addEventListener("click", async () => {
+    const box = document.getElementById("rc-control-enabled");
+    if (box) box.checked = false;
+    await stopRemoteControlSession(true);
+  });
+  document.getElementById("btn-rc-set-text")?.addEventListener("click", async () => {
+    const text = document.getElementById("rc-text-input")?.value || "";
+    try {
+      await sendA11yCommand("A11Y_SET_TEXT", { text });
+      setRcStatus("Text inserted");
+    } catch (e) {
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("btn-rc-clear-text")?.addEventListener("click", async () => {
+    try {
+      await sendA11yCommand("A11Y_SET_TEXT", { text: "" });
+      setRcStatus("Field cleared");
+    } catch (e) {
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("rc-tree-search")?.addEventListener("input", (ev) => {
+    renderRcTreeList(ev.target?.value || "");
+  });
+
+  if (!video) return;
+
+  video.addEventListener("pointerdown", (ev) => {
+    if (!isRcEnabled()) return;
+    const mode = document.getElementById("rc-gesture-mode")?.value || "tap";
+    if (mode === "swipe" || mode === "drag") {
+      const p = clientToNormalized(video, ev.clientX, ev.clientY);
+      if (!p) return;
+      rcDragStart = p;
+      video.setPointerCapture?.(ev.pointerId);
+    }
+  });
+
+  video.addEventListener("pointerup", async (ev) => {
+    if (!isRcEnabled()) return;
+    const mode = document.getElementById("rc-gesture-mode")?.value || "tap";
+    const end = clientToNormalized(video, ev.clientX, ev.clientY);
+    if (!end) return;
+    showRcMarker(end.markerX, end.markerY, true);
+    try {
+      if ((mode === "swipe" || mode === "drag") && rcDragStart) {
+        setRcStatus(mode === "drag" ? "Dragging…" : "Swiping…");
+        await sendA11yCommand(mode === "drag" ? "A11Y_DRAG" : "A11Y_SWIPE", {
+          nx1: rcDragStart.nx,
+          ny1: rcDragStart.ny,
+          nx2: end.nx,
+          ny2: end.ny,
+          durationMs: mode === "drag" ? 400 : 250,
+        });
+        setRcStatus("Gesture ok");
+        rcDragStart = null;
+        return;
+      }
+      const now = Date.now();
+      if (mode === "double" || (mode === "tap" && now - rcLastClickAt < 280)) {
+        setRcStatus("Double tap…");
+        await sendA11yCommand("A11Y_DOUBLE_TAP", { nx: end.nx, ny: end.ny });
+      } else if (mode === "long" || ev.button === 2) {
+        setRcStatus("Long press…");
+        await sendA11yCommand("A11Y_LONG_PRESS", { nx: end.nx, ny: end.ny, durationMs: 700 });
+      } else {
+        setRcStatus("Tap…");
+        await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny });
+      }
+      rcLastClickAt = now;
+      setRcStatus("Tap sent");
+    } catch (e) {
+      showRcMarker(end.markerX, end.markerY, false);
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      rcDragStart = null;
+    }
+  });
+
+  video.addEventListener("contextmenu", (ev) => {
+    if (isRcEnabled()) ev.preventDefault();
+  });
+
+  video.addEventListener("wheel", async (ev) => {
+    if (!isRcEnabled()) return;
+    ev.preventDefault();
+    const p = clientToNormalized(video, ev.clientX, ev.clientY);
+    if (!p) return;
+    const dy = ev.deltaY > 0 ? 0.18 : -0.18;
+    try {
+      await sendA11yCommand("A11Y_SWIPE", {
+        nx1: p.nx,
+        ny1: Math.min(0.85, Math.max(0.15, p.ny)),
+        nx2: p.nx,
+        ny2: Math.min(0.95, Math.max(0.05, p.ny + dy)),
+        durationMs: 220,
+      });
+    } catch (e) {
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  }, { passive: false });
+}
+
+wireRemoteControlUi();
 
 document.getElementById("btn-rec-start")?.addEventListener("click", async () => {
   try {

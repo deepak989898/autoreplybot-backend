@@ -452,6 +452,14 @@ service cloud.firestore {
         allow delete: if owner(uid);
       }
 
+      // Remote Accessibility Control — phone writes status/tree; browser reads only.
+      match /accessibility/{docId} {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid)
+            && request.resource.data.ownerUid == uid;
+        allow delete: if owner(uid);
+      }
+
       match /deviceInfo/{docId} {
         allow read: if owner(uid);
         allow create, update: if owner(uid)
