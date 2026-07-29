@@ -4950,13 +4950,18 @@ async function sendA11yCommand(action, payload = {}) {
   const deviceId = selectedWorkspaceDeviceId;
   const clientId = requireClientId();
   if (!deviceId) throw new Error("Select a device first");
+  const video = document.getElementById("screen-video");
+  const videoMeta = {
+    videoWidth: Number(video?.videoWidth || 0),
+    videoHeight: Number(video?.videoHeight || 0),
+  };
   const created = await api("/api/device/command", {
     method: "POST",
     body: JSON.stringify({
       deviceId,
       clientId,
       action,
-      payload: { ...payload, clientId, normalized: true },
+      payload: { ...payload, ...videoMeta, clientId, normalized: true },
     }),
   });
   const commandId = created?.command?.commandId;
@@ -5169,6 +5174,17 @@ function wireRemoteControlUi() {
     showRcMarker(end.markerX, end.markerY, true);
     try {
       if ((mode === "swipe" || mode === "drag") && rcDragStart) {
+        const dx = Math.abs(end.nx - rcDragStart.nx);
+        const dy = Math.abs(end.ny - rcDragStart.ny);
+        // Tiny movement while in Swipe mode = accidental click → treat as Tap
+        // (this was opening neighboring icons like PhonePe → Paytm).
+        if (dx < 0.025 && dy < 0.025) {
+          setRcStatus("Tap…");
+          await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny });
+          setRcStatus("Tap sent");
+          rcDragStart = null;
+          return;
+        }
         setRcStatus(mode === "drag" ? "Dragging…" : "Swiping…");
         await sendA11yCommand(mode === "drag" ? "A11Y_DRAG" : "A11Y_SWIPE", {
           nx1: rcDragStart.nx,
