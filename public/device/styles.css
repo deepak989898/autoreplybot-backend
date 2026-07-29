@@ -37,34 +37,6 @@ html {
   -webkit-tap-highlight-color: rgba(91, 92, 226, 0.12);
 }
 
-/*
- * Android often ignores PWA manifest orientation. When the phone is in landscape,
- * counter-rotate the page so the UI always stays portrait.
- */
-@media screen and (max-width: 1024px) and (orientation: landscape) {
-  html.force-portrait-mobile {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100vh;
-    height: 100vw;
-    max-width: none;
-    max-height: none;
-    overflow-x: hidden;
-    overflow-y: auto;
-    transform: rotate(-90deg);
-    transform-origin: left top;
-    -webkit-overflow-scrolling: touch;
-    background: var(--bg, #f4f6fb);
-  }
-
-  html.force-portrait-mobile body.device-app {
-    min-height: 100%;
-    width: 100%;
-    overflow-x: hidden;
-  }
-}
-
 .device-app.is-booting {
   overflow: hidden;
 }
