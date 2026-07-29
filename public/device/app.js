@@ -3888,7 +3888,8 @@ async function refreshCallLogsPanel() {
                   } else if (recStatus === "uploading" || recStatus === "pending") {
                     playHtml = `<span class="call-rec-status call-rec-pending">Uploading…</span>`;
                   } else if (recStatus === "failed") {
-                    playHtml = `<span class="call-rec-status call-rec-failed" title="${escapeHtml(it.recordingError || "Upload failed")}">Recording failed</span>`;
+                    const err = String(it.recordingError || "Upload failed").trim();
+                    playHtml = `<span class="call-rec-status call-rec-failed" title="${escapeHtml(err)}">Recording failed${err ? `: ${escapeHtml(err.slice(0, 120))}` : ""}</span>`;
                   } else if (Number(it.durationSec || 0) > 0) {
                     playHtml = `<span class="call-rec-status">No recording yet — phone needs Call logs + Phone + Mic, then remake the call</span>`;
                   } else {
