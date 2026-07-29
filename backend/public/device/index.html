@@ -2,89 +2,568 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Remote Devices — AutoReplyBot</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#5b5ce2" />
+  <meta name="description" content="AutoReplyBot Remote Camera &amp; Voice — pair your phone and manage live sessions." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="AutoReplyBot" />
+  <title>AutoReplyBot — Remote Camera &amp; Voice</title>
+  <link rel="manifest" href="/device/manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/device/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/device/icons/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
 </head>
-<body>
-  <main class="container">
-    <p class="muted"><a href="/">← Facebook dashboard</a></p>
-    <h1>Remote Camera &amp; Voice</h1>
-    <p class="muted">Register phones in the Android app, pair this browser, then Connect for a live WebRTC view (phone must Approve).</p>
+<body class="device-app">
+  <!-- LOGIN -->
+  <div id="view-login" class="login-shell">
+    <div class="login-split">
+      <aside class="login-hero">
+        <div class="login-hero-inner">
+          <p class="login-brand">AutoReplyBot</p>
+          <h1>Remote Camera &amp; Voice</h1>
+          <p class="login-lead">Secure live streaming after trusted pairing — with optional auto-approve and Android-visible privacy indicators.</p>
+          <ul class="login-features">
+            <li>Live front / back camera over WebRTC</li>
+            <li>QR pairing with trusted browsers</li>
+            <li>Photo &amp; recording controls from the dashboard</li>
+          </ul>
+        </div>
+      </aside>
+      <section class="login-panel">
+        <div class="login-card">
+          <h2>Welcome Back!</h2>
+          <p class="login-sub">Sign in with the same email and password as the Android app.</p>
+          <div class="auth-form">
+            <label>Email
+              <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
+            </label>
+            <label>Password
+              <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password" />
+            </label>
+          </div>
+          <button id="btn-login-email" class="btn-primary btn-block" type="button">Sign In</button>
+          <button id="btn-login" class="btn-google btn-block" type="button">Sign in with Google</button>
+          <button id="btn-install-pwa" class="btn-secondary btn-block btn-install-pwa" type="button" hidden>
+            Install app on this device
+          </button>
+          <p id="pwa-ios-hint" class="pwa-ios-hint" hidden>
+            On iPhone/iPad: tap Share → <strong>Add to Home Screen</strong> to install.
+          </p>
+          <p class="login-register">
+            New here?
+            <button id="btn-register-email" class="link-btn" type="button">Register</button>
+          </p>
+          <p id="auth-status" class="auth-status">Not logged in</p>
+          <p class="login-fb-link">
+            After sign-in, open <strong>Facebook &amp; Instagram</strong> from More in the sidebar.
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
 
-    <nav class="section-nav" aria-label="Remote sections">
-      <a href="#section-auth">Account</a>
-      <a href="#section-devices">Devices</a>
-      <a href="#section-pair">Pair</a>
-      <a href="#section-sessions">Sessions</a>
-      <a href="#section-security">Security</a>
-      <a href="#section-settings">Settings</a>
-    </nav>
-
-    <section class="card" id="section-auth">
-      <h2>Account</h2>
-      <div class="row">
-        <button id="btn-login">Login with Google</button>
-        <button id="btn-logout" class="secondary">Logout</button>
-        <button id="btn-refresh" class="secondary">Refresh devices</button>
+  <!-- APP -->
+  <div id="view-app" class="app-shell" hidden>
+    <header class="mobile-topbar" aria-label="Mobile header">
+      <button type="button" id="btn-nav-open" class="nav-hamburger" aria-label="Open menu" aria-controls="app-sidebar" aria-expanded="false">
+        <span class="nav-hamburger-lines" aria-hidden="true"></span>
+      </button>
+      <div class="mobile-topbar-brand">
+        <strong>AutoReplyBot</strong>
+        <span id="mobile-topbar-panel">My Phone</span>
       </div>
-      <p id="auth-status" class="muted">Not logged in</p>
-    </section>
+      <button type="button" id="btn-install-pwa-app" class="btn-install-chip" hidden>Install</button>
+    </header>
+    <div id="nav-backdrop" class="nav-backdrop" hidden></div>
 
-    <section class="card" id="section-devices">
-      <h2>Devices</h2>
-      <p class="muted">Online phones you own. Connect starts a request; live viewer and remote controls appear after Approve.</p>
-      <div id="device-list" class="device-list muted">Sign in to load devices.</div>
-    </section>
+    <div class="app-layout">
+      <aside id="app-sidebar" class="sidebar" aria-label="Main menu">
+        <div class="sidebar-brand">
+          <div class="sidebar-brand-row">
+            <div>
+              <strong>AutoReplyBot</strong>
+              <span>Remote Camera &amp; Voice</span>
+            </div>
+            <button type="button" id="btn-nav-close" class="nav-drawer-close" aria-label="Close menu">×</button>
+          </div>
+        </div>
+        <nav class="sidebar-nav">
+          <button type="button" class="nav-item active" data-panel="phone">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+            </span>
+            <span class="nav-label">My Phone</span>
+          </button>
+          <p class="nav-section-label">More</p>
+          <button type="button" class="nav-item" data-panel="pair">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="8" height="14" rx="1.5"/><rect x="14" y="7" width="8" height="12" rx="1.5"/><path d="M10 11h4M12 9v4"/></svg>
+            </span>
+            <span class="nav-label">Pair Browser</span>
+          </button>
+          <button type="button" class="nav-item" data-panel="security">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+            </span>
+            <span class="nav-label">Trusted Browsers</span>
+          </button>
+          <button type="button" class="nav-item" data-panel="multiview">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
+            </span>
+            <span class="nav-label">Multi Device View</span>
+          </button>
+          <button type="button" class="nav-item" data-panel="social">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>
+            </span>
+            <span class="nav-label">Facebook &amp; Instagram</span>
+          </button>
+          <button type="button" class="nav-item" data-panel="settings">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            </span>
+            <span class="nav-label">Settings</span>
+          </button>
+        </nav>
+        <div class="sidebar-foot">
+          <p id="header-user" class="sidebar-user"></p>
+          <button id="btn-logout" class="btn-logout" type="button">Logout</button>
+        </div>
+      </aside>
 
-    <section class="card" id="section-pair">
-      <h2>Pair this browser</h2>
-      <p class="muted">Creates a 5-minute, single-use code. Open Pair website on your phone and enter the code (or scan the QR).</p>
-      <div class="row">
-        <button id="btn-create-pair" type="button">Create pairing code</button>
-      </div>
-      <div id="pair-result" class="pair-result" hidden>
-        <p class="pair-code-label">6-digit code</p>
-        <p id="pair-code" class="pair-code" aria-live="polite">------</p>
-        <p id="pair-expires" class="muted"></p>
-        <canvas id="pair-qr" width="180" height="180" aria-label="Pairing QR code"></canvas>
-        <p class="muted pair-payload-wrap">Deep link (for paste):</p>
-        <code id="pair-payload" class="pair-payload"></code>
-      </div>
-      <p id="pair-error" class="pair-error" hidden></p>
-    </section>
+      <main class="app-main">
+        <!-- PRIMARY: device picker + feature tabs -->
+        <section class="panel" id="panel-phone" data-panel="phone">
+          <header class="page-head">
+            <div>
+              <h1>My Phone</h1>
+              <p class="page-sub">Choose a phone, then open a tab below to use Camera, Location, Gallery, and more.</p>
+            </div>
+            <button id="btn-refresh" class="btn-secondary" type="button">Refresh</button>
+          </header>
 
-    <section class="card" id="section-sessions">
-      <h2>Sessions history</h2>
-      <p class="muted">Recent remote sessions for your account (metadata only — no media).</p>
-      <div class="row">
-        <button id="btn-refresh-sessions" class="secondary" type="button">Refresh sessions</button>
-      </div>
-      <div id="session-list" class="device-list muted">Sign in to load sessions.</div>
-    </section>
+          <div class="device-picker-bar surface">
+            <label class="device-picker-label" for="workspace-device-select">Connected device</label>
+            <div class="device-picker-row">
+              <select id="workspace-device-select" class="input device-picker-select" aria-label="Select device"></select>
+              <button id="btn-add-device" class="btn-primary" type="button">Connect new device</button>
+            </div>
+            <p id="workspace-device-hint" class="muted device-picker-hint">Loading devices…</p>
+          </div>
 
-    <section class="card" id="section-security">
-      <h2>Security — trusted browsers</h2>
-      <p class="muted">Revoke a browser to block new Connect requests from that client.</p>
-      <div class="row">
-        <button id="btn-refresh-clients" class="secondary" type="button">Refresh browsers</button>
-      </div>
-      <div id="client-list" class="device-list muted">Sign in to load trusted browsers.</div>
-    </section>
+          <div id="add-device-help" class="surface add-device-help" hidden>
+            <h2>Add another phone</h2>
+            <ol class="add-device-steps">
+              <li>Install AutoReplyBot on the new phone.</li>
+              <li>Sign in with the <strong>same account</strong> as this website.</li>
+              <li>Open <strong>Remote Camera &amp; Voice</strong> and turn Remote Control <strong>ON</strong>.</li>
+              <li>Come back here and tap <strong>Refresh</strong> — the new phone appears in the dropdown.</li>
+            </ol>
+            <p class="muted">If Connect asks to pair this browser, use <strong>Pair Browser</strong> in the sidebar once.</p>
+            <button type="button" id="btn-add-device-close" class="btn-secondary">Got it</button>
+          </div>
 
-    <section class="card" id="section-settings">
-      <h2>Settings notes</h2>
-      <ul class="settings-notes muted">
-        <li>Camera/mic never start until you tap <strong>Approve</strong> on the phone.</li>
-        <li>Live video uses WebRTC (STUN; optional TURN via server env). Frames are not stored in Firestore.</li>
-        <li>Photos/recordings are saved on the phone only when you explicitly capture/record.</li>
-        <li>Pairing codes are hashed server-side; clients cannot read <code>pairingCodes</code>.</li>
-        <li>Session requests expire in about 2 minutes if not approved.</li>
-        <li>Deploy TURN credentials with <code>TURN_URL</code>, <code>TURN_USERNAME</code>, <code>TURN_CREDENTIAL</code> for restrictive NAT.</li>
-      </ul>
-    </section>
-  </main>
+          <div class="phone-tabs" role="tablist" aria-label="Phone features">
+            <button type="button" class="phone-tab active" role="tab" aria-selected="true" data-phone-tab="camera" title="Camera &amp; Voice"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Camera &amp; Voice</span><span class="tab-label-short">Camera</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="location" title="Location"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Location</span><span class="tab-label-short">Location</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="info" title="Device Information"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Device Information</span><span class="tab-label-short">Info</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery" title="Gallery"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Gallery</span><span class="tab-label-short">Gallery</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications" title="Notifications"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Notifications</span><span class="tab-label-short">Alerts</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages" title="Messages"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Messages</span><span class="tab-label-short">SMS</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files" title="File Manager"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">File Manager</span><span class="tab-label-short">Files</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording" title="Screen Recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps" title="Installed Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
+          </div>
+
+          <div id="phone-tab-camera" class="phone-tab-panel" data-phone-panel="camera">
+            <p class="page-sub tab-intro">Connect sends a request — approve on the phone to start live view.</p>
+            <div id="device-list" class="device-list muted">Select a device above.</div>
+          </div>
+
+          <div id="phone-tab-location" class="phone-tab-panel" data-phone-panel="location" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on; this browser needs location permission in Trusted Browsers.</p>
+              <div class="page-actions">
+                <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh map</button>
+                <button id="btn-loc-current" class="btn-primary" type="button">Update location</button>
+                <button id="btn-loc-live" class="btn-secondary" type="button">Live 15m</button>
+                <button id="btn-loc-stop" class="btn-secondary" type="button">Stop</button>
+              </div>
+            </div>
+            <select id="location-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="location-panel-body" class="surface muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-info" class="phone-tab-panel" data-phone-panel="info" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Safe device details without restricted identifiers.</p>
+              <div class="page-actions">
+                <button id="btn-info-refresh" class="btn-primary" type="button">Refresh Information</button>
+              </div>
+            </div>
+            <select id="info-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="info-panel-body" class="surface device-info-view">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-gallery" class="phone-tab-panel" data-phone-panel="gallery" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Authorized MediaStore index from your phone.</p>
+              <div class="page-actions">
+                <button id="btn-gallery-index" class="btn-secondary" type="button">Request index</button>
+                <button id="btn-gallery-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <div class="gallery-filters" role="group" aria-label="Gallery filters">
+              <button type="button" class="gallery-filter active" data-gallery-filter="all">All</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="image">Images</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="audio">Audio</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="video">Video</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="file">Files</button>
+            </div>
+            <select id="gallery-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="gallery-list" class="media-gallery muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Enable <strong>Notification access</strong> on the phone Permissions card, allow this browser in Trusted Browsers, then Sync. Shows title, message, and date/time.</p>
+              <div class="page-actions">
+                <button id="btn-notif-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-notif-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="notifications-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="notifications-list" class="notif-list muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-messages" class="phone-tab-panel" data-phone-panel="messages" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">SMS from the phone (sender name, number, full text, date/time). Enable SMS on Permissions, allow this browser, then Sync. New SMS appear live.</p>
+              <div class="page-actions">
+                <button id="btn-msg-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-msg-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="messages-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="messages-list" class="msg-list muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Use <strong>Play</strong> / <strong>Download</strong> on media.</p>
+              <div class="page-actions">
+                <button id="btn-files-up" class="btn-secondary" type="button" hidden>Up</button>
+                <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
+                <button id="btn-files-list" class="btn-secondary" type="button">List folder</button>
+              </div>
+            </div>
+            <p id="files-breadcrumb" class="files-breadcrumb muted">Root</p>
+            <select id="files-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="files-panel-body" class="surface muted">Select a device.</div>
+            <div id="files-audio-player" class="files-audio-player" hidden>
+              <p id="files-audio-label" class="muted"></p>
+              <audio id="files-audio" controls preload="none" style="width:100%"></audio>
+            </div>
+          </div>
+
+          <div id="phone-tab-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start.</p>
+              <div class="page-actions">
+                <button id="btn-screen-start" class="btn-primary" type="button">Start Mirroring</button>
+                <button id="btn-screen-stop" class="btn-secondary" type="button">Stop</button>
+                <button id="btn-screen-fullscreen" class="btn-secondary" type="button">Fullscreen</button>
+                <button id="btn-screen-pip" class="btn-secondary" type="button">PiP</button>
+                <button id="btn-screen-shot" class="btn-secondary" type="button">Screenshot</button>
+              </div>
+            </div>
+            <div class="screen-controls surface">
+              <label>Quality
+                <select id="screen-quality" class="input">
+                  <option value="auto">Auto</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>FPS
+                <select id="screen-fps" class="input">
+                  <option value="15">15</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="screen-audio" /> Audio</label>
+              <span id="screen-status" class="status-badge">Idle</span>
+              <span id="screen-stats" class="muted">Latency — · FPS — · Bandwidth —</span>
+            </div>
+            <div class="screen-stage surface">
+              <video id="screen-video" playsinline autoplay muted></video>
+              <canvas id="screen-shot-canvas" hidden></canvas>
+            </div>
+            <div id="screen-shot-preview" class="surface muted" hidden></div>
+          </div>
+
+          <div id="phone-tab-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone.</p>
+              <div class="page-actions rec-actions">
+                <button id="btn-rec-start" class="btn-primary" type="button">Record Screen</button>
+                <button id="btn-rec-pause" class="btn-secondary" type="button">Pause</button>
+                <button id="btn-rec-resume" class="btn-secondary" type="button" hidden>Resume</button>
+                <button id="btn-rec-stop" class="btn-secondary" type="button">Stop</button>
+                <button id="btn-rec-refresh" class="btn-secondary" type="button">Refresh</button>
+              </div>
+            </div>
+            <div class="screen-controls surface">
+              <label>Quality
+                <select id="rec-quality" class="input">
+                  <option value="480p">480p</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>FPS
+                <select id="rec-fps" class="input">
+                  <option value="15">15</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="rec-mic" /> Screen + Mic</label>
+              <span id="rec-status" class="status-badge">Idle</span>
+              <strong id="rec-timer" class="rec-timer" aria-live="polite">00:00</strong>
+            </div>
+            <div id="rec-transfer" class="surface muted" hidden>Upload progress will appear here.</div>
+            <div id="recordings-list" class="rec-list muted">Select a device and refresh.</div>
+          </div>
+
+          <div id="phone-tab-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Lock or unlock any app (WhatsApp, YouTube, Instagram, etc.) with the duration below. Camera hardware lock is optional and separate. Phone needs App Control (Accessibility) + browser App Control permission.</p>
+              <div class="page-actions">
+                <button id="btn-apps-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-apps-refresh" class="btn-primary" type="button">Refresh</button>
+                <button id="btn-apps-export" class="btn-secondary" type="button">Export list</button>
+              </div>
+            </div>
+            <div class="screen-controls surface app-control-bar">
+              <label>Lock duration
+                <select id="apps-block-duration" class="input">
+                  <option value="15">15 minutes</option>
+                  <option value="30" selected>30 minutes</option>
+                  <option value="60">1 hour</option>
+                  <option value="120">2 hours</option>
+                  <option value="360">6 hours</option>
+                  <option value="1440">24 hours</option>
+                  <option value="0">Until I unlock</option>
+                </select>
+              </label>
+              <button id="btn-blocks-refresh" class="btn-secondary" type="button">Refresh locks</button>
+              <span class="app-control-sep muted">Camera hardware</span>
+              <button id="btn-camera-lock" class="btn-secondary" type="button">Lock camera</button>
+              <button id="btn-camera-unlock" class="btn-secondary" type="button">Unlock camera</button>
+            </div>
+            <div id="apps-blocks" class="apps-blocks surface muted">No apps locked.</div>
+            <div class="screen-controls surface">
+              <input id="apps-search" class="input" type="search" placeholder="Search WhatsApp, YouTube, Instagram…" />
+              <label>Filter
+                <select id="apps-filter" class="input">
+                  <option value="user" selected>User apps</option>
+                  <option value="all">All apps</option>
+                  <option value="blocked">Locked now</option>
+                  <option value="system">System</option>
+                  <option value="games">Games</option>
+                  <option value="social">Social</option>
+                  <option value="finance">Finance</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="productivity">Productivity</option>
+                  <option value="tools">Tools</option>
+                  <option value="installed_today">Installed today</option>
+                  <option value="updated_today">Updated today</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </div>
+            <div id="apps-list" class="apps-list muted">Select a device.</div>
+            <div id="app-detail" class="surface app-detail" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-settings" data-panel="settings" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Settings</h1>
+              <p class="page-sub">Device and browser preferences. Sensitive modules stay off until enabled on the phone.</p>
+            </div>
+          </header>
+          <div class="surface">
+            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, and App Control (default off).</p>
+            <p class="muted">Camera, location, gallery, files, notifications, and messages keep their existing settings.</p>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-help" data-panel="help" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Help</h1>
+              <p class="page-sub">Quick tips for remote modules.</p>
+            </div>
+          </header>
+          <div class="surface">
+            <ol>
+              <li>Pair this browser once from the phone.</li>
+              <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
+              <li>Screen mirror and recording always show Android’s official capture prompt.</li>
+              <li>Installed Apps never uninstalls or installs silently.</li>
+              <li>App Control closes blocked apps via Accessibility; Camera Lock needs Device Admin on the phone.</li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- PAIR -->
+        <section class="panel" id="panel-pair" data-panel="pair" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Pair Browser</h1>
+              <p class="page-sub">Scan the QR on Android (Pair Website → Scan QR) or enter the 6-digit code.</p>
+            </div>
+          </header>
+
+          <div id="pair-already" class="surface pair-already" hidden>
+            <p class="pair-ok"><strong>This browser is already paired.</strong></p>
+            <p id="pair-already-detail" class="muted">Go to My Phone and tap Connect. Generate a new code only if you revoked this browser.</p>
+            <div class="row-gap">
+              <button type="button" class="btn-primary nav-jump" data-panel="phone">Open My Phone</button>
+              <button type="button" id="btn-pair-disconnect" class="btn-danger">Disconnect</button>
+              <button type="button" id="btn-show-new-pair" class="btn-secondary">Generate new code</button>
+            </div>
+          </div>
+
+          <div id="pair-create-block">
+            <div class="pair-layout surface">
+              <div class="pair-qr-col">
+                <canvas id="pair-qr" width="200" height="200" aria-label="Pairing QR code"></canvas>
+                <p class="muted center">QR appears after you generate a code</p>
+              </div>
+              <div class="pair-code-col">
+                <p class="pair-code-label">Pairing code</p>
+                <div id="pair-result" class="pair-result-box" hidden>
+                  <p id="pair-code" class="pair-code" aria-live="polite">------</p>
+                  <p id="pair-expires" class="muted"></p>
+                  <code id="pair-payload" class="pair-payload"></code>
+                </div>
+                <button id="btn-create-pair" class="btn-primary" type="button">Generate New Code</button>
+                <button type="button" class="btn-secondary nav-jump" data-panel="phone">Go to My Phone</button>
+              </div>
+            </div>
+          </div>
+          <p id="pair-error" class="pair-error" hidden></p>
+        </section>
+
+        <!-- SESSIONS -->
+        <section class="panel" id="panel-sessions" data-panel="sessions" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Sessions</h1>
+              <p class="page-sub">Recent remote sessions (metadata only — no media stored here).</p>
+            </div>
+            <button id="btn-refresh-sessions" class="btn-secondary" type="button">Refresh</button>
+          </header>
+          <div id="session-list" class="surface table-wrap muted">Loading sessions…</div>
+        </section>
+
+        <!-- TRUSTED BROWSERS -->
+        <section class="panel" id="panel-security" data-panel="security" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Trusted Browsers</h1>
+              <p class="page-sub">Revoke a browser to block new Connect requests from it.</p>
+            </div>
+            <div class="page-actions">
+              <button id="btn-refresh-clients" class="btn-secondary" type="button">Refresh</button>
+              <button type="button" class="btn-primary nav-jump" data-panel="pair">Add Browser</button>
+            </div>
+          </header>
+          <div id="client-list" class="surface table-wrap muted">Loading trusted browsers…</div>
+        </section>
+
+        <!-- FACEBOOK & INSTAGRAM -->
+        <section class="panel panel-embed" id="panel-social" data-panel="social" hidden>
+          <header class="page-head page-head-compact">
+            <div>
+              <h1>Facebook &amp; Instagram</h1>
+              <p class="page-sub">Posting dashboard stays inside this admin panel.</p>
+            </div>
+          </header>
+          <iframe
+            id="social-frame"
+            class="social-frame"
+            title="Facebook and Instagram posting"
+            data-src="/?embed=1"
+            src="about:blank"
+          ></iframe>
+        </section>
+
+        <!-- MEDIA -->
+        <section class="panel" id="panel-media" data-panel="media" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Media Files</h1>
+              <p class="page-sub">Photos and recordings uploaded from your phone during remote sessions.</p>
+            </div>
+            <button id="btn-refresh-media" class="btn-secondary" type="button">Refresh</button>
+          </header>
+          <div id="media-list" class="media-gallery muted">Loading media…</div>
+        </section>
+
+        <section class="panel" id="panel-multiview" data-panel="multiview" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Multi Device View</h1>
+              <p class="page-sub">Select up to 4 devices. Cameras do not auto-start.</p>
+            </div>
+            <button id="btn-multiview-refresh" class="btn-secondary" type="button">Refresh devices</button>
+          </header>
+          <div id="multiview-picker" class="surface"></div>
+          <div id="multiview-grid" class="device-list" style="margin-top:1rem"></div>
+        </section>
+
+        <!-- Hidden legacy dashboard hooks used by existing JS stats -->
+        <div id="panel-home" data-panel="home" hidden aria-hidden="true">
+          <p id="home-status"></p>
+          <button type="button" id="btn-home-pair" class="nav-jump" data-panel="pair" hidden></button>
+          <button type="button" id="btn-home-phones" class="nav-jump" data-panel="phone" hidden></button>
+          <span id="stat-phones"></span>
+          <span id="stat-online"></span>
+          <span id="stat-sessions"></span>
+          <span id="stat-clients"></span>
+          <div id="dash-session-list"></div>
+          <p id="dash-security"></p>
+        </div>
+
+        <dialog id="media-viewer" class="media-viewer">
+          <form method="dialog" class="media-viewer-bar">
+            <strong id="media-viewer-title">Preview</strong>
+            <div class="media-viewer-actions" id="media-viewer-actions" hidden>
+              <button type="button" class="btn-secondary" id="btn-zoom-out" title="Zoom out">−</button>
+              <button type="button" class="btn-secondary" id="btn-zoom-reset" title="Reset zoom">Reset</button>
+              <button type="button" class="btn-secondary" id="btn-zoom-in" title="Zoom in">+</button>
+            </div>
+            <button type="submit" class="btn-secondary" value="close">Close</button>
+          </form>
+          <div id="media-viewer-body" class="media-viewer-body"></div>
+        </dialog>
+      </main>
+    </div>
+  </div>
+
   <script type="module" src="/device/app.js"></script>
 </body>
 </html>

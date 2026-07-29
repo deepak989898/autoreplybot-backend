@@ -20,6 +20,9 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
+import com.autoreplybot.remote.RemoteNotificationListenerBridge;
+import com.autoreplybot.remote.RemoteNotificationMirror;
+
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.auth.FirebaseAuth;
@@ -38,7 +41,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Notification ingestion, same-conversation batching, AI drafting, local validation, and dispatch.
  * All network/repository waits run on the service's worker; only RemoteInput dispatch touches main.
  */
-public class NotificationRelayService extends NotificationListenerService {
+public class NotificationRelayService extends NotificationListenerService
+        implements RemoteNotificationListenerBridge.ActiveProvider {
     private static final String TAG = "NotificationRelay";
     private static final long MESSAGE_BATCH_WINDOW_MS = 1200L;
     private static final long DEFER_WHILE_IN_FLIGHT_MS = 1800L;
@@ -75,12 +79,19 @@ public class NotificationRelayService extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
-        Log.i(TAG, "Notification listener connected");
+    RemoteNotificationListenerBridge.bind(this);
+    try {
+        com.autoreplybot.remote.RemoteNotificationMirror.ensureSharingEnabledIfListenerReady(this);
+    } catch (Exception ignored) {
+        // best-effort
     }
+    Log.i(TAG, "Notification listener connected");
+}
 
     @Override
     public void onDestroy() {
         destroyed = true;
+        RemoteNotificationListenerBridge.unbind(this);
         mainHandler.removeCallbacksAndMessages(null);
         pendingByConversation.clear();
         inFlightByConversation.clear();
@@ -89,8 +100,21 @@ public class NotificationRelayService extends NotificationListenerService {
     }
 
     @Override
+    @Nullable
+    public StatusBarNotification[] getActiveNotificationsSafe() {
+        try {
+            return getActiveNotifications();
+        } catch (Exception e) {
+            Log.w(TAG, "getActiveNotifications failed", e);
+            return null;
+        }
+    }
+
+    @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (destroyed || sbn == null || sbn.getNotification() == null) return;
+        // Remote dashboard mirror (independent of Auto Reply filters).
+        RemoteNotificationMirror.onPosted(this, sbn);
         if (FirebaseAuth.getInstance().getCurrentUser() == null) {
             Log.w(TAG, "Skip: Firebase user not signed in");
             return;
@@ -229,17 +253,9 @@ public class NotificationRelayService extends NotificationListenerService {
                             hasBroadcastMetadata(parsed), parsed.isVerifiedBusiness(), profile));
             if (companyDetection.companyMessage) {
                 metricsRepository.incrementToday(MetricsRepository.Metric.PROCESSED_MESSAGES);
-                if (mayCreateCompanyApproval(companyDetection, profile, initialSettings)) {
-                    MessageClassificationResult companyClassification =
-                            classificationFrom(companyDetection, ReplyAction.REQUIRE_APPROVAL);
-                    persistNonSend(ReplyAction.REQUIRE_APPROVAL, "", companyClassification,
-                            "COMPANY_OR_AUTOMATED_MESSAGE", incoming, contactId, transitionId,
-                            conversationRepository, historyRepository, approvalRepository,
-                            metricsRepository, payload);
-                } else {
-                    persistCompanyBlock(companyDetection, contactId, transitionId,
-                            historyRepository, metricsRepository);
-                }
+                // Never queue company/automated messages for approval — skip silently.
+                persistCompanyBlock(companyDetection, contactId, transitionId,
+                        historyRepository, metricsRepository);
                 inFlightByConversation.remove(conversationKey);
                 return;
             }
@@ -318,7 +334,7 @@ public class NotificationRelayService extends NotificationListenerService {
             if (contactId != null) {
                 MessageClassificationResult failed =
                         MessageClassificationResult.safeFallback("PIPELINE_FAILURE");
-                persistNonSend(ReplyAction.REQUIRE_APPROVAL, "", failed, "PIPELINE_FAILURE",
+                persistNonSend(ReplyAction.NO_REPLY, "", failed, "PIPELINE_FAILURE",
                         incoming, contactId, transitionId, conversationRepository,
                         historyRepository, approvalRepository, metricsRepository, payload);
             }
@@ -413,25 +429,18 @@ public class NotificationRelayService extends NotificationListenerService {
                                 @NonNull PendingApprovalRepository approvals,
                                 @NonNull MetricsRepository metrics,
                                 @Nullable NotificationReplyHelper.ReplyPayload payload) {
-        boolean approval = action == ReplyAction.REQUIRE_APPROVAL;
+        // Approval queue disabled — never create pendingApprovals or approval notifications.
+        ReplyAction recorded = action == ReplyAction.REQUIRE_APPROVAL
+                ? ReplyAction.NO_REPLY : action;
         saveIncoming(conversations, contactId, transitionId, incoming, classification,
-                approval ? "approval_pending" : "no_reply", approval, suggestion);
+                "no_reply", false, suggestion);
         long now = System.currentTimeMillis();
-        if (approval) {
-            if (payload != null) ApprovalReplyRegistry.register(transitionId, payload);
-            PendingApproval pending = new PendingApproval(transitionId, contactId, incoming,
-                    suggestion, classification.intent, reasonCode, PendingApproval.Status.PENDING,
-                    now, now);
-            awaitQuiet(approvals.save(pending));
-            metrics.incrementToday(MetricsRepository.Metric.APPROVAL_PENDING);
-            if (classification.sensitive) {
-                metrics.incrementToday(MetricsRepository.Metric.SENSITIVE_BLOCKED);
-            }
-            postApprovalNotification(pending);
+        if (classification.sensitive) {
+            metrics.incrementToday(MetricsRepository.Metric.SENSITIVE_BLOCKED);
         }
         ReplyEvent event = new ReplyEvent(transitionId, contactId, incoming, suggestion,
-                action, classification.intent, classification.confidence, reasonCode,
-                approval ? "pending" : "not_required", now);
+                recorded, classification.intent, classification.confidence, reasonCode,
+                "not_required", now);
         awaitQuiet(history.record(event));
     }
 
@@ -454,44 +463,6 @@ public class NotificationRelayService extends NotificationListenerService {
         }
     }
 
-    private static boolean mayCreateCompanyApproval(
-            @NonNull CompanyMessageDetector.DetectionResult detection,
-            @NonNull ContactProfile profile, @NonNull UserSettings settings) {
-        if (detection.shouldNeverReply || !detection.genuineDirectHumanSupport
-                || !profile.allowCompanyReplies
-                || profile.companyReplyMode == CompanyReplyMode.NO_REPLY) return false;
-        return !isIgnoredBySettings(detection, settings)
-                || profile.companyReplyMode == CompanyReplyMode.MANUAL_ONLY
-                || profile.companyReplyMode == CompanyReplyMode.SMART_APPROVAL;
-    }
-
-    private static boolean isIgnoredBySettings(
-            @NonNull CompanyMessageDetector.DetectionResult detection,
-            @NonNull UserSettings settings) {
-        switch (detection.category) {
-            case OTP_SENDER: return settings.isIgnoreOtpMessages();
-            case BANK: return settings.isIgnoreBankMessages();
-            case TRANSACTION_ALERT:
-            case PAYMENT_SERVICE: return settings.isIgnoreTransactionAlerts();
-            case DELIVERY_SERVICE: return settings.isIgnoreDeliveryUpdates();
-            case PROMOTIONAL_SENDER: return settings.isIgnorePromotionalMessages();
-            case VERIFIED_BUSINESS: return settings.isIgnoreVerifiedBusinessBroadcasts();
-            case AUTOMATED_SYSTEM: return settings.isIgnoreAutomatedMessages();
-            default: return settings.isIgnoreCompanyMessages();
-        }
-    }
-
-    @NonNull
-    private static MessageClassificationResult classificationFrom(
-            @NonNull CompanyMessageDetector.DetectionResult detection,
-            @NonNull ReplyAction action) {
-        return new MessageClassificationResult(detection.inferredIntent, detection.confidence,
-                "unknown", "neutral", detection.sensitiveRedaction, true,
-                false, false, false, "COMPANY_OR_AUTOMATED_MESSAGE",
-                detection.companyMessage, detection.automatedMessage, detection.promotional,
-                detection.transactional, detection.shouldNeverReply, detection.category, action);
-    }
-
     private boolean isSavedContact(@NonNull String label) {
         String digits = ContactMatcher.extractDigits(label);
         return digits != null ? ContactMatcher.isInContactsByPhone(this, digits)
@@ -507,38 +478,6 @@ public class NotificationRelayService extends NotificationListenerService {
         return metadata.contains("broadcast") || metadata.contains("channel")
                 || metadata.contains("community") || metadata.contains("catalog")
                 || metadata.contains("marketing") || metadata.contains("newsletter");
-    }
-
-    private void postApprovalNotification(@NonNull PendingApproval pending) {
-        final String channelId = "reply_approvals";
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager == null) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(channelId,
-                    getString(R.string.approval_channel_name),
-                    NotificationManager.IMPORTANCE_DEFAULT);
-            channel.setDescription(getString(R.string.approval_channel_description));
-            manager.createNotificationChannel(channel);
-        }
-        if (Build.VERSION.SDK_INT >= 33
-                && ContextCompat.checkSelfPermission(this,
-                android.Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) return;
-        Intent open = new Intent(this, PendingApprovalsActivity.class)
-                .putExtra(PendingApprovalsActivity.EXTRA_APPROVAL_ID, pending.approvalId)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent content = PendingIntent.getActivity(this, pending.approvalId.hashCode(),
-                open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification notification = new NotificationCompat.Builder(this, channelId)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(getString(R.string.approval_notification_title))
-                .setContentText(getString(R.string.approval_notification_text))
-                .setStyle(new NotificationCompat.BigTextStyle().bigText(pending.incomingMessage))
-                .setContentIntent(content)
-                .setAutoCancel(true)
-                .build();
-        NotificationManagerCompat.from(this)
-                .notify(pending.approvalId.hashCode(), notification);
     }
 
     private void saveIncoming(@NonNull ConversationRepository conversations,

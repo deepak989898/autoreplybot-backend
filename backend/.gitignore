@@ -4,3 +4,5 @@ node_modules/
 .vercel
 serviceAccount.json
 *.log
+
+.vercel

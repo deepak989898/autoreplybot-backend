@@ -91,7 +91,7 @@ public class UserSettings {
     private boolean friendAutoReplyEnabled = true;
     private boolean familyAutoReplyEnabled = true;
     private boolean generalQuestionAutoReplyEnabled = true;
-    private boolean sensitiveMessagesRequireApproval = true;
+    private boolean sensitiveMessagesRequireApproval = false;
     private int duplicateWindowSeconds = 300;
     private int contactCooldownSeconds = 8;
     private int maxRecentMessages = 12;
@@ -444,7 +444,7 @@ public class UserSettings {
         s.familyAutoReplyEnabled = replyPolicyVersion < CURRENT_REPLY_POLICY_VERSION
                 || bool(map, AppConstants.KEY_FAMILY_AUTO_REPLY_ENABLED, true);
         s.generalQuestionAutoReplyEnabled = bool(map, AppConstants.KEY_GENERAL_AUTO_REPLY_ENABLED, true);
-        s.sensitiveMessagesRequireApproval = bool(map, AppConstants.KEY_SENSITIVE_APPROVAL, true);
+        s.sensitiveMessagesRequireApproval = bool(map, AppConstants.KEY_SENSITIVE_APPROVAL, false);
         s.setDuplicateWindowSeconds(number(map, AppConstants.KEY_DUPLICATE_WINDOW_SECONDS, 300).intValue());
         s.setContactCooldownSeconds(number(map, AppConstants.KEY_CONTACT_COOLDOWN_SECONDS, 8).intValue());
         s.setMaxRecentMessages(number(map, AppConstants.KEY_MAX_RECENT_MESSAGES, 12).intValue());

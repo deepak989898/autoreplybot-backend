@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.MediaType;
@@ -85,7 +86,8 @@ public final class RemotePairApi {
                                           @Nullable String code,
                                           @Nullable String token,
                                           @NonNull String clientName,
-                                          @NonNull String deviceId) throws IOException {
+                                          @NonNull String deviceId,
+                                          @NonNull RemotePairTrustOptions options) throws IOException {
         requireBaseUrl();
         JSONObject body = new JSONObject();
         try {
@@ -96,6 +98,18 @@ public final class RemotePairApi {
             }
             body.put("clientName", clientName);
             body.put("deviceId", deviceId);
+            body.put("trustBrowser", options.trustBrowser);
+            body.put("persistentPairing", options.persistentPairing);
+            body.put("autoApproveSessions", options.autoApproveSessions);
+            body.put("requirePhoneUnlock", options.requirePhoneUnlock);
+            JSONObject caps = new JSONObject();
+            caps.put("camera", options.allowCamera);
+            caps.put("microphone", options.allowMicrophone);
+            caps.put("photoCapture", options.allowPhotoCapture);
+            caps.put("videoRecording", options.allowVideoRecording);
+            caps.put("audioRecording", options.allowAudioRecording);
+            caps.put("torch", options.allowTorch);
+            body.put("allowedCapabilities", caps);
         } catch (Exception e) {
             throw new IOException("Failed to build pairing request", e);
         }
@@ -105,7 +119,19 @@ public final class RemotePairApi {
         if (client == null) {
             throw new IOException("Pairing succeeded but client payload missing");
         }
-        return new CompleteResult(RemoteTrustedClient.fromMap(jsonMap(client)));
+        return new CompleteResult(RemoteTrustedClient.fromMap(deepJsonMap(client)));
+    }
+
+    /** @deprecated use overload with {@link RemotePairTrustOptions} */
+    @WorkerThread
+    @NonNull
+    public CompleteResult completePairing(@NonNull String idToken,
+                                          @Nullable String code,
+                                          @Nullable String token,
+                                          @NonNull String clientName,
+                                          @NonNull String deviceId) throws IOException {
+        return completePairing(idToken, code, token, clientName, deviceId,
+                RemotePairTrustOptions.defaults());
     }
 
     @WorkerThread
@@ -121,7 +147,7 @@ public final class RemotePairApi {
         for (int i = 0; i < arr.length(); i++) {
             JSONObject item = arr.optJSONObject(i);
             if (item != null) {
-                out.add(RemoteTrustedClient.fromMap(jsonMap(item)));
+                out.add(RemoteTrustedClient.fromMap(deepJsonMap(item)));
             }
         }
         return out;
@@ -143,7 +169,63 @@ public final class RemotePairApi {
         if (client == null) {
             throw new IOException("Revoke succeeded but client payload missing");
         }
-        return RemoteTrustedClient.fromMap(jsonMap(client));
+        return RemoteTrustedClient.fromMap(deepJsonMap(client));
+    }
+
+    @WorkerThread
+    @NonNull
+    public RemoteTrustedClient updatePhoneCapabilities(@NonNull String idToken,
+                                                       @NonNull String deviceId,
+                                                       @NonNull String clientId,
+                                                       @NonNull String capabilitySecret,
+                                                       @NonNull Map<String, Boolean> capabilities)
+            throws IOException {
+        return updatePhoneCapabilities(
+                idToken, deviceId, clientId, capabilitySecret, capabilities, null);
+    }
+
+    public RemoteTrustedClient updatePhoneCapabilities(@NonNull String idToken,
+                                                       @NonNull String deviceId,
+                                                       @NonNull String clientId,
+                                                       @NonNull String capabilitySecret,
+                                                       @NonNull Map<String, Boolean> capabilities,
+                                                       @Nullable Boolean autoApproveSessions)
+            throws IOException {
+        requireBaseUrl();
+        long timestamp = System.currentTimeMillis();
+        String nonce = java.util.UUID.randomUUID().toString().replace("-", "");
+        String stable = RemoteCapabilityKeys.stableJson(capabilities);
+        String payload = deviceId + ":" + clientId + ":" + timestamp + ":" + nonce + ":" + stable;
+        String signature;
+        try {
+            signature = RemoteCapabilityKeys.hmacSha256Hex(capabilitySecret, payload);
+        } catch (Exception e) {
+            throw new IOException("Failed to sign capability update", e);
+        }
+        JSONObject body = new JSONObject();
+        try {
+            body.put("deviceId", deviceId);
+            body.put("clientId", clientId);
+            body.put("timestamp", timestamp);
+            body.put("nonce", nonce);
+            body.put("signature", signature);
+            JSONObject caps = new JSONObject();
+            for (String key : RemoteCapabilityKeys.KEYS) {
+                caps.put(key, Boolean.TRUE.equals(capabilities.get(key)));
+            }
+            body.put("allowedCapabilities", caps);
+            if (autoApproveSessions != null) {
+                body.put("autoApproveSessions", autoApproveSessions.booleanValue());
+            }
+        } catch (Exception e) {
+            throw new IOException("Failed to build capability request", e);
+        }
+        JSONObject json = postJson("/api/device/phone-capabilities", idToken, body);
+        JSONObject client = json.optJSONObject("client");
+        if (client == null) {
+            throw new IOException("Capability update succeeded but client payload missing");
+        }
+        return RemoteTrustedClient.fromMap(deepJsonMap(client));
     }
 
     private void requireBaseUrl() throws IOException {
@@ -194,19 +276,39 @@ public final class RemotePairApi {
     }
 
     @NonNull
-    private static java.util.Map<String, Object> jsonMap(@NonNull JSONObject obj) {
+    private static java.util.Map<String, Object> deepJsonMap(@NonNull JSONObject obj) {
         java.util.Map<String, Object> map = new java.util.HashMap<>();
         java.util.Iterator<String> keys = obj.keys();
         while (keys.hasNext()) {
             String key = keys.next();
             Object value = obj.opt(key);
-            if (value == null || value == JSONObject.NULL) {
-                map.put(key, null);
-            } else {
-                map.put(key, value);
-            }
+            map.put(key, deepJsonValue(value));
         }
         return map;
+    }
+
+    @Nullable
+    private static Object deepJsonValue(@Nullable Object value) {
+        if (value == null || value == JSONObject.NULL) {
+            return null;
+        }
+        if (value instanceof JSONObject) {
+            return deepJsonMap((JSONObject) value);
+        }
+        if (value instanceof JSONArray) {
+            JSONArray arr = (JSONArray) value;
+            java.util.List<Object> list = new ArrayList<>(arr.length());
+            for (int i = 0; i < arr.length(); i++) {
+                list.add(deepJsonValue(arr.opt(i)));
+            }
+            return list;
+        }
+        return value;
+    }
+
+    @NonNull
+    private static java.util.Map<String, Object> jsonMap(@NonNull JSONObject obj) {
+        return deepJsonMap(obj);
     }
 
     public static final class ParsedPairInput {

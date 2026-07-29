@@ -11,6 +11,17 @@
 
     <style name="Theme.AutoReplyBot" parent="Base.Theme.AutoReplyBot" />
 
+    <!-- Invisible trampoline for FCM tap-to-start (no Active Session UI). -->
+    <style name="Theme.AutoReplyBot.Transparent" parent="Theme.AutoReplyBot">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
     <!-- Status bar = light strip + dark icons (same idea as main). Blue gradient is only below the bar. -->
     <style name="Theme.AutoReplyBot.FacebookPosting" parent="Theme.AutoReplyBot">
         <item name="enableEdgeToEdge">false</item>

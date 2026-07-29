@@ -39,4 +39,26 @@
     <color name="app_navigation_bar">#FEF7FF</color>
     <color name="main_screen_bg">#FEF7FF</color>
     <color name="main_profile_chip_stroke">#E8DEF8</color>
+
+    <!-- Main home menu buttons (distinct colors) -->
+    <color name="menu_contacts_bg">#E3F2FD</color>
+    <color name="menu_contacts_fg">#1565C0</color>
+    <color name="menu_approvals_bg">#FFF3E0</color>
+    <color name="menu_approvals_fg">#E65100</color>
+    <color name="menu_privacy_bg">#E8F5E9</color>
+    <color name="menu_privacy_fg">#2E7D32</color>
+    <color name="menu_history_bg">#E0F7FA</color>
+    <color name="menu_history_fg">#00838F</color>
+    <color name="menu_settings_bg">#EDE7F6</color>
+    <color name="menu_settings_fg">#5E35B1</color>
+    <color name="menu_facebook_bg">#E3F2FD</color>
+    <color name="menu_facebook_fg">#0D47A1</color>
+    <color name="menu_remote_bg">#00897B</color>
+    <color name="menu_remote_fg">#FFFFFF</color>
+    <color name="menu_notif_bg">#FFFFFF</color>
+    <color name="menu_notif_fg">#6A1B9A</color>
+    <color name="menu_notif_stroke">#CE93D8</color>
+    <color name="menu_signout_bg">#FFFFFF</color>
+    <color name="menu_signout_fg">#C62828</color>
+    <color name="menu_signout_stroke">#EF9A9A</color>
 </resources>

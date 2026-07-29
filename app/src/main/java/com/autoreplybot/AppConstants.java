@@ -92,8 +92,31 @@ public final class AppConstants {
     public static final String FIRESTORE_COMMANDS = "commands";
     /** Remote Camera & Voice — users/{uid}/auditLogs/{logId} */
     public static final String FIRESTORE_AUDIT_LOGS = "auditLogs";
+    /** Remote Camera & Voice — users/{uid}/remoteMedia/{mediaId} */
+    public static final String FIRESTORE_REMOTE_MEDIA = "remoteMedia";
+    /** users/{uid}/devices/{deviceId}/moduleCommands/{commandId} */
+    public static final String FIRESTORE_MODULE_COMMANDS = "moduleCommands";
+    /** users/{uid}/transfers/{transferId} */
+    public static final String FIRESTORE_TRANSFERS = "transfers";
+    /** users/{uid}/devices/{deviceId}/deviceInfo/{doc} */
+    public static final String FIRESTORE_DEVICE_INFO = "deviceInfo";
+    /** users/{uid}/devices/{deviceId}/location/{doc} */
+    public static final String FIRESTORE_LOCATION = "location";
+    public static final String FIRESTORE_LOCATION_HISTORY = "locationHistory";
+    public static final String FIRESTORE_GALLERY_ITEMS = "galleryItems";
+    public static final String FIRESTORE_NOTIFICATION_ITEMS = "notificationItems";
+    public static final String FIRESTORE_MESSAGE_ITEMS = "messageItems";
+    public static final String FIRESTORE_INSTALLED_APPS = "installedApps";
+    public static final String FIRESTORE_APP_BLOCKS = "appBlocks";
+    public static final String FIRESTORE_SCREEN_RECORDINGS = "screenRecordings";
+    public static final String FIRESTORE_FOLDER_GRANTS = "folderGrants";
+    public static final String FIRESTORE_FILE_INDEX = "fileIndex";
+    public static final String FIRESTORE_MODULE_SETTINGS = "moduleSettings";
+    /** Admin-only secrets path (written via API). */
+    public static final String FIRESTORE_DEVICE_SECRETS = "deviceSecrets";
     /** Encrypted local prefs for remote control enablement + stable device id. */
     public static final String PREFS_REMOTE_CONTROL = "remote_control_secure_prefs";
+    public static final String PREFS_REMOTE_MODULES = "remote_modules_secure_prefs";
 
     public static final String PREFS_FACEBOOK_POST_SCHEDULE = "facebook_post_schedule";
     public static final String PREFS_ENCRYPTED_FACEBOOK = "facebook_post_secure_prefs";

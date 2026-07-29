@@ -27,6 +27,51 @@ public class RemoteFcmPayloadTest {
         assertEquals("client_1", payload.clientId);
         assertEquals("Chrome", payload.clientName);
         assertEquals(1700000000000L, payload.expiresAt);
+        assertFalse(payload.isAutoStart());
+    }
+
+    @Test
+    public void parseValidAutoStart() {
+        Map<String, String> data = new HashMap<>();
+        data.put("type", "session_auto_start");
+        data.put("requestId", "req_auto1");
+        data.put("sessionId", "sess_auto1");
+        data.put("deviceId", "dev_xyz");
+        data.put("clientId", "client_1");
+        data.put("clientName", "Chrome on Windows");
+        data.put("expiresAt", "1700000000000");
+        data.put("cameraEnabled", "1");
+        data.put("microphoneEnabled", "0");
+        data.put("sessionKind", "camera");
+
+        RemoteFcmPayload payload = RemoteFcmPayload.parse(data);
+        assertTrue(payload.valid);
+        assertTrue(payload.isAutoStart());
+        assertEquals("sess_auto1", payload.sessionId);
+        assertTrue(payload.cameraEnabled);
+        assertFalse(payload.microphoneEnabled);
+        assertFalse(payload.isScreenSession());
+    }
+
+    @Test
+    public void parseScreenAutoStart() {
+        Map<String, String> data = new HashMap<>();
+        data.put("type", "session_auto_start");
+        data.put("requestId", "req_screen1");
+        data.put("sessionId", "sess_screen1");
+        data.put("deviceId", "dev_xyz");
+        data.put("clientId", "client_1");
+        data.put("clientName", "Chrome");
+        data.put("expiresAt", "1700000000000");
+        data.put("cameraEnabled", "0");
+        data.put("microphoneEnabled", "0");
+        data.put("sessionKind", "screen");
+        data.put("screenMirror", "1");
+
+        RemoteFcmPayload payload = RemoteFcmPayload.parse(data);
+        assertTrue(payload.valid);
+        assertTrue(payload.isScreenSession());
+        assertEquals("screen", payload.sessionKind);
     }
 
     @Test

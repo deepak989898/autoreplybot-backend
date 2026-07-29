@@ -15,12 +15,15 @@ import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 final class RemoteTrustedClientsAdapter
         extends RecyclerView.Adapter<RemoteTrustedClientsAdapter.Holder> {
 
     interface Listener {
         void onRevoke(@NonNull RemoteTrustedClient client);
+
+        void onEditPermissions(@NonNull RemoteTrustedClient client);
     }
 
     private final List<RemoteTrustedClient> items = new ArrayList<>();
@@ -52,18 +55,45 @@ final class RemoteTrustedClientsAdapter
         String platform = client.browser.isEmpty()
                 ? client.platform
                 : client.browser + (client.platform.isEmpty() ? "" : " · " + client.platform);
+        String auto = client.autoApproveSessions
+                ? holder.itemView.getContext().getString(R.string.remote_trusted_auto_on)
+                : holder.itemView.getContext().getString(R.string.remote_trusted_auto_off);
+        Map<String, Boolean> caps = RemoteCapabilityKeys.defaultsFromClient(client);
+        String mediaCaps = (Boolean.TRUE.equals(caps.get("camera")) ? "cam " : "")
+                + (Boolean.TRUE.equals(caps.get("microphone")) ? "mic " : "")
+                + (Boolean.TRUE.equals(caps.get("photoCapture")) ? "photo " : "")
+                + (Boolean.TRUE.equals(caps.get("videoRecording")) ? "video " : "")
+                + (Boolean.TRUE.equals(caps.get("audioRecording")) ? "audio " : "")
+                + (Boolean.TRUE.equals(caps.get("torch")) ? "torch " : "");
+        if (mediaCaps.isEmpty()) mediaCaps = "media off ";
+        String moduleCaps = (Boolean.TRUE.equals(caps.get("locationCurrent")) ? "loc " : "")
+                + (Boolean.TRUE.equals(caps.get("galleryList")) ? "gallery " : "")
+                + (Boolean.TRUE.equals(caps.get("notificationsList")) ? "notif " : "")
+                + (Boolean.TRUE.equals(caps.get("messagesList")) ? "sms " : "")
+                + (Boolean.TRUE.equals(caps.get("filesList")) ? "files " : "")
+                + (Boolean.TRUE.equals(caps.get("screenMirror")) ? "mirror " : "")
+                + (Boolean.TRUE.equals(caps.get("screenRecord")) ? "record " : "")
+                + (Boolean.TRUE.equals(caps.get("installedAppsList")) ? "apps " : "")
+                + (Boolean.TRUE.equals(caps.get("appControl")) ? "appctl " : "");
+        if (moduleCaps.isEmpty()) moduleCaps = "modules off";
+        moduleCaps = mediaCaps + "· " + moduleCaps;
         holder.meta.setText(holder.itemView.getContext().getString(
                 R.string.remote_trusted_meta,
-                platform.isEmpty() ? client.clientId : platform,
-                dateFormat.format(new Date(client.createdAt > 0 ? client.createdAt : 0L))));
+                (platform.isEmpty() ? client.clientId : platform) + " · " + auto + " · " + moduleCaps.trim(),
+                dateFormat.format(new Date(client.pairedAt > 0
+                        ? client.pairedAt
+                        : (client.createdAt > 0 ? client.createdAt : 0L)))));
         if (client.revoked) {
             holder.status.setVisibility(View.VISIBLE);
             holder.status.setText(R.string.remote_trusted_revoked);
             holder.revoke.setVisibility(View.GONE);
+            holder.permissions.setVisibility(View.GONE);
         } else {
             holder.status.setVisibility(View.GONE);
             holder.revoke.setVisibility(View.VISIBLE);
+            holder.permissions.setVisibility(View.VISIBLE);
             holder.revoke.setOnClickListener(v -> listener.onRevoke(client));
+            holder.permissions.setOnClickListener(v -> listener.onEditPermissions(client));
         }
     }
 
@@ -77,6 +107,7 @@ final class RemoteTrustedClientsAdapter
         final TextView meta;
         final TextView status;
         final MaterialButton revoke;
+        final MaterialButton permissions;
 
         Holder(@NonNull View view) {
             super(view);
@@ -84,6 +115,7 @@ final class RemoteTrustedClientsAdapter
             meta = view.findViewById(R.id.text_client_meta);
             status = view.findViewById(R.id.text_client_status);
             revoke = view.findViewById(R.id.button_revoke);
+            permissions = view.findViewById(R.id.button_permissions);
         }
     }
 }

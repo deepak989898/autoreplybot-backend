@@ -5,7 +5,7 @@
  */
 export function parseTopicBlocks(raw) {
   if (!raw || !raw.trim()) return [];
-  const parts = raw.split(/(?m)^---\s*$/);
+  const parts = raw.split(/^---\s*$/m);
   const out = [];
   for (const p of parts) {
     const t = p.trim();

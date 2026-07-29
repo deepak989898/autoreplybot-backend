@@ -83,8 +83,6 @@ public class SettingsActivity extends AppCompatActivity {
         buttonSave = findViewById(R.id.button_save);
         findViewById(R.id.button_contacts).setOnClickListener(v ->
                 startActivity(new Intent(this, ContactsActivity.class)));
-        findViewById(R.id.button_pending_approvals).setOnClickListener(v ->
-                startActivity(new Intent(this, PendingApprovalsActivity.class)));
         findViewById(R.id.button_privacy).setOnClickListener(v ->
                 startActivity(new Intent(this, PrivacySettingsActivity.class)));
         findViewById(R.id.button_reply_history).setOnClickListener(v ->

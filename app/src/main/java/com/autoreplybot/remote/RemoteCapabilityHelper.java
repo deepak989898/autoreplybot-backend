@@ -39,6 +39,20 @@ public final class RemoteCapabilityHelper {
         return false;
     }
 
+    public static boolean wantsScreenMirror(@Nullable List<String> capabilities) {
+        if (capabilities == null || capabilities.isEmpty()) {
+            return false;
+        }
+        for (String raw : capabilities) {
+            if (raw == null) continue;
+            String c = raw.trim().toLowerCase(Locale.US);
+            if ("screenmirror".equals(c) || "screen_mirror".equals(c) || "screen".equals(c)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Camera-only when camera requested and microphone not requested. */
     public static boolean isCameraOnly(@Nullable List<String> capabilities) {
         return wantsCamera(capabilities) && !wantsMicrophone(capabilities);

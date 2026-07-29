@@ -23,6 +23,15 @@ public final class RemoteControlPrefs {
     private static final String KEY_DEVICE_ID = "remote_device_id";
     private static final String KEY_DEVICE_DISPLAY_NAME = "remote_device_display_name";
     private static final String KEY_FCM_TOKEN = "remote_fcm_token";
+    private static final String KEY_PERMISSION_SETUP_DONE = "remote_permission_setup_done";
+    private static final String KEY_KEEP_REGISTERED = "remote_keep_registered";
+    private static final String KEY_AUTO_RECONNECT_PRESENCE = "remote_auto_reconnect_presence";
+    private static final String KEY_REQUIRE_UNLOCK = "remote_require_phone_unlock";
+    private static final String KEY_WIFI_ONLY = "remote_wifi_only";
+    private static final String KEY_MOBILE_DATA_ALLOWED = "remote_mobile_data_allowed";
+    private static final String KEY_SESSION_TIMEOUT_MS = "remote_session_timeout_ms";
+    private static final String KEY_MAX_RECORDING_MS = "remote_max_recording_ms";
+    private static final String KEY_LOW_BATTERY_CUTOFF = "remote_low_battery_cutoff";
 
     private final SharedPreferences prefs;
 
@@ -92,5 +101,78 @@ public final class RemoteControlPrefs {
 
     public void setFcmToken(@NonNull String token) {
         prefs.edit().putString(KEY_FCM_TOKEN, token != null ? token.trim() : "").apply();
+    }
+
+    public boolean isPermissionSetupCompleted() {
+        return prefs.getBoolean(KEY_PERMISSION_SETUP_DONE, false);
+    }
+
+    public void setPermissionSetupCompleted(boolean done) {
+        prefs.edit().putBoolean(KEY_PERMISSION_SETUP_DONE, done).apply();
+    }
+
+    public boolean isKeepRegistered() {
+        return prefs.getBoolean(KEY_KEEP_REGISTERED, true);
+    }
+
+    public void setKeepRegistered(boolean keep) {
+        prefs.edit().putBoolean(KEY_KEEP_REGISTERED, keep).apply();
+    }
+
+    public boolean isAutoReconnectPresence() {
+        return prefs.getBoolean(KEY_AUTO_RECONNECT_PRESENCE, true);
+    }
+
+    public void setAutoReconnectPresence(boolean enabled) {
+        prefs.edit().putBoolean(KEY_AUTO_RECONNECT_PRESENCE, enabled).apply();
+    }
+
+    public boolean isRequirePhoneUnlock() {
+        return prefs.getBoolean(KEY_REQUIRE_UNLOCK, false);
+    }
+
+    public void setRequirePhoneUnlock(boolean require) {
+        prefs.edit().putBoolean(KEY_REQUIRE_UNLOCK, require).apply();
+    }
+
+    public boolean isWifiOnly() {
+        return prefs.getBoolean(KEY_WIFI_ONLY, false);
+    }
+
+    public void setWifiOnly(boolean wifiOnly) {
+        prefs.edit().putBoolean(KEY_WIFI_ONLY, wifiOnly).apply();
+    }
+
+    public boolean isMobileDataAllowed() {
+        return prefs.getBoolean(KEY_MOBILE_DATA_ALLOWED, true);
+    }
+
+    public void setMobileDataAllowed(boolean allowed) {
+        prefs.edit().putBoolean(KEY_MOBILE_DATA_ALLOWED, allowed).apply();
+    }
+
+    public long getSessionTimeoutMs() {
+        return prefs.getLong(KEY_SESSION_TIMEOUT_MS, 30L * 60L * 1000L);
+    }
+
+    public void setSessionTimeoutMs(long ms) {
+        prefs.edit().putLong(KEY_SESSION_TIMEOUT_MS, Math.max(60_000L, ms)).apply();
+    }
+
+    public long getMaxRecordingMs() {
+        return prefs.getLong(KEY_MAX_RECORDING_MS, 10L * 60L * 1000L);
+    }
+
+    public void setMaxRecordingMs(long ms) {
+        prefs.edit().putLong(KEY_MAX_RECORDING_MS, Math.max(30_000L, ms)).apply();
+    }
+
+    public int getLowBatteryCutoff() {
+        return prefs.getInt(KEY_LOW_BATTERY_CUTOFF, 5);
+    }
+
+    public void setLowBatteryCutoff(int percent) {
+        int clamped = Math.max(0, Math.min(50, percent));
+        prefs.edit().putInt(KEY_LOW_BATTERY_CUTOFF, clamped).apply();
     }
 }

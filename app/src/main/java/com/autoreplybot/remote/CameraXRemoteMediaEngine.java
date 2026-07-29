@@ -417,6 +417,7 @@ public final class CameraXRemoteMediaEngine implements RemoteMediaEngine, Lifecy
                         Listener l = listener;
                         if (l != null) {
                             l.onPhotoSaved(uri, file.getAbsolutePath());
+                            l.onLocalMediaReady("photo", uri, file.getAbsolutePath(), "image/jpeg");
                         }
                     }
 
@@ -480,6 +481,14 @@ public final class CameraXRemoteMediaEngine implements RemoteMediaEngine, Lifecy
                                 "Video error " + finalize.getError());
                     } else {
                         notifyStatus("Video saved: " + file.getName());
+                        Listener l = listener;
+                        if (l != null) {
+                            l.onLocalMediaReady(
+                                    "video",
+                                    Uri.fromFile(file),
+                                    file.getAbsolutePath(),
+                                    "video/mp4");
+                        }
                     }
                     notifyRecording(false, "video");
                 }
@@ -591,6 +600,14 @@ public final class CameraXRemoteMediaEngine implements RemoteMediaEngine, Lifecy
         if (was && notify) {
             if (out != null) {
                 notifyStatus("Audio saved: " + out.getName());
+                Listener l = listener;
+                if (l != null) {
+                    l.onLocalMediaReady(
+                            "audio",
+                            Uri.fromFile(out),
+                            out.getAbsolutePath(),
+                            "audio/mp4");
+                }
             }
             notifyRecording(false, "audio");
         }

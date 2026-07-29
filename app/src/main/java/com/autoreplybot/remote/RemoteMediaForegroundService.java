@@ -26,9 +26,12 @@ import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Foreground service for an approved remote media session.
@@ -82,6 +85,7 @@ public class RemoteMediaForegroundService extends Service {
     private boolean recordingActive;
     @NonNull private String recordingKind = "";
     private boolean stopping;
+    private final ExecutorService uploadExecutor = Executors.newSingleThreadExecutor();
 
     public final class LocalBinder extends Binder {
         @NonNull
@@ -220,12 +224,17 @@ public class RemoteMediaForegroundService extends Service {
         promoteForeground(session);
         acquireWakeLock();
 
+        // WebRTC must own the camera on many OEMs (Oppo/Realme/etc.). Opening CameraX
+        // at the same time often yields a Connected peer connection with black frames.
+        boolean webrtcOwnsCamera = camera;
         CameraXRemoteMediaEngine engine = new CameraXRemoteMediaEngine(this);
         engine.setListener(engineListener);
         mediaEngine = engine;
-        mediaEngine.start(new RemoteMediaEngine.SessionConfig(sessionId, camera, mic));
+        mediaEngine.start(new RemoteMediaEngine.SessionConfig(
+                sessionId,
+                camera && !webrtcOwnsCamera,
+                mic));
 
-        // Phase 5: publish live tracks after Approve (camera and/or mic requested).
         RemoteWebRtcPublisher publisher = new RemoteWebRtcPublisher(this);
         publisher.setListener(webRtcListener);
         webRtcPublisher = publisher;
@@ -236,7 +245,8 @@ public class RemoteMediaForegroundService extends Service {
         startSessionStatusWatch(sessionId);
 
         broadcastState(true);
-        Log.i(TAG, "Session started id=" + sessionId);
+        Log.i(TAG, "Session started id=" + sessionId
+                + " webrtcOwnsCamera=" + webrtcOwnsCamera);
     }
 
     private void startCommandListener(@NonNull String sessionId) {
@@ -299,18 +309,10 @@ public class RemoteMediaForegroundService extends Service {
             case END_SESSION:
                 stopFully("remote_command");
                 break;
+            case SET_CAMERA_FRONT:
+            case SET_CAMERA_BACK:
             case SWITCH_CAMERA:
                 commandSwitchCamera();
-                break;
-            case SET_CAMERA_FRONT:
-                if (mediaEngine != null && !mediaEngine.isUsingFrontCamera()) {
-                    commandSwitchCamera();
-                }
-                break;
-            case SET_CAMERA_BACK:
-                if (mediaEngine != null && mediaEngine.isUsingFrontCamera()) {
-                    commandSwitchCamera();
-                }
                 break;
             case TORCH_ON:
                 commandSetTorch(true);
@@ -442,6 +444,14 @@ public class RemoteMediaForegroundService extends Service {
         }
 
         @Override
+        public void onLocalMediaReady(@NonNull String kind,
+                                      @NonNull Uri uri,
+                                      @NonNull String absolutePath,
+                                      @NonNull String contentType) {
+            enqueueCloudUpload(kind, absolutePath, contentType);
+        }
+
+        @Override
         public void onRecordingStateChanged(boolean recording, @NonNull String kind) {
             recordingActive = recording;
             recordingKind = recording ? kind : "";
@@ -489,10 +499,10 @@ public class RemoteMediaForegroundService extends Service {
 
     @NonNull
     private Notification buildNotification(@NonNull SessionSnapshot snap) {
-        Intent open = new Intent(this, RemoteActiveSessionActivity.class);
-        open.putExtra(EXTRA_SESSION_ID, snap.sessionId);
-        open.putExtra(EXTRA_CLIENT_NAME, snap.clientName);
-        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // Tap opens Remote Control home (optional controls), not a full-screen share UI.
+        Intent open = new Intent(this, RemoteControlHomeActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content = PendingIntent.getActivity(
                 this,
                 snap.sessionId.hashCode(),
@@ -516,7 +526,7 @@ public class RemoteMediaForegroundService extends Service {
             text = getString(R.string.remote_media_notification_text, snap.clientName);
         }
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_notify)
                 .setContentTitle(getString(R.string.remote_media_notification_title))
                 .setContentText(text)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
@@ -656,11 +666,66 @@ public class RemoteMediaForegroundService extends Service {
     }
 
     public void commandSetTorch(boolean enabled) {
-        if (mediaEngine != null) mediaEngine.setTorchEnabled(enabled);
+        // Live publish uses WebRTC Camera2 — CameraX is started without the camera on many OEMs.
+        if (webRtcPublisher != null) {
+            webRtcPublisher.setTorchEnabled(enabled);
+        }
+        if (mediaEngine != null && mediaEngine.isCameraActive()) {
+            mediaEngine.setTorchEnabled(enabled);
+        }
     }
 
     public void commandCapturePhoto() {
+        if (mediaEngine != null && mediaEngine.isCameraActive()) {
+            mediaEngine.capturePhoto();
+            return;
+        }
+        // Live WebRTC owns the camera — grab a still from the publish track.
+        if (webRtcPublisher != null) {
+            File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
+            if (dir == null) dir = getFilesDir();
+            if (!dir.exists() && !dir.mkdirs()) {
+                broadcastMediaEvent(EVENT_ERROR, "photo_storage: cannot create pictures dir",
+                        recordingActive, recordingKind);
+                return;
+            }
+            File out = new File(dir, "remote_webrtc_" + System.currentTimeMillis() + ".jpg");
+            webRtcPublisher.captureStillJpeg(out, (ok, error) -> {
+                if (!ok) {
+                    broadcastMediaEvent(EVENT_ERROR,
+                            "photo_failed: " + (error != null ? error : "unknown"),
+                            recordingActive, recordingKind);
+                    return;
+                }
+                broadcastMediaEvent(EVENT_PHOTO, out.getAbsolutePath(), recordingActive, recordingKind);
+                enqueueCloudUpload("photo", out.getAbsolutePath(), "image/jpeg");
+            });
+            return;
+        }
         if (mediaEngine != null) mediaEngine.capturePhoto();
+    }
+
+    private void enqueueCloudUpload(@NonNull String kind,
+                                    @NonNull String absolutePath,
+                                    @NonNull String contentType) {
+        SessionSnapshot snap = session;
+        String deviceId = new RemoteControlPrefs(this).getOrCreateDeviceId();
+        String sessionId = snap != null ? snap.sessionId : "";
+        String clientId = snap != null ? snap.clientId : "";
+        uploadExecutor.execute(() -> {
+            File file = new File(absolutePath);
+            RemoteMediaCloudUploader.Result result = RemoteMediaCloudUploader.uploadFile(
+                    file, kind, contentType, deviceId, sessionId, clientId);
+            if (result != null) {
+                broadcastMediaEvent(EVENT_STATUS,
+                        "Uploaded to cloud: " + kind + " (" + result.mediaId + ")",
+                        recordingActive, recordingKind);
+            } else {
+                broadcastMediaEvent(EVENT_ERROR,
+                        "cloud_upload_failed:" + kind,
+                        recordingActive, recordingKind);
+            }
+        });
     }
 
     public void commandStartVideoRecording() {
@@ -672,11 +737,19 @@ public class RemoteMediaForegroundService extends Service {
     }
 
     public void commandStartAudioRecording() {
+        // MediaRecorder exclusive MIC access interrupts WebRTC live mic — pause live track first.
+        if (webRtcPublisher != null) webRtcPublisher.setMicrophoneMuted(true);
         if (mediaEngine != null) mediaEngine.startAudioRecording();
+        broadcastMediaEvent(EVENT_STATUS,
+                "Recording audio file on phone (live mic paused). Use Stop audio file to restore live voice.",
+                true, "audio");
     }
 
     public void commandStopAudioRecording() {
         if (mediaEngine != null) mediaEngine.stopAudioRecording();
+        if (webRtcPublisher != null) webRtcPublisher.setMicrophoneMuted(false);
+        broadcastMediaEvent(EVENT_STATUS, "Audio file recording stopped — live mic restored",
+                false, "");
     }
 
     public void commandSetQuality(int height) {
@@ -695,6 +768,7 @@ public class RemoteMediaForegroundService extends Service {
         stopCommandListener();
         stopSessionStatusWatch();
         releaseEngineAndWakeLock();
+        uploadExecutor.shutdownNow();
         synchronized (LOCK) {
             session = null;
             activeSnapshot = null;

@@ -1,6 +1,11 @@
 package com.autoreplybot.remote;
 
 import android.content.Context;
+import android.content.Intent;
+import android.graphics.ImageFormat;
+import android.graphics.Rect;
+import android.graphics.YuvImage;
+import android.media.projection.MediaProjection;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -26,12 +31,22 @@ import org.webrtc.MediaStream;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RtpReceiver;
+import org.webrtc.ScreenCapturerAndroid;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
+import org.webrtc.VideoCapturer;
+import org.webrtc.VideoFrame;
+import org.webrtc.VideoSink;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
+import org.webrtc.audio.AudioDeviceModule;
+import org.webrtc.audio.JavaAudioDeviceModule;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -73,8 +88,9 @@ public final class RemoteWebRtcPublisher {
     @Nullable private Listener listener;
     @Nullable private EglBase eglBase;
     @Nullable private PeerConnectionFactory factory;
+    @Nullable private AudioDeviceModule audioDeviceModule;
     @Nullable private PeerConnection peerConnection;
-    @Nullable private CameraVideoCapturer videoCapturer;
+    @Nullable private VideoCapturer videoCapturer;
     @Nullable private SurfaceTextureHelper surfaceTextureHelper;
     @Nullable private VideoSource videoSource;
     @Nullable private AudioSource audioSource;
@@ -84,7 +100,13 @@ public final class RemoteWebRtcPublisher {
     @Nullable private String sessionId;
     private boolean cameraEnabled;
     private boolean microphoneEnabled;
+    private boolean screenEnabled;
+    private boolean torchEnabled;
+    private boolean preferBackCamera;
+    @Nullable private Intent mediaProjectionData;
+    private int mediaProjectionResultCode;
     private int captureHeight = 720;
+    private int captureFps = 24;
 
     public RemoteWebRtcPublisher(@NonNull Context context) {
         this.appContext = context.getApplicationContext();
@@ -109,7 +131,11 @@ public final class RemoteWebRtcPublisher {
         this.sessionId = sessionId;
         this.cameraEnabled = cameraEnabled;
         this.microphoneEnabled = microphoneEnabled;
+        this.screenEnabled = false;
+        this.mediaProjectionData = null;
+        this.mediaProjectionResultCode = 0;
         this.captureHeight = preferredHeight > 0 ? preferredHeight : 720;
+        this.captureFps = 24;
         processedSignalIds.clear();
         pendingRemoteIce.clear();
         remoteAnswerSet = false;
@@ -118,6 +144,47 @@ public final class RemoteWebRtcPublisher {
                 startInternal();
             } catch (Exception e) {
                 Log.e(TAG, "start failed", e);
+                notifyError("start_failed", safeMessage(e));
+                stopInternal();
+                started.set(false);
+            }
+        });
+    }
+
+    /**
+     * Live screen mirror using MediaProjection + {@link ScreenCapturerAndroid}.
+     * Does not stream media through Firestore — signalling only.
+     */
+    public void startScreen(@NonNull String sessionId,
+                            @Nullable Intent projectionData,
+                            int resultCode,
+                            boolean microphoneEnabled,
+                            int preferredHeight,
+                            int fps) {
+        if (projectionData == null || resultCode == 0) {
+            notifyError("no_projection", "MediaProjection consent required");
+            return;
+        }
+        if (!started.compareAndSet(false, true)) {
+            Log.w(TAG, "Publisher already started");
+            return;
+        }
+        this.sessionId = sessionId;
+        this.cameraEnabled = false;
+        this.screenEnabled = true;
+        this.microphoneEnabled = microphoneEnabled;
+        this.mediaProjectionData = new Intent(projectionData);
+        this.mediaProjectionResultCode = resultCode;
+        this.captureHeight = preferredHeight > 0 ? preferredHeight : 720;
+        this.captureFps = fps > 0 ? Math.min(60, fps) : 30;
+        processedSignalIds.clear();
+        pendingRemoteIce.clear();
+        remoteAnswerSet = false;
+        executor.execute(() -> {
+            try {
+                startInternal();
+            } catch (Exception e) {
+                Log.e(TAG, "screen start failed", e);
                 notifyError("start_failed", safeMessage(e));
                 stopInternal();
                 started.set(false);
@@ -140,16 +207,183 @@ public final class RemoteWebRtcPublisher {
         });
     }
 
+    public interface StillCaptureCallback {
+        void onComplete(boolean ok, @Nullable String error);
+    }
+
+    /**
+     * Grab one JPEG from the live WebRTC video track (CameraX may not hold the camera).
+     */
+    public void captureStillJpeg(@NonNull File outFile, @NonNull StillCaptureCallback callback) {
+        executor.execute(() -> {
+            VideoTrack track = localVideoTrack;
+            if (track == null || (!cameraEnabled && !screenEnabled)) {
+                callback.onComplete(false, "No live video track");
+                return;
+            }
+            AtomicBoolean done = new AtomicBoolean(false);
+            VideoSink sink = new VideoSink() {
+                @Override
+                public void onFrame(VideoFrame frame) {
+                    if (!done.compareAndSet(false, true)) {
+                        return;
+                    }
+                    try {
+                        track.removeSink(this);
+                    } catch (RuntimeException ignored) {
+                    }
+                    try {
+                        frame.retain();
+                        try {
+                            writeJpegFromFrame(frame, outFile);
+                            callback.onComplete(true, null);
+                        } finally {
+                            frame.release();
+                        }
+                    } catch (Exception e) {
+                        callback.onComplete(false,
+                                e.getMessage() != null ? e.getMessage() : "frame_failed");
+                    }
+                }
+            };
+            try {
+                track.addSink(sink);
+            } catch (Exception e) {
+                callback.onComplete(false,
+                        e.getMessage() != null ? e.getMessage() : "sink_failed");
+            }
+        });
+    }
+
+    private static void writeJpegFromFrame(@NonNull VideoFrame frame, @NonNull File outFile)
+            throws Exception {
+        VideoFrame.I420Buffer i420 = frame.getBuffer().toI420();
+        if (i420 == null) {
+            throw new IllegalStateException("I420 conversion failed");
+        }
+        try {
+            int width = i420.getWidth();
+            int height = i420.getHeight();
+            int chromaHeight = (height + 1) / 2;
+            int chromaWidth = (width + 1) / 2;
+            ByteBuffer yBuf = i420.getDataY();
+            ByteBuffer uBuf = i420.getDataU();
+            ByteBuffer vBuf = i420.getDataV();
+            int strideY = i420.getStrideY();
+            int strideU = i420.getStrideU();
+            int strideV = i420.getStrideV();
+            byte[] nv21 = new byte[width * height + width * chromaHeight];
+            int pos = 0;
+            for (int row = 0; row < height; row++) {
+                yBuf.position(row * strideY);
+                yBuf.get(nv21, pos, width);
+                pos += width;
+            }
+            for (int row = 0; row < chromaHeight; row++) {
+                for (int col = 0; col < chromaWidth; col++) {
+                    int vuIndex = width * height + row * width + col * 2;
+                    if (vuIndex + 1 >= nv21.length) break;
+                    nv21[vuIndex] = vBuf.get(row * strideV + col);
+                    nv21[vuIndex + 1] = uBuf.get(row * strideU + col);
+                }
+            }
+            YuvImage yuv = new YuvImage(nv21, ImageFormat.NV21, width, height, null);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            yuv.compressToJpeg(new Rect(0, 0, width, height), 90, bos);
+            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                fos.write(bos.toByteArray());
+            }
+        } finally {
+            i420.release();
+        }
+    }
+
     public void switchCamera() {
         executor.execute(() -> {
-            if (videoCapturer != null) {
+            if (videoCapturer instanceof CameraVideoCapturer) {
                 try {
-                    videoCapturer.switchCamera(null);
+                    ((CameraVideoCapturer) videoCapturer).switchCamera(
+                            new CameraVideoCapturer.CameraSwitchHandler() {
+                                @Override
+                                public void onCameraSwitchDone(boolean isFrontCamera) {
+                                    preferBackCamera = !isFrontCamera;
+                                    if (torchEnabled && !isFrontCamera) {
+                                        applyTorchInternal(true);
+                                    } else if (isFrontCamera) {
+                                        torchEnabled = false;
+                                    }
+                                }
+
+                                @Override
+                                public void onCameraSwitchError(String errorDescription) {
+                                    notifyError("switch_camera",
+                                            errorDescription != null ? errorDescription : "switch failed");
+                                }
+                            });
                 } catch (Exception e) {
                     notifyError("switch_camera", safeMessage(e));
                 }
             }
         });
+    }
+
+    /** Live WebRTC owns the camera — torch must apply to the Camera2 capturer, not CameraX. */
+    public void setTorchEnabled(boolean enabled) {
+        executor.execute(() -> {
+            if (!started.get() || !cameraEnabled || !(videoCapturer instanceof CameraVideoCapturer)) {
+                notifyError("no_camera", "Live camera not active for torch");
+                return;
+            }
+            if (enabled && RemoteWebRtcTorchHelper.isFrontFacingCapturer(videoCapturer)) {
+                // Torch is on the rear unit — switch first, then enable in switch callback.
+                torchEnabled = true;
+                preferBackCamera = true;
+                notifyState("torch_switch", "Switching to back camera for torch");
+                try {
+                    ((CameraVideoCapturer) videoCapturer).switchCamera(
+                            new CameraVideoCapturer.CameraSwitchHandler() {
+                                @Override
+                                public void onCameraSwitchDone(boolean isFrontCamera) {
+                                    preferBackCamera = !isFrontCamera;
+                                    if (!isFrontCamera) {
+                                        applyTorchInternal(true);
+                                    } else {
+                                        torchEnabled = false;
+                                        notifyError("torch_unsupported",
+                                                "Could not switch to back camera for torch");
+                                    }
+                                }
+
+                                @Override
+                                public void onCameraSwitchError(String errorDescription) {
+                                    torchEnabled = false;
+                                    notifyError("torch_switch",
+                                            errorDescription != null ? errorDescription : "switch failed");
+                                }
+                            });
+                } catch (Exception e) {
+                    torchEnabled = false;
+                    notifyError("torch_switch", safeMessage(e));
+                }
+                return;
+            }
+            applyTorchInternal(enabled);
+        });
+    }
+
+    public boolean isTorchEnabled() {
+        return torchEnabled;
+    }
+
+    private void applyTorchInternal(boolean enabled) {
+        String err = RemoteWebRtcTorchHelper.setTorchEnabled(videoCapturer, enabled);
+        if (err != null) {
+            torchEnabled = false;
+            notifyError("torch_failed", err);
+            return;
+        }
+        torchEnabled = enabled;
+        notifyState("torch", enabled ? "on" : "off");
     }
 
     private void startInternal() {
@@ -177,17 +411,23 @@ public final class RemoteWebRtcPublisher {
             peerConnection.addTrack(localAudioTrack, java.util.Collections.singletonList("stream0"));
         }
 
-        if (cameraEnabled) {
-            videoCapturer = createCameraCapturer();
+        if (cameraEnabled || screenEnabled) {
+            if (screenEnabled) {
+                videoCapturer = createScreenCapturer();
+            } else {
+                videoCapturer = createCameraCapturer();
+            }
             if (videoCapturer == null) {
-                throw new IllegalStateException("No camera available for WebRTC capturer");
+                throw new IllegalStateException(screenEnabled
+                        ? "Screen capturer unavailable"
+                        : "No camera available for WebRTC capturer");
             }
             surfaceTextureHelper =
                     SurfaceTextureHelper.create("RemoteWebRtcCapture", eglBase.getEglBaseContext());
             videoSource = factory.createVideoSource(videoCapturer.isScreencast());
             videoCapturer.initialize(surfaceTextureHelper, appContext, videoSource.getCapturerObserver());
             int[] size = sizeForHeight(captureHeight);
-            videoCapturer.startCapture(size[0], size[1], 24);
+            videoCapturer.startCapture(size[0], size[1], captureFps);
             localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
             localVideoTrack.setEnabled(true);
             peerConnection.addTrack(localVideoTrack, java.util.Collections.singletonList("stream0"));
@@ -378,21 +618,37 @@ public final class RemoteWebRtcPublisher {
             }
         }
         eglBase = EglBase.create();
+        audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+                .setUseHardwareAcousticEchoCanceler(true)
+                .setUseHardwareNoiseSuppressor(true)
+                .createAudioDeviceModule();
         DefaultVideoEncoderFactory encoderFactory =
                 new DefaultVideoEncoderFactory(eglBase.getEglBaseContext(), true, true);
         DefaultVideoDecoderFactory decoderFactory =
                 new DefaultVideoDecoderFactory(eglBase.getEglBaseContext());
         factory = PeerConnectionFactory.builder()
+                .setAudioDeviceModule(audioDeviceModule)
                 .setVideoEncoderFactory(encoderFactory)
                 .setVideoDecoderFactory(decoderFactory)
                 .createPeerConnectionFactory();
+        // Factory retains ownership; drop our reference.
+        audioDeviceModule.release();
+        audioDeviceModule = null;
     }
 
     @Nullable
     private CameraVideoCapturer createCameraCapturer() {
         CameraEnumerator enumerator = new Camera2Enumerator(appContext);
         String[] names = enumerator.getDeviceNames();
-        // Prefer front camera to match RemoteSession selectedCamera default.
+        // Prefer back when torch was requested; otherwise front (previous default).
+        if (preferBackCamera) {
+            for (String name : names) {
+                if (!enumerator.isFrontFacing(name)) {
+                    CameraVideoCapturer capturer = enumerator.createCapturer(name, null);
+                    if (capturer != null) return capturer;
+                }
+            }
+        }
         for (String name : names) {
             if (enumerator.isFrontFacing(name)) {
                 CameraVideoCapturer capturer = enumerator.createCapturer(name, null);
@@ -406,6 +662,19 @@ public final class RemoteWebRtcPublisher {
             }
         }
         return null;
+    }
+
+    @Nullable
+    private VideoCapturer createScreenCapturer() {
+        Intent data = mediaProjectionData;
+        if (data == null) return null;
+        return new ScreenCapturerAndroid(data, new MediaProjection.Callback() {
+            @Override
+            public void onStop() {
+                notifyError("projection_revoked", "Screen capture permission revoked");
+                RemoteMediaProjectionHolder.clear();
+            }
+        });
     }
 
     @NonNull

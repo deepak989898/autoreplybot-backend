@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import { db } from "./firebase.js";
 import * as R from "./remote-constants.js";
+import { normalizeAllowedCapabilities } from "./capability-model.js";
 
 /**
  * @returns {string}
@@ -123,16 +124,31 @@ export async function writeAuditLog(uid, entry) {
  */
 export function sanitizeTrustedClient(id, data) {
   if (!data || typeof data !== "object") return null;
+  const caps =
+    data.allowedCapabilities && typeof data.allowedCapabilities === "object"
+      ? data.allowedCapabilities
+      : {};
   return {
     clientId: data.clientId || id,
     clientName: String(data.clientName || ""),
-    browser: String(data.browser || ""),
-    platform: String(data.platform || ""),
-    createdAt: Number(data.createdAt || 0),
-    lastUsedAt: Number(data.lastUsedAt || 0),
+    browser: String(data.browser || data.browserName || ""),
+    browserName: String(data.browserName || data.browser || ""),
+    platform: String(data.platform || data.operatingSystem || ""),
+    operatingSystem: String(data.operatingSystem || data.platform || ""),
+    browserFingerprintHash: String(data.browserFingerprintHash || ""),
+    createdAt: Number(data.createdAt || data.pairedAt || 0),
+    pairedAt: Number(data.pairedAt || data.createdAt || 0),
+    lastUsedAt: Number(data.lastUsedAt || data.lastSeenAt || 0),
+    lastSeenAt: Number(data.lastSeenAt || data.lastUsedAt || 0),
     revoked: Boolean(data.revoked),
+    persistentPairing: data.persistentPairing !== false,
+    autoApproveSessions: Boolean(data.autoApproveSessions),
+    requirePhoneUnlock: Boolean(data.requirePhoneUnlock),
+    expiresAt: data.expiresAt == null ? null : Number(data.expiresAt),
+    allowedCapabilities: normalizeAllowedCapabilities(caps),
     pairingMetadata: String(data.pairingMetadata || ""),
     ownerUid: String(data.ownerUid || ""),
+    updatedAt: Number(data.updatedAt || 0),
   };
 }
 
@@ -174,20 +190,32 @@ export async function endActiveSessionsForClient(uid, clientId) {
 }
 
 /**
- * End active remote sessions for a device (one-session-per-device preference).
+ * End active remote sessions for a device.
+ * When sessionKind is set ("camera" | "screen"), only matching sessions end so
+ * camera and screen mirror can run independently.
  * @param {string} uid
  * @param {string} deviceId
  * @param {string} [reason]
+ * @param {string|null} [sessionKind]
  * @returns {Promise<number>}
  */
-export async function endActiveSessionsForDevice(uid, deviceId, reason = "replaced") {
+export async function endActiveSessionsForDevice(
+  uid,
+  deviceId,
+  reason = "replaced",
+  sessionKind = null
+) {
   const snap = await sessionsRef(uid).where("deviceId", "==", deviceId).get();
   const now = Date.now();
   const batch = db().batch();
   let count = 0;
+  const kindFilter = sessionKind ? String(sessionKind) : null;
   snap.forEach((doc) => {
-    const status = String(doc.data()?.status || "");
+    const data = doc.data() || {};
+    const status = String(data.status || "");
     if (!R.ACTIVE_SESSION_STATUSES.includes(status)) return;
+    const kind = String(data.sessionKind || "camera");
+    if (kindFilter && kind !== kindFilter) return;
     batch.update(doc.ref, {
       status: "ended",
       endedAt: now,

@@ -43,25 +43,14 @@ public final class PrivacySafetyChecker {
             return ReplyAction.NO_REPLY;
         }
         if (classification.isCompanyMessage) {
-            return classification.modelAction == ReplyAction.REQUIRE_APPROVAL
-                    ? ReplyAction.REQUIRE_APPROVAL : ReplyAction.NO_REPLY;
+            return ReplyAction.NO_REPLY;
         }
         if (profile.relationshipType == RelationshipType.BLOCKED
                 || classification.intent == MessageIntent.SPAM
                 || classification.intent == MessageIntent.ABUSIVE) {
             return ReplyAction.NO_REPLY;
         }
-        if (!classification.canAutoReply && classification.confidence < 0.60d) {
-            return ReplyAction.REQUIRE_APPROVAL;
-        }
-        if (SECRET.matcher(incoming).find() || RISK_TOPIC.matcher(incoming).find()) {
-            return ReplyAction.REQUIRE_APPROVAL;
-        }
-        // Model review flags are advisory for ordinary messages. Deterministic risk checks and
-        // high-risk intents remain authoritative so safe greetings/casual chat can auto-send.
-        if (classification.sensitive || isHighRiskIntent(classification.intent)) {
-            return ReplyAction.REQUIRE_APPROVAL;
-        }
+        // Approval queue removed — continue to generation for all other messages.
         return ReplyAction.SEND_REPLY;
     }
 
@@ -116,17 +105,19 @@ public final class PrivacySafetyChecker {
             add(flags, "PROMPT_OR_CONTEXT_LEAK");
         }
 
-        // A non-empty, locally safe draft should auto-send even if the model was overly cautious.
-        // NO_REPLY remains authoritative; approval is re-applied below for every real risk.
+        // Approval queue removed: send a valid draft, or skip. Never hold for manual review.
+        // Only hard-block replies that leak secrets / private info / prompt content.
         ReplyAction action = generated.action == ReplyAction.NO_REPLY
                 ? ReplyAction.NO_REPLY : ReplyAction.SEND_REPLY;
-        if (!generated.valid || reply.isEmpty()) action = ReplyAction.REQUIRE_APPROVAL;
-        if (privateInfo || unverified || locallyRepeated || generated.repeatedReply
-                || hasBlockingFlag(flags) || classification.sensitive
-                || isHighRiskIntent(classification.intent)) {
-            action = ReplyAction.REQUIRE_APPROVAL;
+        if (!generated.valid || reply.isEmpty()) {
+            action = ReplyAction.NO_REPLY;
         }
-        if (profile.relationshipType == RelationshipType.BLOCKED) action = ReplyAction.NO_REPLY;
+        if (privateInfo || hasSecretOrLeakFlag(flags)) {
+            action = ReplyAction.NO_REPLY;
+        }
+        if (profile.relationshipType == RelationshipType.BLOCKED) {
+            action = ReplyAction.NO_REPLY;
+        }
 
         InformationClassification info = informationClassification(
                 classification.intent, privateInfo, flags);
@@ -151,16 +142,19 @@ public final class PrivacySafetyChecker {
     }
 
     private static boolean hasBlockingFlag(List<String> flags) {
+        return hasSecretOrLeakFlag(flags);
+    }
+
+    /** Hard-block only credential / private-leak style flags (not topic caution). */
+    private static boolean hasSecretOrLeakFlag(List<String> flags) {
         for (String flag : flags) {
             String upper = flag.toUpperCase(Locale.ROOT);
-            if (upper.contains("SECRET") || upper.contains("PRIVATE")
-                    || upper.contains("LOCATION") || upper.contains("COMMITMENT")
-                    || upper.contains("PAYMENT") || upper.contains("BOOKING")
-                    || upper.contains("MEETING") || upper.contains("TRAVEL")
-                    || upper.contains("MEDICAL") || upper.contains("LEGAL")
-                    || upper.contains("EMERGENCY") || upper.contains("LEAK")
-                    || upper.contains("RISK_TOPIC") || upper.contains("UNVERIFIED")
-                    || upper.contains("REPEATED")) return true;
+            if (upper.contains("SECRET") || upper.contains("CREDENTIAL") || upper.contains("OTP")
+                    || upper.contains("CROSS_CONTACT") || upper.contains("PROMPT")
+                    || upper.contains("LEAK") || upper.contains("LOCATION")
+                    || upper.contains("HOME_ADDRESS") || upper.contains("PRIVATE")) {
+                return true;
+            }
         }
         return false;
     }

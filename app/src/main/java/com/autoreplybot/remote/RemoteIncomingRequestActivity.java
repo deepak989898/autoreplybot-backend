@@ -204,6 +204,8 @@ public class RemoteIncomingRequestActivity extends AppCompatActivity {
 
     @NonNull
     private String formatCapabilities(@NonNull RemoteSessionRequest loaded) {
+        boolean screen = RemoteCapabilityHelper.wantsScreenMirror(loaded.requestedCapabilities);
+        if (screen) return getString(R.string.remote_cap_screen_mirror);
         boolean camera = RemoteCapabilityHelper.wantsCamera(loaded.requestedCapabilities);
         boolean mic = RemoteCapabilityHelper.wantsMicrophone(loaded.requestedCapabilities);
         if (camera && mic) return getString(R.string.remote_cap_camera_and_mic);
@@ -241,8 +243,15 @@ public class RemoteIncomingRequestActivity extends AppCompatActivity {
             Toast.makeText(this, R.string.remote_request_expired, Toast.LENGTH_SHORT).show();
             return;
         }
-        boolean wantCamera = RemoteCapabilityHelper.wantsCamera(request.requestedCapabilities);
+        boolean wantScreen = RemoteCapabilityHelper.wantsScreenMirror(request.requestedCapabilities);
+        boolean wantCamera = !wantScreen
+                && RemoteCapabilityHelper.wantsCamera(request.requestedCapabilities);
         boolean wantMic = RemoteCapabilityHelper.wantsMicrophone(request.requestedCapabilities);
+        if (wantScreen) {
+            setBusy(true);
+            completeScreenApproval(wantMic);
+            return;
+        }
         RemotePermissionCoordinator.Mode mode =
                 RemotePermissionCoordinator.Mode.forCapabilities(wantCamera, wantMic);
         setBusy(true);
@@ -270,6 +279,74 @@ public class RemoteIncomingRequestActivity extends AppCompatActivity {
         });
     }
 
+    private void completeScreenApproval(boolean withMic) {
+        if (request == null || requestId == null) {
+            setBusy(false);
+            return;
+        }
+        final RemoteSessionRequest approvedRequest = request;
+        final String name = textClient.getText() != null
+                ? textClient.getText().toString()
+                : getString(R.string.remote_default_client_name);
+        final String quality = "720p";
+
+        requestRepository.markApproved(requestId)
+                .continueWithTask(task -> {
+                    if (!task.isSuccessful()) throw task.getException();
+                    String deviceId = approvedRequest.deviceId.isEmpty()
+                            ? prefs.getOrCreateDeviceId()
+                            : approvedRequest.deviceId;
+                    return sessionRepository
+                            .findActiveForDeviceAndEnd(deviceId, "replaced_by_new_session", "screen")
+                            .continueWithTask(endTask -> sessionRepository.createActive(
+                                    deviceId,
+                                    approvedRequest.clientId,
+                                    false,
+                                    withMic,
+                                    "screen"));
+                })
+                .addOnSuccessListener(session -> {
+                    auditRepository.append(
+                            RemoteAuditAction.SESSION_APPROVED,
+                            prefs.getOrCreateDeviceId(),
+                            approvedRequest.clientId,
+                            session.sessionId,
+                            "ok",
+                            Collections.singletonMap("requestId", requestId));
+                    FirebaseUser current = FirebaseAuth.getInstance().getCurrentUser();
+                    if (current != null) {
+                        Map<String, Object> link = new HashMap<>();
+                        link.put("sessionId", session.sessionId);
+                        link.put("status", RemoteSessionRequest.Status.APPROVED.wireValue());
+                        link.put("sessionKind", "screen");
+                        FirebaseFirestore.getInstance()
+                                .collection(com.autoreplybot.AppConstants.FIRESTORE_USERS)
+                                .document(current.getUid())
+                                .collection(com.autoreplybot.AppConstants.FIRESTORE_SESSION_REQUESTS)
+                                .document(requestId)
+                                .set(link, com.google.firebase.firestore.SetOptions.merge());
+                    }
+                    new RemoteModulePrefs(this).setScreenMirrorEnabled(true);
+                    new RemoteDeviceInfoRepository(this).publishModuleFlags();
+                    startActivity(RemoteMediaProjectionConsentActivity.intentForMirror(
+                            this,
+                            session.sessionId,
+                            requestId,
+                            approvedRequest.clientId,
+                            name,
+                            withMic,
+                            quality,
+                            30 /* fps; website preference applied on next request */));
+                    finish();
+                })
+                .addOnFailureListener(error -> {
+                    setBusy(false);
+                    Toast.makeText(this,
+                            getString(R.string.remote_error, error.getMessage()),
+                            Toast.LENGTH_LONG).show();
+                });
+    }
+
     private void completeApproval(boolean wantCamera, boolean wantMic) {
         if (request == null || requestId == null) {
             setBusy(false);
@@ -286,14 +363,15 @@ public class RemoteIncomingRequestActivity extends AppCompatActivity {
                     String deviceId = approvedRequest.deviceId.isEmpty()
                             ? prefs.getOrCreateDeviceId()
                             : approvedRequest.deviceId;
-                    // Prefer one active session per device.
+                    // One active camera session per device (screen sessions unaffected).
                     return sessionRepository
-                            .findActiveForDeviceAndEnd(deviceId, "replaced_by_new_session")
+                            .findActiveForDeviceAndEnd(deviceId, "replaced_by_new_session", "camera")
                             .continueWithTask(endTask -> sessionRepository.createActive(
                                     deviceId,
                                     approvedRequest.clientId,
                                     wantCamera,
-                                    wantMic));
+                                    wantMic,
+                                    "camera"));
                 })
                 .addOnSuccessListener(session -> {
                     auditRepository.append(
@@ -334,11 +412,7 @@ public class RemoteIncomingRequestActivity extends AppCompatActivity {
                             wantCamera,
                             wantMic);
 
-                    Intent open = new Intent(this, RemoteActiveSessionActivity.class);
-                    open.putExtra(RemoteMediaForegroundService.EXTRA_SESSION_ID, session.sessionId);
-                    open.putExtra(RemoteMediaForegroundService.EXTRA_CLIENT_NAME, name);
-                    open.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                    startActivity(open);
+                    // Keep sharing in the foreground service + notification only.
                     finish();
                 })
                 .addOnFailureListener(error -> {

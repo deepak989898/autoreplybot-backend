@@ -94,5 +94,15 @@ public interface RemoteMediaEngine {
         void onRecordingStateChanged(boolean recording, @NonNull String kind);
 
         void onStatusMessage(@NonNull String message);
+
+        /**
+         * Local file ready for cloud upload (photo / video / audio).
+         * @param kind {@code photo}, {@code video}, or {@code audio}
+         */
+        default void onLocalMediaReady(@NonNull String kind,
+                                       @NonNull Uri uri,
+                                       @NonNull String absolutePath,
+                                       @NonNull String contentType) {
+        }
     }
 }

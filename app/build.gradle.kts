@@ -124,9 +124,11 @@ dependencies {
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
     implementation(libs.camera.video)
+    implementation(libs.mlkit.barcode.scanning)
     // Phase 5 WebRTC: io.getstream:stream-webrtc-android (maintained Google WebRTC AAR for AGP 8.x).
     // Fallback if unavailable: org.webrtc:google-webrtc from a known working mirror — prefer Stream.
     implementation(libs.stream.webrtc.android)
+    implementation(libs.play.services.location)
     testImplementation(libs.junit)
     testImplementation(libs.json)
     androidTestImplementation(libs.ext.junit)

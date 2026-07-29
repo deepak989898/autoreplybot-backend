@@ -1,6 +1,7 @@
 package com.autoreplybot.remote;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.autoreplybot.AppConstants;
 import com.google.android.gms.tasks.Task;
@@ -41,6 +42,15 @@ public final class RemoteSessionRepository {
                                             @NonNull String clientId,
                                             boolean cameraEnabled,
                                             boolean microphoneEnabled) {
+        return createActive(deviceId, clientId, cameraEnabled, microphoneEnabled, "camera");
+    }
+
+    @NonNull
+    public Task<RemoteSession> createActive(@NonNull String deviceId,
+                                            @NonNull String clientId,
+                                            boolean cameraEnabled,
+                                            boolean microphoneEnabled,
+                                            @NonNull String sessionKind) {
         try {
             validateId(deviceId);
             validateId(clientId);
@@ -61,7 +71,10 @@ public final class RemoteSessionRepository {
                     "auto",
                     "",
                     uid);
-            return doc(uid, sessionId).set(session.toMap()).continueWith(task -> {
+            Map<String, Object> map = session.toMap();
+            map.put("sessionKind", sessionKind != null && !sessionKind.isEmpty()
+                    ? sessionKind : "camera");
+            return doc(uid, sessionId).set(map).continueWith(task -> {
                 if (!task.isSuccessful()) {
                     Exception e = task.getException();
                     throw e != null ? e : new IllegalStateException("Failed to create session");
@@ -101,6 +114,16 @@ public final class RemoteSessionRepository {
 
     @NonNull
     public Task<Void> findActiveForDeviceAndEnd(@NonNull String deviceId, @NonNull String reason) {
+        return findActiveForDeviceAndEnd(deviceId, reason, null);
+    }
+
+    /**
+     * @param sessionKind null = end all kinds; "camera" / "screen" = only that kind
+     */
+    @NonNull
+    public Task<Void> findActiveForDeviceAndEnd(@NonNull String deviceId,
+                                                @NonNull String reason,
+                                                @Nullable String sessionKind) {
         try {
             validateId(deviceId);
             String uid = requireUid();
@@ -128,6 +151,12 @@ public final class RemoteSessionRepository {
                                         && !"connecting".equals(status)
                                         && !"connected".equals(status)
                                         && !"reconnecting".equals(status)) {
+                                    continue;
+                                }
+                                String kind = RemoteMapValues.string(data, "sessionKind");
+                                if (kind.isEmpty()) kind = "camera";
+                                if (sessionKind != null && !sessionKind.isEmpty()
+                                        && !sessionKind.equals(kind)) {
                                     continue;
                                 }
                                 Map<String, Object> patch = new HashMap<>();

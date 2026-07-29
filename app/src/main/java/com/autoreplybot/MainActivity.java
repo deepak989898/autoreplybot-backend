@@ -33,17 +33,11 @@ import com.google.firebase.auth.FirebaseUser;
 public class MainActivity extends AppCompatActivity {
 
     private TextView textEmail;
-    private TextView textProfileInitial;
     private TextView textNotificationHint;
     private Chip chipNotificationAccess;
     private TextView textMessagingAppsValue;
     private SwitchMaterial switchMaster;
     private Spinner spinnerDefaultMode;
-    private TextView textProcessed;
-    private TextView textAutoSent;
-    private TextView textPending;
-    private TextView textDuplicates;
-    private TextView textSensitive;
     private boolean bindingDashboard;
 
     @Override
@@ -59,36 +53,23 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         textEmail = findViewById(R.id.text_email);
-        textProfileInitial = findViewById(R.id.text_profile_initial);
         textNotificationHint = findViewById(R.id.text_notification_hint);
         chipNotificationAccess = findViewById(R.id.chip_notification_access);
         textMessagingAppsValue = findViewById(R.id.text_messaging_apps_value);
         switchMaster = findViewById(R.id.switch_master);
         spinnerDefaultMode = findViewById(R.id.spinner_default_mode);
-        textProcessed = findViewById(R.id.text_metric_processed);
-        textAutoSent = findViewById(R.id.text_metric_auto_sent);
-        textPending = findViewById(R.id.text_metric_pending);
-        textDuplicates = findViewById(R.id.text_metric_duplicates);
-        textSensitive = findViewById(R.id.text_metric_sensitive);
 
         MaterialButton buttonSettings = findViewById(R.id.button_settings);
         MaterialButton buttonFacebookPosting = findViewById(R.id.button_facebook_posting);
         MaterialButton buttonRemoteControl = findViewById(R.id.button_remote_control);
-        MaterialButton buttonNotificationAccess = findViewById(R.id.button_notification_access);
         MaterialButton buttonSignOut = findViewById(R.id.button_sign_out);
-        MaterialButton buttonContacts = findViewById(R.id.button_contacts);
-        MaterialButton buttonApprovals = findViewById(R.id.button_pending_approvals);
-        MaterialButton buttonPrivacy = findViewById(R.id.button_privacy);
-        MaterialButton buttonHistory = findViewById(R.id.button_reply_history);
 
         String emailOrId = user.getEmail() != null ? user.getEmail() : user.getUid();
         textEmail.setText(emailOrId);
 
-        String initialSrc = user.getEmail() != null && !user.getEmail().isEmpty()
-                ? user.getEmail().trim()
-                : (user.getUid() != null ? user.getUid() : "?");
-        char letter = Character.toUpperCase(initialSrc.charAt(0));
-        textProfileInitial.setText(String.valueOf(letter));
+        // Status chip opens the same system Notification Listener settings screen.
+        chipNotificationAccess.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
 
         buttonSettings.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
@@ -96,15 +77,6 @@ public class MainActivity extends AppCompatActivity {
                 startActivity(new Intent(this, FacebookPostingActivity.class)));
         buttonRemoteControl.setOnClickListener(v ->
                 startActivity(new Intent(this, RemoteControlHomeActivity.class)));
-        buttonNotificationAccess.setOnClickListener(v ->
-                startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
-        buttonContacts.setOnClickListener(v -> startActivity(new Intent(this, ContactsActivity.class)));
-        buttonApprovals.setOnClickListener(v ->
-                startActivity(new Intent(this, PendingApprovalsActivity.class)));
-        buttonPrivacy.setOnClickListener(v ->
-                startActivity(new Intent(this, PrivacySettingsActivity.class)));
-        buttonHistory.setOnClickListener(v ->
-                startActivity(new Intent(this, ReplyHistoryActivity.class)));
         ArrayAdapter<CharSequence> modeAdapter = ArrayAdapter.createFromResource(this,
                 R.array.reply_mode_options, android.R.layout.simple_spinner_item);
         modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -130,7 +102,6 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         SettingsRepository repo = new SettingsRepository(this);
         repo.pullFromFirestore().addOnCompleteListener(t -> refreshStatus());
-        refreshMetrics();
     }
 
     private void refreshStatus() {
@@ -148,17 +119,6 @@ public class MainActivity extends AppCompatActivity {
         switchMaster.setChecked(s.isMasterEnabled());
         spinnerDefaultMode.setSelection(s.getDefaultReplyMode().ordinal(), false);
         bindingDashboard = false;
-    }
-
-    private void refreshMetrics() {
-        new MetricsRepository(this).loadToday().addOnSuccessListener(metrics -> {
-            textProcessed.setText(String.valueOf(metrics.processedMessages));
-            textAutoSent.setText(String.valueOf(metrics.autoSentReplies));
-            textDuplicates.setText(String.valueOf(metrics.duplicatesBlocked));
-            textSensitive.setText(String.valueOf(metrics.sensitiveBlocked));
-        });
-        new PendingApprovalRepository(this).loadPending(100)
-                .addOnSuccessListener(values -> textPending.setText(String.valueOf(values.size())));
     }
 
     private void updateDashboardSettings(@Nullable Boolean master, @Nullable ReplyMode mode) {

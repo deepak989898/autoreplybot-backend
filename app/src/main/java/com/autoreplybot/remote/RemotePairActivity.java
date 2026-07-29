@@ -9,6 +9,8 @@ import android.text.TextUtils;
 import android.view.View;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
@@ -17,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.autoreplybot.R;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
@@ -36,6 +39,24 @@ public class RemotePairActivity extends AppCompatActivity {
     private TextInputEditText inputClientName;
     private View progress;
     private MaterialButton buttonContinue;
+    private MaterialButton buttonScanQr;
+    private MaterialCheckBox checkTrust;
+    private MaterialCheckBox checkPersistent;
+    private MaterialCheckBox checkAutoApprove;
+    private MaterialCheckBox checkCamera;
+    private MaterialCheckBox checkMic;
+    private MaterialCheckBox checkPhoto;
+    private MaterialCheckBox checkVideo;
+    private MaterialCheckBox checkAudio;
+    private MaterialCheckBox checkTorch;
+
+    private final ActivityResultLauncher<Intent> qrScanLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() != RESULT_OK || result.getData() == null) return;
+                String raw = result.getData().getStringExtra(RemoteQrScanActivity.EXTRA_RAW_VALUE);
+                if (TextUtils.isEmpty(raw)) return;
+                applyScannedPayload(raw);
+            });
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -54,11 +75,28 @@ public class RemotePairActivity extends AppCompatActivity {
         inputToken = findViewById(R.id.input_pair_token);
         inputClientName = findViewById(R.id.input_client_name);
         buttonContinue = findViewById(R.id.button_pair_continue);
+        buttonScanQr = findViewById(R.id.button_scan_qr);
+        checkTrust = findViewById(R.id.check_trust_browser);
+        checkPersistent = findViewById(R.id.check_persistent_pairing);
+        checkAutoApprove = findViewById(R.id.check_auto_approve);
+        checkCamera = findViewById(R.id.check_allow_camera);
+        checkMic = findViewById(R.id.check_allow_microphone);
+        checkPhoto = findViewById(R.id.check_allow_photo);
+        checkVideo = findViewById(R.id.check_allow_video);
+        checkAudio = findViewById(R.id.check_allow_audio);
+        checkTorch = findViewById(R.id.check_allow_torch);
 
         inputClientName.setText(getString(R.string.remote_default_client_name));
         applyDeepLink(getIntent());
 
         buttonContinue.setOnClickListener(v -> onContinueClicked());
+        buttonScanQr.setOnClickListener(v ->
+                qrScanLauncher.launch(new Intent(this, RemoteQrScanActivity.class)));
+        View editTrusted = findViewById(R.id.button_edit_trusted);
+        if (editTrusted != null) {
+            editTrusted.setOnClickListener(v ->
+                    startActivity(new Intent(this, RemoteTrustedClientsActivity.class)));
+        }
     }
 
     @Override
@@ -89,6 +127,29 @@ public class RemotePairActivity extends AppCompatActivity {
         if (!TextUtils.isEmpty(token)) {
             inputToken.setText(token);
         }
+    }
+
+    private void applyScannedPayload(@NonNull String raw) {
+        RemotePairApi.ParsedPairInput parsed = RemotePairApi.parseUserInput("", raw);
+        if (parsed.isEmpty()) {
+            // Also accept plain deep link pasted into code-like field.
+            parsed = RemotePairApi.parseUserInput(raw, raw);
+        }
+        if (parsed.isEmpty()) {
+            Toast.makeText(this, R.string.remote_pair_code_or_token_required, Toast.LENGTH_SHORT)
+                    .show();
+            return;
+        }
+        if (!parsed.code.isEmpty()) {
+            inputCode.setText(parsed.code);
+        }
+        if (!parsed.token.isEmpty()) {
+            inputToken.setText(parsed.token);
+        } else if (raw.startsWith("autoreplybot://") || raw.contains("://pair")) {
+            inputToken.setText(raw);
+        }
+        Toast.makeText(this, R.string.remote_qr_scanned, Toast.LENGTH_SHORT).show();
+        onContinueClicked();
     }
 
     private void onContinueClicked() {
@@ -123,20 +184,41 @@ public class RemotePairActivity extends AppCompatActivity {
         final String finalCode = parsed.code;
         final String finalToken = parsed.token;
         final String finalName = clientName;
+        final RemotePairTrustOptions options = readTrustOptions();
 
         new AlertDialog.Builder(this)
                 .setTitle(R.string.remote_pair_trust_title)
                 .setMessage(getString(R.string.remote_pair_trust_message)
-                        + "\n\n" + finalName)
+                        + "\n\n" + finalName
+                        + "\n"
+                        + (options.autoApproveSessions
+                        ? getString(R.string.remote_pair_summary_auto_on)
+                        : getString(R.string.remote_pair_summary_auto_off)))
                 .setNegativeButton(R.string.remote_pair_cancel, null)
                 .setPositiveButton(R.string.remote_pair_confirm,
-                        (d, which) -> completePairing(finalCode, finalToken, finalName))
+                        (d, which) -> completePairing(finalCode, finalToken, finalName, options))
                 .show();
+    }
+
+    @NonNull
+    private RemotePairTrustOptions readTrustOptions() {
+        return new RemotePairTrustOptions(
+                checkTrust == null || checkTrust.isChecked(),
+                checkPersistent == null || checkPersistent.isChecked(),
+                checkAutoApprove != null && checkAutoApprove.isChecked(),
+                false,
+                checkCamera == null || checkCamera.isChecked(),
+                checkMic == null || checkMic.isChecked(),
+                checkPhoto == null || checkPhoto.isChecked(),
+                checkVideo != null && checkVideo.isChecked(),
+                checkAudio != null && checkAudio.isChecked(),
+                checkTorch == null || checkTorch.isChecked());
     }
 
     private void completePairing(@NonNull String code,
                                  @NonNull String token,
-                                 @NonNull String clientName) {
+                                 @NonNull String clientName,
+                                 @NonNull RemotePairTrustOptions options) {
         FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
         if (user == null) {
             finish();
@@ -145,7 +227,8 @@ public class RemotePairActivity extends AppCompatActivity {
         setBusy(true);
         user.getIdToken(false)
                 .addOnSuccessListener(tokenResult ->
-                        executor.execute(() -> runComplete(tokenResult, code, token, clientName)))
+                        executor.execute(() ->
+                                runComplete(tokenResult, code, token, clientName, options)))
                 .addOnFailureListener(error -> {
                     setBusy(false);
                     Toast.makeText(this,
@@ -157,7 +240,8 @@ public class RemotePairActivity extends AppCompatActivity {
     private void runComplete(@NonNull GetTokenResult tokenResult,
                              @NonNull String code,
                              @NonNull String token,
-                             @NonNull String clientName) {
+                             @NonNull String clientName,
+                             @NonNull RemotePairTrustOptions options) {
         try {
             String idToken = tokenResult.getToken();
             if (TextUtils.isEmpty(idToken)) {
@@ -168,7 +252,8 @@ public class RemotePairActivity extends AppCompatActivity {
                     code,
                     token,
                     clientName,
-                    prefs.getOrCreateDeviceId());
+                    prefs.getOrCreateDeviceId(),
+                    options);
             mainHandler.post(() -> {
                 setBusy(false);
                 Toast.makeText(this, R.string.remote_pair_success, Toast.LENGTH_SHORT).show();
@@ -189,5 +274,6 @@ public class RemotePairActivity extends AppCompatActivity {
     private void setBusy(boolean busy) {
         progress.setVisibility(busy ? View.VISIBLE : View.GONE);
         buttonContinue.setEnabled(!busy);
+        if (buttonScanQr != null) buttonScanQr.setEnabled(!busy);
     }
 }
