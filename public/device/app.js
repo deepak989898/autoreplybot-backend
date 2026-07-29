@@ -2429,6 +2429,20 @@ function isStandaloneDisplay() {
   );
 }
 
+/** Keep the installed PWA / mobile UI in portrait — never rotate with the phone. */
+function lockPortraitOrientation() {
+  try {
+    const orient = screen.orientation || screen.mozOrientation || screen.msOrientation;
+    if (orient && typeof orient.lock === "function") {
+      orient.lock("portrait").catch(() => {
+        orient.lock("portrait-primary").catch(() => {});
+      });
+    }
+  } catch {
+    // Browser may require fullscreen / installed PWA; manifest covers that case.
+  }
+}
+
 function updatePwaInstallUi() {
   const loginBtn = document.getElementById("btn-install-pwa");
   const appBtn = document.getElementById("btn-install-pwa-app");
@@ -2482,6 +2496,7 @@ function setupPwa() {
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
     updatePwaInstallUi();
+    lockPortraitOrientation();
   });
 
   document.getElementById("btn-install-pwa")?.addEventListener("click", () => {
@@ -2498,6 +2513,11 @@ function setupPwa() {
   }
 
   updatePwaInstallUi();
+  lockPortraitOrientation();
+  window.addEventListener("orientationchange", () => lockPortraitOrientation());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") lockPortraitOrientation();
+  });
 }
 
 setupPwa();
