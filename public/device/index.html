@@ -17,10 +17,54 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
+  <style>
+    /* Instant first paint before styles.css / app.js load */
+    .boot-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f4f6fb;
+      font-family: "DM Sans", system-ui, sans-serif;
+    }
+    .boot-loading[hidden] { display: none !important; }
+    .boot-loading-inner { text-align: center; padding: 24px; }
+    .boot-spinner {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 16px;
+      border: 3px solid #e6e8f0;
+      border-top-color: #5b5ce2;
+      border-radius: 50%;
+      animation: boot-spin 0.75s linear infinite;
+    }
+    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    .boot-loading-brand {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1c1f2e;
+    }
+    .boot-loading-text {
+      margin: 8px 0 0;
+      font-size: 0.92rem;
+      color: #6b7289;
+    }
+  </style>
 </head>
-<body class="device-app">
+<body class="device-app is-booting">
+  <div id="boot-loading" class="boot-loading" role="status" aria-live="polite" aria-busy="true">
+    <div class="boot-loading-inner">
+      <div class="boot-spinner" aria-hidden="true"></div>
+      <p class="boot-loading-brand">AutoReplyBot</p>
+      <p id="boot-loading-text" class="boot-loading-text">Loading…</p>
+    </div>
+  </div>
+
   <!-- LOGIN -->
-  <div id="view-login" class="login-shell">
+  <div id="view-login" class="login-shell" hidden>
     <div class="login-split">
       <aside class="login-hero">
         <div class="login-hero-inner">

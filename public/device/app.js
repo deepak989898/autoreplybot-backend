@@ -225,8 +225,9 @@ function setPhoneTab(tabId) {
     panel.hidden = panel.dataset.phonePanel !== activePhoneTab;
   });
   if (activePhoneTab === "camera") {
-    // ensure device card visible for selection
+    // ensure device card visible for selection; restore live UI if still connected
     if (cachedDevices.length) renderDevices(cachedDevices, cachedClients);
+    else restoreActiveLiveSessionsUi();
   }
   if (activePhoneTab === "location") openLocationTab().catch(() => {});
   if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
@@ -243,6 +244,8 @@ function onWorkspaceDeviceChanged() {
   const select = document.getElementById("workspace-device-select");
   selectedWorkspaceDeviceId = String(select?.value || "");
   syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  locationLastRenderKey = "";
+  locationMapCoords = null;
   const chosen = (cachedDevices || []).find((d) => d.deviceId === selectedWorkspaceDeviceId);
   const hint = document.getElementById("workspace-device-hint");
   if (hint && chosen) {
@@ -259,6 +262,19 @@ function ensureSocialFrame() {
   if (!current || current === "about:blank" || current === "about:blank#") {
     frame.setAttribute("src", target);
   }
+}
+
+function setBootLoading(show, text) {
+  const el = document.getElementById("boot-loading");
+  const msg = document.getElementById("boot-loading-text");
+  if (msg && text) msg.textContent = text;
+  if (el) {
+    el.hidden = !show;
+    el.setAttribute("aria-busy", show ? "true" : "false");
+    if (show) el.removeAttribute("hidden");
+    else el.setAttribute("hidden", "");
+  }
+  document.body.classList.toggle("is-booting", Boolean(show));
 }
 
 function setLoggedInUi(user) {
@@ -690,6 +706,52 @@ function renderDevices(devices, clients) {
       });
     });
   });
+
+  // Tab switches / refreshDevices rebuild this DOM — reattach any still-live sessions.
+  restoreActiveLiveSessionsUi();
+}
+
+/**
+ * After the camera card HTML is rebuilt, restore Connect / End Session / video
+ * for sessions that are still active in {@link liveByDevice}.
+ */
+function restoreActiveLiveSessionsUi() {
+  if (!deviceList) return;
+  for (const [deviceId, live] of liveByDevice.entries()) {
+    if (!live) continue;
+    live.root = deviceList.querySelector(`[data-device-id="${CSS.escape(deviceId)}"]`);
+    if (!live.root) continue;
+
+    const pc = live.pc;
+    const pcState = pc?.connectionState || "";
+    const receivers = pc
+      ? pc.getReceivers().filter((r) => r.track && r.track.readyState !== "ended")
+      : [];
+    const hasLiveMedia = receivers.length > 0;
+    const pcAlive =
+      Boolean(pc) && pcState !== "closed" && pcState !== "failed" && pcState !== "disconnected";
+
+    if (hasLiveMedia || (pcAlive && (pcState === "connected" || pcState === "connecting"))) {
+      setDeviceError(deviceId, "");
+      setConnectUi(deviceId, { connecting: false, live: true });
+      for (const receiver of receivers) {
+        attachRemoteTrack(deviceId, receiver.track, null);
+      }
+      if (live.connectionLabel) {
+        setDeviceStatus(deviceId, live.connectionLabel);
+      } else {
+        setConnectionLabel(deviceId, CONN.CONNECTED, "session still active");
+      }
+      applyLiveControlUi(deviceId);
+      continue;
+    }
+
+    // Request pending / waiting for phone approval — keep Connect disabled.
+    if (live.requestId && !pc) {
+      setConnectUi(deviceId, { connecting: true, live: false });
+      if (live.connectionLabel) setDeviceStatus(deviceId, live.connectionLabel);
+    }
+  }
 }
 
 /**
@@ -1033,6 +1095,23 @@ async function sendCommand(deviceId, action) {
 async function startConnect(deviceId, clientId) {
   if (!firebaseUid || !db) return;
   if (liveByDevice.has(deviceId)) {
+    // DOM may have been rebuilt after a tab switch — restore UI instead of failing.
+    restoreActiveLiveSessionsUi();
+    const existing = liveByDevice.get(deviceId);
+    const pcState = existing?.pc?.connectionState || "";
+    if (
+      existing?.pc &&
+      pcState !== "closed" &&
+      pcState !== "failed"
+    ) {
+      setDeviceError(deviceId, "");
+      setConnectionLabel(
+        deviceId,
+        CONN.CONNECTED,
+        "already live — use End Session to disconnect"
+      );
+      return;
+    }
     setDeviceError(deviceId, "Already connecting or live for this device.");
     return;
   }
@@ -2107,8 +2186,11 @@ function setAuthBusy(busy, label) {
 }
 
 async function main() {
+  setBootLoading(true, "Loading…");
   const cfg = await loadConfig();
   if (!cfg.firebase?.apiKey) {
+    setBootLoading(false);
+    setLoggedOutUi();
     authStatus.textContent = "Missing Firebase web config env vars on server";
     return;
   }
@@ -2116,10 +2198,13 @@ async function main() {
     publicIceServers = cfg.iceServers;
   }
   if (!cfg.firebase.storageBucket) {
+    setBootLoading(false);
+    setLoggedOutUi();
     authStatus.textContent =
       "Missing Firebase storageBucket (set FIREBASE_WEB_STORAGE_BUCKET on the server).";
     return;
   }
+  setBootLoading(true, "Checking sign-in…");
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
   db = getFirestore(app);
@@ -2256,18 +2341,32 @@ async function main() {
       if (pairResult) pairResult.hidden = true;
       showPairError("");
       updatePairingUi(false);
+      setBootLoading(false);
       return;
     }
-    idToken = await user.getIdToken();
-    firebaseUid = user.uid;
-    setLoggedInUi(user);
-    showPanel("phone");
-    await refreshDashboard();
+    try {
+      setBootLoading(true, "Loading your devices…");
+      idToken = await user.getIdToken();
+      firebaseUid = user.uid;
+      setLoggedInUi(user);
+      showPanel("phone");
+      await refreshDashboard();
+    } catch (e) {
+      if (authStatus) {
+        authStatus.textContent = e instanceof Error ? e.message : String(e);
+      }
+    } finally {
+      setBootLoading(false);
+    }
   });
 }
 
 main().catch((e) => {
-  authStatus.textContent = e instanceof Error ? e.message : String(e);
+  setBootLoading(false);
+  setLoggedOutUi();
+  if (authStatus) {
+    authStatus.textContent = e instanceof Error ? e.message : String(e);
+  }
 });
 
 /* ——— PWA install + service worker ——— */
@@ -2384,6 +2483,7 @@ let galleryFilter = "all";
 let locationMapZoom = 16;
 let locationMapCoords = null;
 let locationAutoFetchInFlight = false;
+let locationLastRenderKey = "";
 
 function googleMapsEmbedUrl(lat, lon, zoom) {
   const z = Math.min(20, Math.max(3, Number(zoom) || 16));
@@ -2398,6 +2498,36 @@ function googleMapsOpenUrl(lat, lon, zoom) {
   return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}&z=${z}`;
 }
 
+function locationRenderKey(deviceId, lat, lon, zoom) {
+  return `${deviceId}|${lat.toFixed(5)}|${lon.toFixed(5)}|${zoom}`;
+}
+
+function updateLocationCardMeta(deviceId, device, loc) {
+  const body = document.getElementById("location-panel-body");
+  if (!body) return;
+  const lat = Number(loc.latitude);
+  const lon = Number(loc.longitude);
+  const mode = String(device.locationSharingMode || loc.sharingMode || "");
+  const updated = loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—";
+  const acc = loc.accuracyMeters != null ? `${loc.accuracyMeters} m` : "—";
+  const title = body.querySelector(".location-map-meta strong");
+  const modeEl = body.querySelector(".location-map-meta .muted");
+  const coords = body.querySelector(".location-coords");
+  const updatedEl = body.querySelector(".location-updated");
+  if (title) title.textContent = device.deviceName || deviceId;
+  if (modeEl && modeEl.textContent.includes("mode")) {
+    modeEl.textContent = ` · mode ${mode}`;
+  }
+  if (coords) {
+    coords.textContent = `Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${acc}`;
+  }
+  if (updatedEl) {
+    updatedEl.textContent = `Updated ${updated}`;
+  }
+  const open = body.querySelector(".location-map-actions a");
+  if (open) open.setAttribute("href", googleMapsOpenUrl(lat, lon, locationMapZoom));
+}
+
 function renderLocationCard(deviceId, device, loc) {
   const body = document.getElementById("location-panel-body");
   if (!body || !loc) return;
@@ -2407,8 +2537,31 @@ function renderLocationCard(deviceId, device, loc) {
     body.textContent = "Invalid coordinates from phone.";
     return;
   }
-  locationMapCoords = { lat, lon };
   if (!Number.isFinite(locationMapZoom)) locationMapZoom = 16;
+  const key = locationRenderKey(deviceId, lat, lon, locationMapZoom);
+  const hasCard = Boolean(body.querySelector(".location-map-card"));
+
+  // Same place — update text only. Reloading the iframe causes the 2–3 blinks.
+  if (hasCard && key === locationLastRenderKey) {
+    updateLocationCardMeta(deviceId, device, loc);
+    return;
+  }
+
+  const sameSpot =
+    hasCard &&
+    locationMapCoords &&
+    Math.abs(locationMapCoords.lat - lat) < 0.00005 &&
+    Math.abs(locationMapCoords.lon - lon) < 0.00005;
+
+  locationMapCoords = { lat, lon };
+
+  if (sameSpot) {
+    updateLocationCardMeta(deviceId, device, loc);
+    locationLastRenderKey = key;
+    return;
+  }
+
+  locationLastRenderKey = key;
   const embed = googleMapsEmbedUrl(lat, lon, locationMapZoom);
   const openUrl = googleMapsOpenUrl(lat, lon, locationMapZoom);
   const mode = String(device.locationSharingMode || loc.sharingMode || "");
@@ -2422,7 +2575,7 @@ function renderLocationCard(deviceId, device, loc) {
           <strong>${escapeHtml(device.deviceName || deviceId)}</strong>
           <span class="muted"> · mode ${escapeHtml(mode)}</span>
           <p class="location-coords">Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${escapeHtml(acc)}</p>
-          <p class="muted">Updated ${escapeHtml(updated)}</p>
+          <p class="muted location-updated">Updated ${escapeHtml(updated)}</p>
         </div>
         <div class="location-map-actions">
           <button type="button" class="btn-secondary" id="btn-map-zoom-out" title="Zoom out">−</button>
@@ -2458,12 +2611,19 @@ function applyLocationMapZoom() {
   const label = document.getElementById("location-zoom-label");
   if (label) label.textContent = `Zoom ${locationMapZoom}`;
   if (frame) {
-    frame.src = googleMapsEmbedUrl(
+    const next = googleMapsEmbedUrl(
       locationMapCoords.lat,
       locationMapCoords.lon,
       locationMapZoom
     );
+    if (frame.src !== next) frame.src = next;
   }
+  locationLastRenderKey = locationRenderKey(
+    selectedWorkspaceDeviceId || "",
+    locationMapCoords.lat,
+    locationMapCoords.lon,
+    locationMapZoom
+  );
 }
 
 async function requestCurrentLocationSilent(deviceId) {
@@ -2497,14 +2657,15 @@ async function refreshLocationPanel(opts = {}) {
   try {
     let data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
     let loc = data.location;
-    const device = data.device || {};
-    if (!device.locationSharingEnabled) {
-      body.innerHTML =
-        `<p class="error">Location sharing is disabled on the phone. Turn it on under Device Management → Location Sharing.</p>`;
-      return;
-    }
+    let device = data.device || {};
 
-    if (loc && Number.isFinite(Number(loc.latitude))) {
+    // If sharing flag is off, still request — phone enables it when OS permission exists.
+    if (!device.locationSharingEnabled) {
+      if (!body.querySelector(".location-map-card")) {
+        body.innerHTML =
+          `<p class="muted">Location sharing was off on this phone — requesting a fix… Open the phone app once if this stays empty.</p>`;
+      }
+    } else if (loc && Number.isFinite(Number(loc.latitude))) {
       renderLocationCard(deviceId, device, loc);
     }
 
@@ -2512,12 +2673,27 @@ async function refreshLocationPanel(opts = {}) {
       locationAutoFetchInFlight = true;
       try {
         await requestCurrentLocationSilent(deviceId);
-        for (let i = 0; i < 5; i++) {
-          await new Promise((r) => setTimeout(r, 1200));
+        let lastKey = "";
+        for (let i = 0; i < 4; i++) {
+          await new Promise((r) => setTimeout(r, i === 0 ? 1500 : 2000));
           data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
           loc = data.location;
+          device = data.device || device;
           if (loc && Number.isFinite(Number(loc.latitude))) {
-            renderLocationCard(deviceId, data.device || device, loc);
+            const key = locationRenderKey(
+              deviceId,
+              Number(loc.latitude),
+              Number(loc.longitude),
+              locationMapZoom
+            );
+            if (key !== lastKey) {
+              renderLocationCard(deviceId, device, loc);
+              lastKey = key;
+            } else {
+              updateLocationCardMeta(deviceId, device, loc);
+            }
+            // Got a stable fix — stop polling early (avoids map blink).
+            if (i >= 1 && Number(loc.accuracyMeters || 999) <= 100) break;
           }
         }
       } catch (e) {
@@ -2526,6 +2702,9 @@ async function refreshLocationPanel(opts = {}) {
           if (/locationCurrent|CAPABILITY_DENIED|lacks capability/i.test(msg)) {
             body.innerHTML =
               `<p class="error">Allow location for this browser on the phone: Trusted Browsers → Permissions → current &amp; live location.</p>`;
+          } else if (/PERMISSION_DENIED|permission not granted/i.test(msg)) {
+            body.innerHTML =
+              `<p class="error">Grant Location permission on the phone (Remote Camera &amp; Voice → Permissions).</p>`;
           } else {
             body.innerHTML = `<p class="error">${escapeHtml(msg)}</p>`;
           }
@@ -2536,9 +2715,11 @@ async function refreshLocationPanel(opts = {}) {
       }
     }
 
-    if (!loc) {
-      body.innerHTML =
-        `<p class="muted">Waiting for GPS fix... Tap <strong>Update location</strong> if the map does not appear.</p>`;
+    if (!loc || !Number.isFinite(Number(loc.latitude))) {
+      if (!body.querySelector(".location-map-card")) {
+        body.innerHTML =
+          `<p class="muted">Waiting for GPS fix… Tap <strong>Update location</strong> if the map does not appear. On the phone, open Remote Camera &amp; Voice once so Location Sharing can sync.</p>`;
+      }
       return;
     }
     renderLocationCard(deviceId, data.device || device, loc);
@@ -4320,14 +4501,31 @@ function setRecButtonUi(state) {
     resume.classList.toggle("btn-paused-active", state === "paused");
   }
   if (stop) {
-    stop.disabled = !(state === "recording" || state === "paused" || state === "stopping");
+    // Allow Stop while waiting for Cast permission too (cancels / ends active capture).
+    stop.disabled = !(
+      state === "recording" || state === "paused" || state === "stopping"
+    );
     stop.classList.toggle("is-active", state === "recording" || state === "paused");
-    stop.classList.toggle("btn-danger-active", state === "recording" || state === "paused" || state === "stopping");
+    stop.classList.toggle(
+      "btn-danger-active",
+      state === "recording" || state === "paused" || state === "stopping"
+    );
   }
 }
 
 function applyRecUiFromStatus(status, durationMs) {
   const s = String(status || "Idle");
+  // Don't let a stale "Recording" poll wipe a user-initiated Stopping/Paused click.
+  if (
+    (recUiState === "stopping" || recUiState === "uploading") &&
+    /^Recording$/i.test(s)
+  ) {
+    return;
+  }
+  if (recUiState === "paused" && /^Recording$/i.test(s)) {
+    // Keep paused UI until phone reports Paused (or user hits Resume).
+    return;
+  }
   setRecStatus(s);
   if (/^Recording$/i.test(s)) {
     setRecButtonUi("recording");
@@ -4340,7 +4538,7 @@ function applyRecUiFromStatus(status, durationMs) {
     setRecButtonUi("paused");
     stopLocalRecTimer();
     setRecTimerDisplay(Number(durationMs) || localRecElapsedMs());
-  } else if (/Encoding|Uploading/i.test(s)) {
+  } else if (/Encoding|Uploading|Stopping/i.test(s)) {
     setRecButtonUi(s.toLowerCase().includes("upload") ? "uploading" : "stopping");
     stopLocalRecTimer();
     if (durationMs) setRecTimerDisplay(durationMs);
@@ -4352,6 +4550,9 @@ function applyRecUiFromStatus(status, durationMs) {
     setRecButtonUi("failed");
     stopLocalRecTimer();
     if (durationMs) setRecTimerDisplay(durationMs);
+  } else if (/Waiting|Permission/i.test(s)) {
+    setRecButtonUi("recording");
+    stopLocalRecTimer();
   } else {
     setRecButtonUi("idle");
     stopLocalRecTimer();
@@ -5254,18 +5455,18 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
     setRecButtonUi("recording");
     setRecStatus("Waiting for Permission");
     setRecTimerDisplay(0);
+    stopLocalRecTimer();
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({ deviceId, clientId, op: "START", quality, fps, withMic }),
     });
-    setRecStatus("Recording");
-    startLocalRecTimer(0);
     const transferBox = document.getElementById("rec-transfer");
     if (transferBox) {
       transferBox.hidden = false;
       transferBox.textContent =
-        "Approve screen capture on the phone, then watch the timer. Tap Stop (red) when finished.";
+        "Approve Cast on the phone. Status becomes Recording when capture starts. Use Stop / Pause after that.";
     }
+    // Wait for phone Firestore status — do not fake "Recording" locally.
     startRecordingsPoll(180000);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -5293,6 +5494,7 @@ document.getElementById("btn-rec-pause")?.addEventListener("click", async () => 
     startRecordingsPoll(180000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
+    startRecordingsPoll(60000);
   }
 });
 document.getElementById("btn-rec-resume")?.addEventListener("click", async () => {
@@ -5319,6 +5521,7 @@ document.getElementById("btn-rec-resume")?.addEventListener("click", async () =>
     startRecordingsPoll(180000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
+    startRecordingsPoll(60000);
   }
 });
 document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
@@ -5336,6 +5539,17 @@ document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
         op: "STOP",
       }),
     });
+    // Retry STOP once — older phones sometimes drop the first control intent.
+    setTimeout(() => {
+      api("/api/device/recordings/command", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId: selectedWorkspaceDeviceId,
+          clientId: preferredClientId(cachedClients),
+          op: "STOP",
+        }),
+      }).catch(() => {});
+    }, 1200);
     setRecStatus("Encoding");
     startRecordingsPoll(180000);
   } catch (e) {

@@ -941,12 +941,6 @@ async function handleLocationRequest(req, res) {
       .doc(deviceId)
       .get();
     const device = deviceSnap.data() || {};
-    if (!device.locationSharingEnabled) {
-      return res.status(403).json({
-        error: "Location sharing is disabled on the phone.",
-        code: "LOCATION_DISABLED",
-      });
-    }
     const cmd = await createModuleCommand(
       uid,
       deviceId,
@@ -988,12 +982,6 @@ async function handleLocationLive(req, res) {
       .collection(R.COL_DEVICES)
       .doc(deviceId)
       .get();
-    if (!(deviceSnap.data() || {}).locationSharingEnabled) {
-      return res.status(403).json({
-        error: "Location sharing is disabled on the phone.",
-        code: "LOCATION_DISABLED",
-      });
-    }
     const cmd = await createModuleCommand(
       uid,
       deviceId,
