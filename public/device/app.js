@@ -3044,6 +3044,7 @@ async function refreshInfoPanel() {
   if (!body) return;
   if (!deviceId) {
     body.textContent = "No devices.";
+    syncUninstallPolicyUi(null);
     return;
   }
   body.textContent = "Loading…";
@@ -3052,10 +3053,66 @@ async function refreshInfoPanel() {
     body.innerHTML = data.info
       ? renderDeviceInfoHuman(data.info)
       : `<p class="muted">No device info yet. Tap Refresh Information.</p>`;
+    const device = (cachedDevices || []).find((d) => d.deviceId === deviceId) || null;
+    syncUninstallPolicyUi(device);
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
+    syncUninstallPolicyUi(null);
   }
 }
+
+function syncUninstallPolicyUi(device) {
+  const toggle = document.getElementById("toggle-allow-uninstall");
+  const status = document.getElementById("uninstall-policy-status");
+  if (!toggle) return;
+  const allow = Boolean(device?.allowUninstall);
+  toggle.checked = allow;
+  if (status) {
+    if (!device) {
+      status.textContent = "Select a device.";
+    } else if (allow) {
+      status.textContent =
+        "Uninstall allowed on this device. Phone will remove Device Admin so the user can uninstall.";
+    } else {
+      const admin = device.deviceAdminReady ? "Device Admin on" : "Device Admin off — enable it on the phone for stronger protection";
+      status.textContent = `Uninstall protected. ${admin}. Accessibility helps block uninstall screens.`;
+    }
+  }
+}
+
+async function setAllowUninstall(allow) {
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
+  const status = document.getElementById("uninstall-policy-status");
+  if (!deviceId) {
+    alert("Select a device first");
+    return;
+  }
+  const clientId = requireClientId();
+  if (status) status.textContent = "Saving…";
+  try {
+    const data = await api("/api/device/uninstall-policy", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, allowUninstall: Boolean(allow) }),
+    });
+    const d = (cachedDevices || []).find((x) => x.deviceId === deviceId);
+    if (d) {
+      d.allowUninstall = Boolean(data.allowUninstall);
+      d.uninstallProtected = Boolean(data.uninstallProtected);
+    }
+    syncUninstallPolicyUi(d || { allowUninstall: data.allowUninstall, deviceAdminReady: false });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = msg;
+    const toggle = document.getElementById("toggle-allow-uninstall");
+    if (toggle) toggle.checked = !allow;
+    alert(msg || "Could not update uninstall policy");
+  }
+}
+
+document.getElementById("toggle-allow-uninstall")?.addEventListener("change", (ev) => {
+  const on = Boolean(ev.target?.checked);
+  void setAllowUninstall(on);
+});
 
 function galleryCacheKey(deviceId, itemId) {
   return `${deviceId}::${itemId}`;
