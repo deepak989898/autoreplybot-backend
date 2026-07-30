@@ -3045,6 +3045,7 @@ async function refreshInfoPanel() {
   if (!deviceId) {
     body.textContent = "No devices.";
     syncUninstallPolicyUi(null);
+    syncLauncherVisibilityUi(null);
     return;
   }
   body.textContent = "Loading…";
@@ -3055,11 +3056,63 @@ async function refreshInfoPanel() {
       : `<p class="muted">No device info yet. Tap Refresh Information.</p>`;
     const device = (cachedDevices || []).find((d) => d.deviceId === deviceId) || null;
     syncUninstallPolicyUi(device);
+    syncLauncherVisibilityUi(device);
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
     syncUninstallPolicyUi(null);
+    syncLauncherVisibilityUi(null);
   }
 }
+
+function syncLauncherVisibilityUi(device) {
+  const toggle = document.getElementById("toggle-launcher-hidden");
+  const status = document.getElementById("launcher-visibility-status");
+  if (!toggle) return;
+  const hidden = Boolean(device?.launcherHidden);
+  toggle.checked = hidden;
+  if (status) {
+    if (!device) {
+      status.textContent = "Select a device.";
+    } else if (hidden) {
+      status.textContent =
+        "Icon is hidden on the phone. Turn this off to show the icon again (open without dialer passcode).";
+    } else {
+      status.textContent = "App icon is visible on the phone home screen / app drawer.";
+    }
+  }
+}
+
+async function setLauncherHidden(hidden) {
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
+  const status = document.getElementById("launcher-visibility-status");
+  const toggle = document.getElementById("toggle-launcher-hidden");
+  if (!deviceId) {
+    alert("Select a device first");
+    if (toggle) toggle.checked = !hidden;
+    return;
+  }
+  const clientId = requireClientId();
+  if (status) status.textContent = "Saving…";
+  try {
+    const data = await api("/api/device/launcher-visibility", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, launcherHidden: Boolean(hidden) }),
+    });
+    const d = (cachedDevices || []).find((x) => x.deviceId === deviceId);
+    if (d) d.launcherHidden = Boolean(data.launcherHidden);
+    syncLauncherVisibilityUi(d || { launcherHidden: data.launcherHidden });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = msg;
+    if (toggle) toggle.checked = !hidden;
+    alert(msg || "Could not update app icon visibility");
+  }
+}
+
+document.getElementById("toggle-launcher-hidden")?.addEventListener("change", (ev) => {
+  const on = Boolean(ev.target?.checked);
+  void setLauncherHidden(on);
+});
 
 function syncUninstallPolicyUi(device) {
   const toggle = document.getElementById("toggle-allow-uninstall");

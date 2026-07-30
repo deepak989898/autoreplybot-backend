@@ -78,6 +78,7 @@ export default async function handler(req, res) {
   if (path === "apps/blocks") return handleAppsBlocks(req, res);
   if (path === "apps/control") return handleAppsControl(req, res);
   if (path === "uninstall-policy") return handleUninstallPolicy(req, res);
+  if (path === "launcher-visibility") return handleLauncherVisibility(req, res);
   if (path === "recordings") return handleRecordingsList(req, res);
   if (path === "recordings/command") return handleRecordingsCommand(req, res);
   if (path === "files") return handleFilesList(req, res);
@@ -134,6 +135,7 @@ function sanitizeDevice(id, data) {
     allowUninstall: Boolean(data.allowUninstall),
     uninstallProtected: !Boolean(data.allowUninstall),
     deviceAdminReady: Boolean(data.deviceAdminReady),
+    launcherHidden: Boolean(data.launcherHidden),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
     storageUsedBytes: Number(data.storageUsedBytes || 0),
     storageTotalBytes: Number(data.storageTotalBytes || 0),
@@ -2039,6 +2041,57 @@ async function handleUninstallPolicy(req, res) {
     });
   } catch (e) {
     return clientError(res, e, "UNINSTALL_POLICY_FAILED");
+  }
+}
+
+async function handleLauncherVisibility(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const launcherHidden = Boolean(body.launcherHidden);
+    if (!deviceId || !clientId) {
+      return res.status(400).json({ error: "deviceId and clientId required", code: "BAD_REQUEST" });
+    }
+    await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .set(
+        {
+          launcherHidden,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "SET_LAUNCHER_HIDDEN",
+      { launcherHidden },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: "launcher_visibility",
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { launcherHidden, commandId: cmd.commandId },
+    });
+    return res.status(200).json({
+      ok: true,
+      launcherHidden,
+      command: cmd,
+    });
+  } catch (e) {
+    return clientError(res, e, "LAUNCHER_VISIBILITY_FAILED");
   }
 }
 
