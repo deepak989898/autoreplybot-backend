@@ -4937,13 +4937,6 @@ async function startScreenMirror() {
   if (screenLiveByDevice.has(deviceId)) {
     throw new Error("Screen mirror already active for this device");
   }
-  // Wake the phone first — lock-screen capture is usually black until unlocked.
-  try {
-    setScreenStatus("Waking phone…");
-    await sendScreenLockOp("UNLOCK");
-  } catch {
-    /* continue; user may unlock manually */
-  }
   setScreenStatus("Preparing");
   await ensureBrowserIdentity();
   const withAudio = Boolean(document.getElementById("screen-audio")?.checked);
@@ -5795,14 +5788,9 @@ document.getElementById("btn-screen-lock")?.addEventListener("click", async () =
 document.getElementById("btn-screen-unlock")?.addEventListener("click", async () => {
   try {
     setScreenStatus("Waking…");
-    await sendScreenLockOp("UNLOCK");
+    const data = await sendScreenLockOp("UNLOCK");
     setScreenStatus("Unlock / wake sent");
-    alert(
-      "Phone wake / unlock request bhej diya.\n\n" +
-        "Agar screen BLACK dikhe: Android lock screen ko remote mirror me hide karta hai.\n" +
-        "Phone pe PIN daal kar unlock karein, phir Start Mirroring dabayein.\n" +
-        "Uske baad Remote Control On karein."
-    );
+    void data;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     setScreenStatus("Idle");
@@ -6101,26 +6089,8 @@ function wireRemoteControlUi() {
   const video = document.getElementById("screen-video");
   const toggle = document.getElementById("rc-control-enabled");
   toggle?.addEventListener("change", async () => {
-    if (!toggle.checked) {
-      await stopRemoteControlSession(false);
-      return;
-    }
-    const deviceId = selectedWorkspaceDeviceId;
-    const mirroring = deviceId && screenLiveByDevice.has(deviceId);
-    if (!mirroring) {
-      toggle.checked = false;
-      alert(
-        "Pehle Start Mirroring dabayein.\n\n" +
-          "Remote Control checkbox sirf tap/swipe bhejta hai — screen nahi dikhata.\n\n" +
-          "Agar phone LOCK hai:\n" +
-          "1) Unlock / Wake dabayein\n" +
-          "2) Phone pe PIN khud daalein (lock screen website pe black dikh sakti hai)\n" +
-          "3) Start Mirroring\n" +
-          "4) Phir Remote Control On karein"
-      );
-      return;
-    }
-    await startRemoteControlSession();
+    if (toggle.checked) await startRemoteControlSession();
+    else await stopRemoteControlSession(false);
   });
   document.getElementById("btn-rc-back")?.addEventListener("click", () =>
     sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 1 }).then(() => setRcStatus("Back")).catch((e) => setRcStatus(e.message || String(e)))
