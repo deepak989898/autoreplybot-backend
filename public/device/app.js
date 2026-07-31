@@ -203,8 +203,7 @@ function fillWorkspaceDeviceSelect() {
     const opt = document.createElement("option");
     opt.value = d.deviceId;
     const label = d.deviceName || d.deviceModel || "Device";
-    const state = d.appUninstalled ? "uninstalled" : d.online ? "online" : "offline";
-    opt.textContent = `${label} (${state})`;
+    opt.textContent = `${label} (${d.online ? "online" : "offline"})`;
     select.appendChild(opt);
   }
   const pick = devices.some((d) => d.deviceId === prev)
@@ -627,13 +626,10 @@ function renderDevices(devices, clients) {
   deviceList.innerHTML = focused
     .map((d) => {
       const online = Boolean(d.online);
-      const uninstalled = Boolean(d.appUninstalled);
       const id = escapeHtml(d.deviceId);
       const idleHint = !clientId
         ? "This browser must be paired first."
-        : uninstalled
-          ? "App was uninstalled on this phone. Device history is kept here. Reinstall the app to go online again."
-          : !online
+        : !online
           ? "Device is offline. It will remain saved and reconnect automatically."
           : autoApprove
             ? `${CONN.IDLE} — trusted auto-approve on. Android may still require a notification tap.`
@@ -642,7 +638,6 @@ function renderDevices(devices, clients) {
         <h3>${escapeHtml(d.deviceName || d.deviceId)}</h3>
         <div class="device-meta">
           <span class="pill ${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span>
-          ${uninstalled ? `<span class="pill offline">App uninstalled</span>` : ""}
           <span class="pill">${d.remoteControlEnabled === false ? "Remote off" : "Remote on"}</span>
           <span>${escapeHtml(d.manufacturer || "")} ${escapeHtml(d.deviceModel || "")}</span>
           <span>Android ${escapeHtml(d.androidVersion || "?")}</span>
@@ -2611,7 +2606,7 @@ function fillDeviceSelect(selectEl) {
   for (const d of cachedDevices || []) {
     const opt = document.createElement("option");
     opt.value = d.deviceId;
-    opt.textContent = `${d.deviceName || d.deviceModel || "Device"} (${d.appUninstalled ? "uninstalled" : d.online ? "online" : "offline"})`;
+    opt.textContent = `${d.deviceName || d.deviceModel || "Device"} (${d.online ? "online" : "offline"})`;
     selectEl.appendChild(opt);
   }
   if (prev && [...selectEl.options].some((o) => o.value === prev)) selectEl.value = prev;
@@ -4644,7 +4639,7 @@ async function refreshMultiViewPanel() {
     .map(
       (d) => `<label style="display:inline-flex;gap:.4rem;margin:.25rem .75rem .25rem 0">
       <input type="checkbox" class="mv-check" value="${escapeHtml(d.deviceId)}" />
-      ${escapeHtml(d.deviceName || d.deviceModel || d.deviceId)} (${d.appUninstalled ? "uninstalled" : d.online ? "online" : "offline"})
+      ${escapeHtml(d.deviceName || d.deviceModel || d.deviceId)} (${d.online ? "online" : "offline"})
     </label>`
     )
     .join("");
