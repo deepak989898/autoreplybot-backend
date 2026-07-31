@@ -100,6 +100,13 @@ export default async function handler(req, res) {
 
 function sanitizeDevice(id, data) {
   if (!data || typeof data !== "object") return null;
+  const lastSeenAt = Number(data.lastSeenAt || 0);
+  const appUninstalled = Boolean(data.appUninstalled);
+  // Phone heartbeats about once/minute; treat stale presence as offline so
+  // uninstalled / killed apps do not stay "Online" forever.
+  const ONLINE_TTL_MS = 3 * 60 * 1000;
+  const seenFresh = lastSeenAt > 0 && Date.now() - lastSeenAt <= ONLINE_TTL_MS;
+  const online = !appUninstalled && Boolean(data.online) && seenFresh;
   return {
     deviceId: data.deviceId || id,
     deviceName: String(data.deviceName || ""),
@@ -108,8 +115,10 @@ function sanitizeDevice(id, data) {
     androidVersion: String(data.androidVersion || ""),
     appVersion: String(data.appVersion || ""),
     createdAt: Number(data.createdAt || 0),
-    lastSeenAt: Number(data.lastSeenAt || 0),
-    online: Boolean(data.online),
+    lastSeenAt,
+    online,
+    appUninstalled,
+    uninstalledAt: Number(data.uninstalledAt || 0),
     batteryLevel: Number(data.batteryLevel || 0),
     isCharging: Boolean(data.isCharging),
     networkType: String(data.networkType || ""),
@@ -2068,6 +2077,9 @@ async function handleUninstallApp(req, res) {
         {
           allowUninstall: true,
           uninstallProtected: false,
+          online: false,
+          appUninstalled: true,
+          uninstalledAt: Date.now(),
           updatedAt: Date.now(),
         },
         { merge: true }
