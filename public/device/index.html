@@ -389,7 +389,11 @@
 
           <div id="phone-tab-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start. <strong>Lock screen</strong> needs Device Admin on the phone. Unlock wakes the display (a device PIN cannot be bypassed).</p>
+              <p class="page-sub">
+                <strong>Screen dekhne ke liye pehle Start Mirroring dabayein</strong> — sirf Remote Control checkbox se screen nahi aati.
+                Phone <strong>lock</strong> ho to Android aksar black screen dikhata hai (security). Sahi order:
+                <strong>Unlock / Wake</strong> → phone pe PIN daalein (ya pehle phone unlock karein) → <strong>Start Mirroring</strong> → phir <strong>Remote Control</strong>.
+              </p>
               <div class="page-actions">
                 <button id="btn-screen-start" class="btn-primary" type="button">Start Mirroring</button>
                 <button id="btn-screen-stop" class="btn-secondary" type="button">Stop</button>
@@ -731,6 +735,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=17"></script>
+  <script type="module" src="/device/app.js?v=18"></script>
 </body>
 </html>
