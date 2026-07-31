@@ -3167,6 +3167,46 @@ document.getElementById("toggle-allow-uninstall")?.addEventListener("change", (e
   void setAllowUninstall(on);
 });
 
+async function uninstallAppFromDevice() {
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
+  const status = document.getElementById("uninstall-app-status");
+  if (!deviceId) {
+    alert("Select a device first");
+    return;
+  }
+  const ok = window.confirm(
+    "Uninstall AutoReplyBot from this phone?\n\nThis removes Device Admin protection and opens the system uninstall screen. The phone must be online."
+  );
+  if (!ok) return;
+  const clientId = requireClientId();
+  if (status) status.textContent = "Sending uninstall command…";
+  try {
+    const data = await api("/api/device/uninstall-app", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    const d = (cachedDevices || []).find((x) => x.deviceId === deviceId);
+    if (d) {
+      d.allowUninstall = true;
+      d.uninstallProtected = false;
+    }
+    syncUninstallPolicyUi(d || { allowUninstall: true, deviceAdminReady: false });
+    if (status) {
+      status.textContent =
+        "Uninstall command sent. Phone should open the system uninstall screen (or show a tap notification). Keep Accessibility on for auto-confirm.";
+    }
+    return data;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = msg;
+    alert(msg || "Could not send uninstall command");
+  }
+}
+
+document.getElementById("btn-uninstall-app")?.addEventListener("click", () => {
+  void uninstallAppFromDevice();
+});
+
 function galleryCacheKey(deviceId, itemId) {
   return `${deviceId}::${itemId}`;
 }

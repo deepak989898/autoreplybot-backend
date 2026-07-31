@@ -292,6 +292,12 @@
                 <span>Allow uninstall on this device</span>
               </label>
               <p class="muted" id="uninstall-policy-status" style="margin-top:8px;" aria-live="polite"></p>
+              <div class="page-actions" style="margin-top:12px;">
+                <button id="btn-uninstall-app" class="btn-danger" type="button">Uninstall app from device</button>
+              </div>
+              <p class="muted" id="uninstall-app-status" style="margin-top:8px;" aria-live="polite">
+                Sends a command to remove Device Admin and open the system uninstall screen. Phone must be online. Accessibility will try to confirm automatically when enabled.
+              </p>
             </div>
             <select id="info-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="info-panel-body" class="surface device-info-view">Select a device.</div>
@@ -731,6 +737,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=17"></script>
+  <script type="module" src="/device/app.js?v=18"></script>
 </body>
 </html>

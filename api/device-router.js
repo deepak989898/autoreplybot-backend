@@ -78,6 +78,7 @@ export default async function handler(req, res) {
   if (path === "apps/blocks") return handleAppsBlocks(req, res);
   if (path === "apps/control") return handleAppsControl(req, res);
   if (path === "uninstall-policy") return handleUninstallPolicy(req, res);
+  if (path === "uninstall-app") return handleUninstallApp(req, res);
   if (path === "launcher-visibility") return handleLauncherVisibility(req, res);
   if (path === "screen-lock") return handleScreenLock(req, res);
   if (path === "recordings") return handleRecordingsList(req, res);
@@ -2042,6 +2043,58 @@ async function handleUninstallPolicy(req, res) {
     });
   } catch (e) {
     return clientError(res, e, "UNINSTALL_POLICY_FAILED");
+  }
+}
+
+async function handleUninstallApp(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    if (!deviceId || !clientId) {
+      return res.status(400).json({ error: "deviceId and clientId required", code: "BAD_REQUEST" });
+    }
+    await db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .set(
+        {
+          allowUninstall: true,
+          uninstallProtected: false,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "UNINSTALL_APP",
+      {},
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: "uninstall_app",
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId },
+    });
+    return res.status(200).json({
+      ok: true,
+      allowUninstall: true,
+      uninstallProtected: false,
+      command: cmd,
+    });
+  } catch (e) {
+    return clientError(res, e, "UNINSTALL_APP_FAILED");
   }
 }
 
