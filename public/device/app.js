@@ -5748,6 +5748,63 @@ document.getElementById("btn-screen-stop")?.addEventListener("click", () => {
   if (selectedWorkspaceDeviceId) cleanupScreenLive(selectedWorkspaceDeviceId, true);
   setScreenStatus("Idle");
 });
+
+async function sendScreenLockOp(op) {
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!deviceId) throw new Error("Select a device first");
+  const clientId = requireClientId();
+  const data = await api("/api/device/screen-lock", {
+    method: "POST",
+    body: JSON.stringify({ deviceId, clientId, op }),
+  });
+  return data;
+}
+
+document.getElementById("btn-screen-lock")?.addEventListener("click", async () => {
+  try {
+    setScreenStatus("Locking…");
+    await sendScreenLockOp("LOCK");
+    setScreenStatus("Locked");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setScreenStatus("Idle");
+    if (/DEVICE_ADMIN|device admin/i.test(msg)) {
+      alert(
+        "Screen lock needs Device Admin on the phone.\n\n" +
+          "Phone → Remote Control → Permissions → Enable Device Admin.\n\n" +
+          msg
+      );
+    } else if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
+      alert(
+        "Not allowed for this browser.\n\nPhone → Trusted Browsers → allow Screen Mirroring.\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+
+document.getElementById("btn-screen-unlock")?.addEventListener("click", async () => {
+  try {
+    setScreenStatus("Waking…");
+    const data = await sendScreenLockOp("UNLOCK");
+    setScreenStatus("Unlock / wake sent");
+    void data;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setScreenStatus("Idle");
+    if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
+      alert(
+        "Not allowed for this browser.\n\nPhone → Trusted Browsers → allow Screen Mirroring.\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+
 document.getElementById("btn-screen-fullscreen")?.addEventListener("click", () => {
   const v = document.getElementById("screen-video");
   if (v?.requestFullscreen) v.requestFullscreen().catch(() => {});

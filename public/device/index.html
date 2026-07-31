@@ -389,10 +389,12 @@
 
           <div id="phone-tab-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start.</p>
+              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start. <strong>Lock screen</strong> needs Device Admin on the phone. Unlock wakes the display (a device PIN cannot be bypassed).</p>
               <div class="page-actions">
                 <button id="btn-screen-start" class="btn-primary" type="button">Start Mirroring</button>
                 <button id="btn-screen-stop" class="btn-secondary" type="button">Stop</button>
+                <button id="btn-screen-lock" class="btn-secondary" type="button">Lock screen</button>
+                <button id="btn-screen-unlock" class="btn-secondary" type="button">Unlock / Wake</button>
                 <button id="btn-screen-fullscreen" class="btn-secondary" type="button">Fullscreen</button>
                 <button id="btn-screen-pip" class="btn-secondary" type="button">PiP</button>
                 <button id="btn-screen-shot" class="btn-secondary" type="button">Screenshot</button>
@@ -729,6 +731,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=16"></script>
+  <script type="module" src="/device/app.js?v=17"></script>
 </body>
 </html>
