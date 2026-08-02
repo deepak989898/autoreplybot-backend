@@ -10,7 +10,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=5" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=6" />
+  <script>
+    // Admin must not be controlled by the device PWA service worker (can break module login).
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        regs.forEach(function (r) {
+          if ((r.scope || "").indexOf("/device") !== -1) r.unregister();
+        });
+      }).catch(function () {});
+    }
+  </script>
 </head>
 <body class="device-app admin-app">
   <div id="admin-loading" class="admin-loading" hidden>
@@ -32,19 +42,21 @@
       <section class="login-panel">
         <div class="login-card">
           <h2>Admin sign in</h2>
-          <p id="auth-status" class="muted" aria-live="polite"></p>
-          <label class="field">
-            <span>Email</span>
-            <input id="auth-email" class="input" type="email" autocomplete="username" />
-          </label>
-          <label class="field">
-            <span>Password</span>
-            <input id="auth-password" class="input" type="password" autocomplete="current-password" />
-          </label>
-          <div class="row-gap" style="margin-top:12px;flex-wrap:wrap;">
-            <button id="btn-login-email" class="btn-primary" type="button">Sign in</button>
-            <button id="btn-login-google" class="btn-secondary" type="button">Google</button>
-          </div>
+          <p id="auth-status" class="muted" aria-live="polite">Loading sign-in…</p>
+          <form id="admin-login-form" autocomplete="on">
+            <label class="field">
+              <span>Email</span>
+              <input id="auth-email" class="input" type="email" name="email" autocomplete="username" required />
+            </label>
+            <label class="field">
+              <span>Password</span>
+              <input id="auth-password" class="input" type="password" name="password" autocomplete="current-password" required />
+            </label>
+            <div class="row-gap" style="margin-top:12px;flex-wrap:wrap;">
+              <button id="btn-login-email" class="btn-primary" type="submit">Sign in</button>
+              <button id="btn-login-google" class="btn-secondary" type="button">Google</button>
+            </div>
+          </form>
           <p id="auth-loading-hint" class="muted" hidden style="margin-top:12px;">Please wait — checking admin access and loading dashboard…</p>
           <p class="muted" style="margin-top:14px;">
             <a href="/device/">← Back to device dashboard</a>
@@ -298,6 +310,31 @@
     </main>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=5"></script>
+  <script type="module" src="/device/admin/app.js?v=6"></script>
+  <script>
+    // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
+    window.addEventListener("error", function (ev) {
+      var el = document.getElementById("auth-status");
+      if (el && ev && ev.message) {
+        el.textContent = "Page error: " + ev.message;
+        el.classList.add("admin-auth-error");
+      }
+    });
+    window.addEventListener("unhandledrejection", function (ev) {
+      var el = document.getElementById("auth-status");
+      if (el) {
+        var msg = ev && ev.reason ? (ev.reason.message || String(ev.reason)) : "Unknown error";
+        el.textContent = "Sign-in error: " + msg;
+        el.classList.add("admin-auth-error");
+      }
+    });
+    setTimeout(function () {
+      var el = document.getElementById("auth-status");
+      if (el && el.textContent === "Loading sign-in…") {
+        el.textContent = "Sign-in script did not start. Hard refresh (Ctrl+F5) or try another browser.";
+        el.classList.add("admin-auth-error");
+      }
+    }, 8000);
+  </script>
 </body>
 </html>

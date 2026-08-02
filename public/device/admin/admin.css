@@ -49,6 +49,12 @@
   pointer-events: none;
 }
 
+.admin-auth-error {
+  color: var(--danger) !important;
+  font-weight: 600;
+  white-space: pre-wrap;
+}
+
 .admin-login-split {
   min-height: 100vh;
 }

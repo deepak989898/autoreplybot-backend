@@ -7,7 +7,11 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=5";
+import { startAdminLiveViewer } from "./live.js?v=6";
+
+/** Prevents auth-state logout from wiping an in-progress Sign in. */
+let loginInProgress = false;
+let authBootstrapped = false;
 
 const viewLogin = document.getElementById("view-login");
 const viewDenied = document.getElementById("view-denied");
@@ -33,8 +37,6 @@ let activeLiveSessionId = "";
 /** @type {{ torch: boolean, micMuted: boolean, videoRec: boolean, audioRec: boolean }} */
 let liveControlState = { torch: false, micMuted: false, videoRec: false, audioRec: false };
 /** @type {string} */
-let activeLiveSessionId = "";
-/** @type {string} */
 let openUserUid = "";
 /** @type {object | null} */
 let userDetailCache = null;
@@ -42,11 +44,6 @@ let userDetailCache = null;
 let exploreCtx = null;
 /** @type {string} */
 let activePhoneTab = "camera";
-/** Live control UI state (admin only — does not touch user panel). */
-let adminTorchOn = false;
-let adminMicMuted = false;
-let adminVideoRec = false;
-let adminAudioRec = false;
 
 function show(el, on) {
   if (!el) return;
@@ -1114,6 +1111,12 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality
   }
 }
 
+function setAuthError(message) {
+  if (!authStatus) return;
+  authStatus.textContent = message || "";
+  authStatus.classList.toggle("admin-auth-error", Boolean(message));
+}
+
 function setLoginBusy(on, message = "") {
   const hint = document.getElementById("auth-loading-hint");
   const emailBtn = document.getElementById("btn-login-email");
@@ -1125,7 +1128,12 @@ function setLoginBusy(on, message = "") {
     hint.hidden = !on;
     if (on && message) hint.textContent = message;
   }
-  if (authStatus && message) authStatus.textContent = message;
+  if (on && message) {
+    if (authStatus) {
+      authStatus.classList.remove("admin-auth-error");
+      authStatus.textContent = message;
+    }
+  }
 }
 
 function setAdminLoading(on, message = "Loading…") {
@@ -1138,41 +1146,36 @@ function setAdminLoading(on, message = "Loading…") {
 async function enterAdmin(user) {
   setAdminLoading(true, "Checking admin access…");
   setLoginBusy(true, "Checking admin access…");
-  try {
-    idToken = await user.getIdToken(true);
-    setAdminLoading(true, "Verifying admin permissions…");
-    const me = await api("/api/admin/me");
-    if (!me.isAdmin) {
-      setAdminLoading(false);
-      setLoginBusy(false);
-      show(viewLogin, false);
-      show(viewApp, false);
-      show(viewDenied, true);
-      if (deniedEmail) deniedEmail.textContent = `Signed in as ${user.email || user.uid}`;
-      return;
-    }
+  idToken = await user.getIdToken(true);
+  setAdminLoading(true, "Verifying admin permissions…");
+  const me = await api("/api/admin/me");
+  if (!me.isAdmin) {
     show(viewLogin, false);
-    show(viewDenied, false);
-    show(viewApp, true);
-    if (adminUser) adminUser.textContent = me.email || user.email || "";
-    setAdminLoading(true, "Loading dashboard…");
-    activeTab = "dashboard";
-    document.querySelectorAll("#admin-main-tabs .admin-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.getAttribute("data-tab") === "dashboard");
-    });
-    document.querySelectorAll(".admin-panel").forEach((panel) => {
-      panel.hidden = panel.id !== "tab-dashboard";
-    });
-    setUsersSubview("list");
-    await loadDashboard();
-    if (authStatus) authStatus.textContent = "";
-  } finally {
-    setAdminLoading(false);
-    setLoginBusy(false);
+    show(viewApp, false);
+    show(viewDenied, true);
+    if (deniedEmail) deniedEmail.textContent = `Signed in as ${user.email || user.uid}`;
+    return;
   }
+  show(viewLogin, false);
+  show(viewDenied, false);
+  show(viewApp, true);
+  if (adminUser) adminUser.textContent = me.email || user.email || "";
+  setAdminLoading(true, "Loading dashboard…");
+  activeTab = "dashboard";
+  document.querySelectorAll("#admin-main-tabs .admin-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-tab") === "dashboard");
+  });
+  document.querySelectorAll(".admin-panel").forEach((panel) => {
+    panel.hidden = panel.id !== "tab-dashboard";
+  });
+  setUsersSubview("list");
+  await loadDashboard();
+  setAuthError("");
+  if (authStatus) authStatus.textContent = "";
 }
 
 function setLoggedOut() {
+  if (loginInProgress) return;
   idToken = "";
   void stopLiveViewer();
   exploreCtx = null;
@@ -1187,28 +1190,72 @@ function setLoggedOut() {
 /** Complete login even when Firebase session already exists (onAuthStateChanged may not re-fire). */
 async function completeAdminLogin(user) {
   if (!user) return;
+  loginInProgress = true;
   try {
     await enterAdmin(user);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (authStatus) authStatus.textContent = msg;
+    setAuthError(msg);
     setAdminLoading(false);
     setLoginBusy(false);
-    // Sign out so the next Sign in always re-triggers a clean auth cycle.
+    show(viewApp, false);
+    show(viewDenied, false);
+    show(viewLogin, true);
     try {
-      await signOut(auth);
+      loginInProgress = false;
+      if (auth) await signOut(auth);
     } catch {
-      setLoggedOut();
+      /* ignore */
     }
+    return;
+  } finally {
+    loginInProgress = false;
+    setAdminLoading(false);
+    setLoginBusy(false);
+  }
+}
+
+async function loginWithEmailPassword() {
+  const email = document.getElementById("auth-email")?.value?.trim();
+  const password = document.getElementById("auth-password")?.value || "";
+  if (!email || !password) {
+    setAuthError("Enter email and password.");
+    return;
+  }
+  if (!auth) {
+    setAuthError("Sign-in is not ready yet. Wait a second and try again.");
+    return;
+  }
+  loginInProgress = true;
+  setAdminLoading(true, "Signing in…");
+  setLoginBusy(true, "Signing in…");
+  setAuthError("");
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    await completeAdminLogin(cred.user);
+  } catch (e) {
+    loginInProgress = false;
+    setAdminLoading(false);
+    setLoginBusy(false);
+    const code = e?.code ? ` (${e.code})` : "";
+    setAuthError((e instanceof Error ? e.message : String(e)) + code);
   }
 }
 
 async function main() {
-  const cfgRes = await fetch("/api/config");
-  if (!cfgRes.ok) throw new Error("Failed to load /api/config");
+  if (authStatus) {
+    authStatus.classList.remove("admin-auth-error");
+    authStatus.textContent = "Preparing sign-in…";
+  }
+
+  const cfgRes = await fetch("/api/config", { cache: "no-store" });
+  if (!cfgRes.ok) throw new Error(`Failed to load /api/config (${cfgRes.status})`);
   const cfg = await cfgRes.json();
   firebaseConfig = cfg.firebase;
-  const app = initializeApp(cfg.firebase);
+  if (!firebaseConfig?.apiKey || !firebaseConfig?.projectId) {
+    throw new Error("Firebase web config missing on server. Check FIREBASE_WEB_* env vars.");
+  }
+  const app = initializeApp(firebaseConfig);
   auth = getAuth(app);
 
   document.querySelectorAll("#admin-main-tabs .admin-tab").forEach((btn) => {
@@ -1272,55 +1319,54 @@ async function main() {
   document.getElementById("btn-logout")?.addEventListener("click", () => signOut(auth));
   document.getElementById("btn-denied-logout")?.addEventListener("click", () => signOut(auth));
 
-  document.getElementById("btn-login-email")?.addEventListener("click", async () => {
-    const email = document.getElementById("auth-email")?.value?.trim();
-    const password = document.getElementById("auth-password")?.value || "";
-    if (!email || !password) {
-      if (authStatus) authStatus.textContent = "Enter email and password.";
-      return;
-    }
-    setAdminLoading(true, "Signing in…");
-    setLoginBusy(true, "Signing in…");
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      await completeAdminLogin(cred.user);
-    } catch (e) {
-      setAdminLoading(false);
-      setLoginBusy(false);
-      if (authStatus) authStatus.textContent = e instanceof Error ? e.message : String(e);
-    }
+  const loginForm = document.getElementById("admin-login-form");
+  loginForm?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void loginWithEmailPassword();
   });
 
   document.getElementById("btn-login-google")?.addEventListener("click", async () => {
+    if (!auth) {
+      setAuthError("Sign-in is not ready yet. Wait a second and try again.");
+      return;
+    }
+    loginInProgress = true;
     setAdminLoading(true, "Opening Google…");
     setLoginBusy(true, "Opening Google…");
+    setAuthError("");
     try {
       const cred = await signInWithPopup(auth, new GoogleAuthProvider());
       await completeAdminLogin(cred.user);
     } catch (e) {
+      loginInProgress = false;
       setAdminLoading(false);
       setLoginBusy(false);
-      if (authStatus) authStatus.textContent = e instanceof Error ? e.message : String(e);
+      const code = e?.code ? ` (${e.code})` : "";
+      setAuthError((e instanceof Error ? e.message : String(e)) + code);
     }
   });
 
-  let authReady = false;
+  if (authStatus) authStatus.textContent = "Ready — enter email and password, then Sign in.";
+
   onAuthStateChanged(auth, async (user) => {
-    // Initial session restore only — button handlers call completeAdminLogin themselves.
-    if (authReady) {
-      if (!user) setLoggedOut();
+    if (!authBootstrapped) {
+      authBootstrapped = true;
+      if (user) {
+        setAdminLoading(true, "Restoring admin session…");
+        await completeAdminLogin(user);
+      } else {
+        setLoggedOut();
+      }
       return;
     }
-    authReady = true;
-    if (!user) {
-      setLoggedOut();
-      return;
-    }
-    setAdminLoading(true, "Restoring admin session…");
-    await completeAdminLogin(user);
+    // Later auth changes: ignore sign-in events (form handler owns that). Only handle logout.
+    if (!user && !loginInProgress) setLoggedOut();
   });
 }
 
 main().catch((e) => {
-  if (authStatus) authStatus.textContent = e instanceof Error ? e.message : String(e);
+  const msg = e instanceof Error ? e.message : String(e);
+  setAuthError(msg);
+  setAdminLoading(false);
+  setLoginBusy(false);
 });
