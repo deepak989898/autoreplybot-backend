@@ -23,6 +23,15 @@ import * as R from "../lib/remote-constants.js";
 import { createModuleCommand, createTransfer } from "../lib/module-commands.js";
 import { getStorage } from "firebase-admin/storage";
 import { bucket as storageBucket } from "../lib/firebase.js";
+import {
+  createUploadSlot,
+  ensureThread,
+  finalizeMediaMessage,
+  getThread,
+  listMessages,
+  markRead,
+  sendMessage,
+} from "../lib/support-chat.js";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
 const SIGNATURE_SKEW_MS = 2 * 60 * 1000;
@@ -99,6 +108,12 @@ export default async function handler(req, res) {
   if (path === "app-download") return handleAppDownload(req, res);
   if (path === "export-inventory") return handleExportInventory(req, res);
   if (path === "bulk") return handleBulk(req, res);
+
+  if (path === "support/thread") return handleSupportThread(req, res);
+  if (path === "support/messages") return handleSupportMessages(req, res);
+  if (path === "support/upload-url") return handleSupportUploadUrl(req, res);
+  if (path === "support/messages/media") return handleSupportMediaMessage(req, res);
+  if (path === "support/read") return handleSupportRead(req, res);
 
   return res.status(404).json({ error: "Unknown device route", code: "NOT_FOUND", path });
 }
@@ -2806,5 +2821,120 @@ async function handlePhoneCapabilities(req, res) {
     return res.status(200).json({ ok: true, client: sanitizeTrustedClient(clientId, updated) });
   } catch (e) {
     return clientError(res, e, "PHONE_CAPS_FAILED");
+  }
+}
+
+/* ——— Website Help / Support chat (user ↔ Platform Admin only) ——— */
+
+async function handleSupportThread(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const thread = await ensureThread(uid, {
+      email: req._platformEmail,
+      displayName: req._platformName,
+    });
+    return res.status(200).json({ ok: true, thread });
+  } catch (e) {
+    return clientError(res, e, "SUPPORT_THREAD_FAILED");
+  }
+}
+
+async function handleSupportMessages(req, res) {
+  if (req.method === "GET") {
+    try {
+      const uid = await requireAuthed(req);
+      await ensureThread(uid, {
+        email: req._platformEmail,
+        displayName: req._platformName,
+      });
+      const after = Number(req.query?.after || 0) || 0;
+      const limit = Number(req.query?.limit || 80) || 80;
+      const messages = await listMessages(uid, { after, limit });
+      return res.status(200).json({ ok: true, messages });
+    } catch (e) {
+      return clientError(res, e, "SUPPORT_MESSAGES_FAILED");
+    }
+  }
+  if (req.method === "POST") {
+    try {
+      const uid = await requireAuthed(req);
+      const body = parseBody(req.body);
+      const message = await sendMessage({
+        uid,
+        senderRole: "user",
+        senderUid: uid,
+        senderEmail: req._platformEmail || "",
+        text: body.text || "",
+      });
+      return res.status(200).json({ ok: true, message });
+    } catch (e) {
+      return clientError(res, e, "SUPPORT_SEND_FAILED");
+    }
+  }
+  res.setHeader("Allow", "GET, POST");
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+async function handleSupportUploadUrl(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const slot = await createUploadSlot({
+      uid,
+      contentType: body.contentType,
+      fileName: body.fileName,
+      sizeBytes: body.sizeBytes,
+    });
+    return res.status(200).json({ ok: true, ...slot });
+  } catch (e) {
+    return clientError(res, e, "SUPPORT_UPLOAD_URL_FAILED");
+  }
+}
+
+async function handleSupportMediaMessage(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const message = await finalizeMediaMessage({
+      uid,
+      messageId: body.messageId,
+      storagePath: body.storagePath,
+      contentType: body.contentType,
+      sizeBytes: body.sizeBytes,
+      fileName: body.fileName,
+      text: body.text || "",
+      senderRole: "user",
+      senderUid: uid,
+      senderEmail: req._platformEmail || "",
+    });
+    return res.status(200).json({ ok: true, message });
+  } catch (e) {
+    return clientError(res, e, "SUPPORT_MEDIA_FAILED");
+  }
+}
+
+async function handleSupportRead(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const thread = await markRead(uid, "user");
+    return res.status(200).json({ ok: true, thread: thread || (await getThread(uid)) });
+  } catch (e) {
+    return clientError(res, e, "SUPPORT_READ_FAILED");
   }
 }

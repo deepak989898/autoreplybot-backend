@@ -53,6 +53,19 @@ let adminRcSessionActive = false;
 let adminRcDragStart = null;
 /** @type {number} */
 let adminRcLastClickAt = 0;
+/** @type {object[]} */
+let supportChatsCache = [];
+/** @type {string} */
+let activeSupportUid = "";
+/** @type {object[]} */
+let supportThreadMessages = [];
+/** @type {File | null} */
+let adminSupportPendingFile = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let supportAdminPollTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let supportInboxTimer = null;
+let adminSupportSending = false;
 
 function show(el, on) {
   if (!el) return;
@@ -129,11 +142,13 @@ function setTab(tab) {
   document.querySelectorAll(".admin-panel").forEach((panel) => {
     panel.hidden = panel.id !== `tab-${tab}`;
   });
+  if (tab !== "support") stopAdminSupportThreadPoll();
   if (tab === "dashboard") void loadDashboard();
   if (tab === "users") {
     setUsersSubview("list");
     void loadUsers();
   }
+  if (tab === "support") void loadSupportInbox();
   if (tab === "admins") void loadAdmins();
 }
 
@@ -1529,6 +1544,275 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality
   }
 }
 
+/* ——— Support chat (admin inbox) ——— */
+
+function setAdminSupportStatus(text) {
+  const el = document.getElementById("admin-support-status");
+  if (el) el.textContent = text || "";
+}
+
+function updateSupportTabBadge(total) {
+  const badge = document.getElementById("support-tab-badge");
+  if (!badge) return;
+  const n = Math.max(0, Number(total) || 0);
+  if (n <= 0) {
+    badge.hidden = true;
+    badge.textContent = "0";
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = n > 99 ? "99+" : String(n);
+}
+
+function stopSupportInboxPolling() {
+  if (supportInboxTimer) {
+    clearInterval(supportInboxTimer);
+    supportInboxTimer = null;
+  }
+}
+
+function startSupportInboxPolling() {
+  stopSupportInboxPolling();
+  supportInboxTimer = setInterval(() => {
+    if (!idToken) return;
+    void refreshSupportTabBadge();
+    if (activeTab === "support" && !activeSupportUid) void loadSupportInbox({ quiet: true });
+  }, 10000);
+}
+
+function stopAdminSupportThreadPoll() {
+  if (supportAdminPollTimer) {
+    clearInterval(supportAdminPollTimer);
+    supportAdminPollTimer = null;
+  }
+}
+
+async function refreshSupportTabBadge() {
+  if (!idToken) return;
+  try {
+    const data = await api("/api/admin/support/chats?limit=100");
+    const chats = Array.isArray(data.chats) ? data.chats : [];
+    const total = chats.reduce((sum, c) => sum + Number(c.unreadForAdmin || 0), 0);
+    updateSupportTabBadge(total);
+    if (activeTab === "support") {
+      supportChatsCache = chats;
+      renderSupportChatList();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function renderSupportChatList() {
+  const el = document.getElementById("support-chat-list");
+  if (!el) return;
+  if (!supportChatsCache.length) {
+    el.innerHTML = `<p class="muted">No support chats yet. When a user messages via Help FAB, they appear here.</p>`;
+    return;
+  }
+  el.innerHTML = supportChatsCache
+    .map((c) => {
+      const unread = Number(c.unreadForAdmin || 0);
+      const badge =
+        unread > 0 ? `<span class="admin-support-unread">${unread > 99 ? "99+" : unread}</span>` : "";
+      const active = c.userUid === activeSupportUid ? " active" : "";
+      const when = c.lastMessageAt ? fmtTime(c.lastMessageAt) : "";
+      return `<button type="button" class="admin-support-chat-item${active}" data-support-uid="${escapeHtml(c.userUid)}">
+        <strong>${escapeHtml(c.userEmail || c.userUid)}${badge}</strong>
+        <div class="preview">${escapeHtml(c.lastMessageText || "(no messages)")}</div>
+        <div class="preview">${escapeHtml(when)}</div>
+      </button>`;
+    })
+    .join("");
+  el.querySelectorAll("[data-support-uid]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void openSupportThread(btn.getAttribute("data-support-uid") || "");
+    });
+  });
+}
+
+function renderAdminSupportMessages() {
+  const box = document.getElementById("support-thread-messages");
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+  if (!supportThreadMessages.length) {
+    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">No messages yet.</p>`;
+    return;
+  }
+  box.innerHTML = supportThreadMessages
+    .map((m) => {
+      const isAdmin = m.senderRole === "admin";
+      const who = isAdmin ? "Admin" : "User";
+      const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
+      const media = (m.attachments || [])
+        .map((a) => {
+          if (!a?.url) return "";
+          if (a.type === "video") {
+            return `<video src="${escapeHtml(a.url)}" controls playsinline></video>`;
+          }
+          return `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener"><img src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" /></a>`;
+        })
+        .join("");
+      const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
+      return `<div class="admin-support-msg ${isAdmin ? "admin" : "user"}">${text}${media}<span class="meta">${escapeHtml(who)} · ${escapeHtml(time)}</span></div>`;
+    })
+    .join("");
+  if (nearBottom || supportThreadMessages.length < 4) box.scrollTop = box.scrollHeight;
+}
+
+async function loadSupportInbox(opts = {}) {
+  const listEl = document.getElementById("support-chat-list");
+  const q = String(document.getElementById("support-search")?.value || "").trim();
+  try {
+    if (!opts.quiet && listEl) listEl.textContent = "Loading…";
+    const data = await api(
+      `/api/admin/support/chats?limit=100${q ? `&q=${encodeURIComponent(q)}` : ""}`
+    );
+    supportChatsCache = Array.isArray(data.chats) ? data.chats : [];
+    const total = supportChatsCache.reduce((sum, c) => sum + Number(c.unreadForAdmin || 0), 0);
+    updateSupportTabBadge(total);
+    renderSupportChatList();
+    if (activeSupportUid) {
+      show(document.getElementById("support-compose"), true);
+    }
+  } catch (e) {
+    if (listEl) listEl.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function openSupportThread(uid) {
+  const id = String(uid || "").trim();
+  if (!id) return;
+  activeSupportUid = id;
+  const chat = supportChatsCache.find((c) => c.userUid === id);
+  const title = document.getElementById("support-thread-title");
+  const sub = document.getElementById("support-thread-sub");
+  if (title) title.textContent = chat?.userEmail || id;
+  if (sub) sub.textContent = id;
+  show(document.getElementById("support-compose"), true);
+  renderSupportChatList();
+  setAdminSupportStatus("Loading…");
+  try {
+    const data = await api(
+      `/api/admin/support/chats/${encodeURIComponent(id)}/messages?limit=100`
+    );
+    supportThreadMessages = Array.isArray(data.messages) ? data.messages : [];
+    renderAdminSupportMessages();
+    await api(`/api/admin/support/chats/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      body: "{}",
+    });
+    await loadSupportInbox({ quiet: true });
+    setAdminSupportStatus("");
+  } catch (e) {
+    setAdminSupportStatus(e instanceof Error ? e.message : String(e));
+  }
+  stopAdminSupportThreadPoll();
+  supportAdminPollTimer = setInterval(async () => {
+    if (activeTab !== "support" || !activeSupportUid || !idToken) return;
+    try {
+      const last = supportThreadMessages.length
+        ? Number(supportThreadMessages[supportThreadMessages.length - 1].createdAt || 0)
+        : 0;
+      const url = `/api/admin/support/chats/${encodeURIComponent(activeSupportUid)}/messages?limit=100${
+        last ? `&after=${encodeURIComponent(String(last))}` : ""
+      }`;
+      const data = await api(url);
+      const list = Array.isArray(data.messages) ? data.messages : [];
+      if (last && list.length) {
+        const seen = new Set(supportThreadMessages.map((m) => m.messageId));
+        for (const m of list) {
+          if (!seen.has(m.messageId)) supportThreadMessages.push(m);
+        }
+        renderAdminSupportMessages();
+      } else if (!last) {
+        supportThreadMessages = list;
+        renderAdminSupportMessages();
+      }
+      await api(`/api/admin/support/chats/${encodeURIComponent(activeSupportUid)}/read`, {
+        method: "POST",
+        body: "{}",
+      });
+    } catch {
+      /* ignore */
+    }
+  }, 2500);
+}
+
+function clearAdminSupportAttach() {
+  adminSupportPendingFile = null;
+  const input = document.getElementById("admin-support-file");
+  if (input) input.value = "";
+  const prev = document.getElementById("admin-support-attach-preview");
+  if (prev) {
+    prev.hidden = true;
+    prev.textContent = "";
+  }
+}
+
+async function uploadAdminSupportMedia(uid, file, text) {
+  const slot = await api(`/api/admin/support/chats/${encodeURIComponent(uid)}/upload-url`, {
+    method: "POST",
+    body: JSON.stringify({
+      contentType: file.type,
+      fileName: file.name,
+      sizeBytes: file.size,
+    }),
+  });
+  const put = await fetch(slot.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+  const result = await api(`/api/admin/support/chats/${encodeURIComponent(uid)}/messages/media`, {
+    method: "POST",
+    body: JSON.stringify({
+      messageId: slot.messageId,
+      storagePath: slot.storagePath,
+      contentType: slot.contentType,
+      sizeBytes: slot.sizeBytes,
+      fileName: slot.fileName,
+      text: text || "",
+    }),
+  });
+  return result.message;
+}
+
+async function sendAdminSupportMessage() {
+  if (adminSupportSending || !activeSupportUid) return;
+  const input = document.getElementById("admin-support-input");
+  const text = String(input?.value || "").trim();
+  const file = adminSupportPendingFile;
+  if (!text && !file) return;
+  adminSupportSending = true;
+  setAdminSupportStatus(file ? "Uploading…" : "Sending…");
+  try {
+    let message;
+    if (file) {
+      message = await uploadAdminSupportMedia(activeSupportUid, file, text);
+      clearAdminSupportAttach();
+    } else {
+      const data = await api(
+        `/api/admin/support/chats/${encodeURIComponent(activeSupportUid)}/messages`,
+        { method: "POST", body: JSON.stringify({ text }) }
+      );
+      message = data.message;
+    }
+    if (input) input.value = "";
+    if (message && !supportThreadMessages.some((m) => m.messageId === message.messageId)) {
+      supportThreadMessages.push(message);
+      renderAdminSupportMessages();
+    }
+    await loadSupportInbox({ quiet: true });
+    setAdminSupportStatus("Sent");
+  } catch (e) {
+    setAdminSupportStatus(e instanceof Error ? e.message : String(e));
+  } finally {
+    adminSupportSending = false;
+  }
+}
+
 function setAuthError(message) {
   if (!authStatus) return;
   authStatus.textContent = message || "";
@@ -1588,6 +1872,8 @@ async function enterAdmin(user) {
   });
   setUsersSubview("list");
   await loadDashboard();
+  startSupportInboxPolling();
+  void refreshSupportTabBadge();
   setAuthError("");
   if (authStatus) authStatus.textContent = "";
 }
@@ -1596,6 +1882,11 @@ function setLoggedOut() {
   if (loginInProgress) return;
   idToken = "";
   void stopLiveViewer();
+  stopAdminSupportThreadPoll();
+  stopSupportInboxPolling();
+  activeSupportUid = "";
+  supportThreadMessages = [];
+  supportChatsCache = [];
   exploreCtx = null;
   openUserUid = "";
   setAdminLoading(false);
@@ -1684,6 +1975,54 @@ async function main() {
     if (ev.key === "Enter") void loadUsers();
   });
   document.getElementById("users-status")?.addEventListener("change", () => loadUsers());
+
+  document.getElementById("btn-support-refresh")?.addEventListener("click", () => loadSupportInbox());
+  document.getElementById("support-search")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") void loadSupportInbox();
+  });
+  document.getElementById("btn-admin-support-attach")?.addEventListener("click", () => {
+    document.getElementById("admin-support-file")?.click();
+  });
+  document.getElementById("admin-support-file")?.addEventListener("change", (ev) => {
+    const file = ev.target?.files?.[0] || null;
+    if (!file) {
+      clearAdminSupportAttach();
+      return;
+    }
+    const okType = /^(image\/(jpeg|png|webp)|video\/(mp4|webm))$/i.test(file.type);
+    const max = file.type.startsWith("video/") ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (!okType) {
+      alert("Only JPEG/PNG/WebP images or MP4/WebM videos are allowed.");
+      clearAdminSupportAttach();
+      return;
+    }
+    if (file.size > max) {
+      alert(file.type.startsWith("video/") ? "Video max 50MB." : "Image max 10MB.");
+      clearAdminSupportAttach();
+      return;
+    }
+    adminSupportPendingFile = file;
+    const prev = document.getElementById("admin-support-attach-preview");
+    if (prev) {
+      prev.hidden = false;
+      prev.textContent = `Attached: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+    }
+  });
+  document.getElementById("btn-admin-support-send")?.addEventListener("click", () => {
+    void sendAdminSupportMessage();
+  });
+  document.getElementById("admin-support-input")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      void sendAdminSupportMessage();
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && idToken) {
+      void refreshSupportTabBadge();
+      if (activeTab === "support") void loadSupportInbox();
+    }
+  });
 
   document.getElementById("btn-back-users")?.addEventListener("click", () => {
     void stopLiveViewer();

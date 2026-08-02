@@ -26,6 +26,16 @@ import {
 import { db } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
+import {
+  createUploadSlot,
+  ensureThread,
+  finalizeMediaMessage,
+  getThread,
+  listMessages,
+  listThreadsForAdmin,
+  markRead,
+  sendMessage,
+} from "../lib/support-chat.js";
 
 /**
  * Admin panel APIs (+ device explore/control):
@@ -158,6 +168,25 @@ export default async function handler(req, res) {
   const userDetail = path.match(/^users\/([^/]+)$/i);
   if (userDetail) {
     return handleUserDetail(req, res, decodeURIComponent(userDetail[1]));
+  }
+
+  if (path === "support/chats") return handleAdminSupportChats(req, res);
+
+  const supportChatRead = path.match(/^support\/chats\/([^/]+)\/read$/i);
+  if (supportChatRead) {
+    return handleAdminSupportRead(req, res, decodeURIComponent(supportChatRead[1]));
+  }
+  const supportChatUpload = path.match(/^support\/chats\/([^/]+)\/upload-url$/i);
+  if (supportChatUpload) {
+    return handleAdminSupportUploadUrl(req, res, decodeURIComponent(supportChatUpload[1]));
+  }
+  const supportChatMedia = path.match(/^support\/chats\/([^/]+)\/messages\/media$/i);
+  if (supportChatMedia) {
+    return handleAdminSupportMedia(req, res, decodeURIComponent(supportChatMedia[1]));
+  }
+  const supportChatMessages = path.match(/^support\/chats\/([^/]+)\/messages$/i);
+  if (supportChatMessages) {
+    return handleAdminSupportMessages(req, res, decodeURIComponent(supportChatMessages[1]));
   }
 
   return res.status(404).json({ error: "Unknown admin route", code: "NOT_FOUND", path });
@@ -649,5 +678,120 @@ async function handleDeviceImpersonate(req, res, uid, deviceId) {
     return res.status(200).json({ ok: true, deviceId, ...result });
   } catch (e) {
     return adminError(res, e, "ADMIN_IMPERSONATE_FAILED");
+  }
+}
+
+/* ——— Support chat (Platform Admin ↔ website users) ——— */
+
+async function handleAdminSupportChats(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const chats = await listThreadsForAdmin({
+      q: req.query?.q,
+      limit: Number(req.query?.limit || 100) || 100,
+    });
+    return res.status(200).json({ ok: true, chats });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_LIST_FAILED");
+  }
+}
+
+async function handleAdminSupportMessages(req, res, uid) {
+  if (req.method === "GET") {
+    try {
+      await requirePlatformAdmin(req);
+      await ensureThread(uid);
+      const after = Number(req.query?.after || 0) || 0;
+      const limit = Number(req.query?.limit || 80) || 80;
+      const [messages, thread] = await Promise.all([
+        listMessages(uid, { after, limit }),
+        getThread(uid),
+      ]);
+      return res.status(200).json({ ok: true, messages, thread });
+    } catch (e) {
+      return adminError(res, e, "ADMIN_SUPPORT_MESSAGES_FAILED");
+    }
+  }
+  if (req.method === "POST") {
+    try {
+      const admin = await requirePlatformAdmin(req);
+      const body = parseBody(req.body);
+      const message = await sendMessage({
+        uid,
+        senderRole: "admin",
+        senderUid: admin.uid,
+        senderEmail: admin.email,
+        text: body.text || "",
+      });
+      return res.status(200).json({ ok: true, message });
+    } catch (e) {
+      return adminError(res, e, "ADMIN_SUPPORT_SEND_FAILED");
+    }
+  }
+  res.setHeader("Allow", "GET, POST");
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+async function handleAdminSupportUploadUrl(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const slot = await createUploadSlot({
+      uid,
+      contentType: body.contentType,
+      fileName: body.fileName,
+      sizeBytes: body.sizeBytes,
+    });
+    return res.status(200).json({ ok: true, ...slot });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_UPLOAD_URL_FAILED");
+  }
+}
+
+async function handleAdminSupportMedia(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const message = await finalizeMediaMessage({
+      uid,
+      messageId: body.messageId,
+      storagePath: body.storagePath,
+      contentType: body.contentType,
+      sizeBytes: body.sizeBytes,
+      fileName: body.fileName,
+      text: body.text || "",
+      senderRole: "admin",
+      senderUid: admin.uid,
+      senderEmail: admin.email,
+    });
+    return res.status(200).json({ ok: true, message });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_MEDIA_FAILED");
+  }
+}
+
+async function handleAdminSupportRead(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const thread = await markRead(uid, "admin");
+    return res.status(200).json({ ok: true, thread: thread || (await getThread(uid)) });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_READ_FAILED");
   }
 }

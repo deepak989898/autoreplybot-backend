@@ -349,11 +349,18 @@ function setLoggedInUi(user) {
       ? `Signed in as ${user.email || user.uid}`
       : "Not logged in";
   }
+  const fabOn = document.getElementById("support-fab");
+  if (fabOn) fabOn.hidden = false;
+  startSupportUnreadPolling();
 }
 
 function setLoggedOutUi() {
   setAuthBusy(false);
   closeNavDrawer();
+  stopSupportChatPolling();
+  closeSupportChat();
+  const fabOff = document.getElementById("support-fab");
+  if (fabOff) fabOff.hidden = true;
   if (viewApp) {
     viewApp.hidden = true;
     viewApp.setAttribute("hidden", "");
@@ -6464,3 +6471,303 @@ document.getElementById("apps-search")?.addEventListener("input", () => {
   window.__appsSearchT = setTimeout(() => refreshAppsPanel(), 300);
 });
 document.getElementById("apps-filter")?.addEventListener("change", () => refreshAppsPanel());
+
+/* ——— Help / Support chat (website user ↔ Platform Admin) ——— */
+/** @type {object[]} */
+let supportMessages = [];
+/** @type {File | null} */
+let supportPendingFile = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let supportPollTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let supportUnreadTimer = null;
+let supportChatOpen = false;
+let supportSending = false;
+
+function setSupportStatus(text) {
+  const el = document.getElementById("support-chat-status");
+  if (el) el.textContent = text || "";
+}
+
+function updateSupportFabBadge(n) {
+  const badge = document.getElementById("support-fab-badge");
+  if (!badge) return;
+  const count = Math.max(0, Number(n) || 0);
+  if (count <= 0) {
+    badge.hidden = true;
+    badge.textContent = "0";
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = count > 99 ? "99+" : String(count);
+}
+
+function renderSupportMessages() {
+  const box = document.getElementById("support-chat-messages");
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  if (!supportMessages.length) {
+    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">Say hello to Admin. You can also attach an image or video.</p>`;
+    return;
+  }
+  box.innerHTML = supportMessages
+    .map((m) => {
+      const mine = m.senderRole === "user";
+      const who = mine ? "You" : "Admin";
+      const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
+      const media = (m.attachments || [])
+        .map((a) => {
+          if (!a?.url) return "";
+          if (a.type === "video") {
+            return `<video class="support-msg-media" src="${escapeHtml(a.url)}" controls playsinline></video>`;
+          }
+          return `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener"><img class="support-msg-media" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" /></a>`;
+        })
+        .join("");
+      const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
+      return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(who)} · ${escapeHtml(time)}</span></div>`;
+    })
+    .join("");
+  if (nearBottom || supportMessages.length < 3) {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+async function refreshSupportUnread() {
+  if (!idToken) return;
+  try {
+    const data = await api("/api/device/support/thread");
+    updateSupportFabBadge(data?.thread?.unreadForUser || 0);
+  } catch {
+    /* ignore background unread errors */
+  }
+}
+
+async function loadSupportMessages(opts = {}) {
+  const after = opts.after || 0;
+  const data = await api(
+    `/api/device/support/messages?limit=100${after ? `&after=${encodeURIComponent(String(after))}` : ""}`
+  );
+  const list = Array.isArray(data.messages) ? data.messages : [];
+  if (after > 0) {
+    const seen = new Set(supportMessages.map((m) => m.messageId));
+    for (const m of list) {
+      if (!seen.has(m.messageId)) supportMessages.push(m);
+    }
+  } else {
+    supportMessages = list;
+  }
+  renderSupportMessages();
+}
+
+async function markSupportRead() {
+  try {
+    const data = await api("/api/device/support/read", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    updateSupportFabBadge(data?.thread?.unreadForUser || 0);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSupportAttach() {
+  supportPendingFile = null;
+  const input = document.getElementById("support-file-input");
+  if (input) input.value = "";
+  const prev = document.getElementById("support-attach-preview");
+  if (prev) {
+    prev.hidden = true;
+    prev.textContent = "";
+  }
+}
+
+function setSupportAttachPreview(file) {
+  const prev = document.getElementById("support-attach-preview");
+  if (!prev) return;
+  if (!file) {
+    prev.hidden = true;
+    prev.textContent = "";
+    return;
+  }
+  prev.hidden = false;
+  const mb = (file.size / (1024 * 1024)).toFixed(2);
+  prev.textContent = `Attached: ${file.name} (${mb} MB) — will send with your next message.`;
+}
+
+async function uploadSupportMedia(file, text) {
+  const slot = await api("/api/device/support/upload-url", {
+    method: "POST",
+    body: JSON.stringify({
+      contentType: file.type,
+      fileName: file.name,
+      sizeBytes: file.size,
+    }),
+  });
+  const put = await fetch(slot.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!put.ok) {
+    throw new Error(`Upload failed (${put.status})`);
+  }
+  const result = await api("/api/device/support/messages/media", {
+    method: "POST",
+    body: JSON.stringify({
+      messageId: slot.messageId,
+      storagePath: slot.storagePath,
+      contentType: slot.contentType,
+      sizeBytes: slot.sizeBytes,
+      fileName: slot.fileName,
+      text: text || "",
+    }),
+  });
+  return result.message;
+}
+
+async function sendSupportChat() {
+  if (supportSending || !idToken) return;
+  const input = document.getElementById("support-chat-input");
+  const text = String(input?.value || "").trim();
+  const file = supportPendingFile;
+  if (!text && !file) return;
+  supportSending = true;
+  setSupportStatus(file ? "Uploading…" : "Sending…");
+  try {
+    let message;
+    if (file) {
+      message = await uploadSupportMedia(file, text);
+      clearSupportAttach();
+    } else {
+      const data = await api("/api/device/support/messages", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      message = data.message;
+    }
+    if (input) input.value = "";
+    if (message) {
+      if (!supportMessages.some((m) => m.messageId === message.messageId)) {
+        supportMessages.push(message);
+      }
+      renderSupportMessages();
+    } else {
+      await loadSupportMessages();
+    }
+    setSupportStatus("Sent");
+  } catch (e) {
+    setSupportStatus(e instanceof Error ? e.message : String(e));
+  } finally {
+    supportSending = false;
+  }
+}
+
+function stopSupportChatPolling() {
+  if (supportPollTimer) {
+    clearInterval(supportPollTimer);
+    supportPollTimer = null;
+  }
+  if (supportUnreadTimer) {
+    clearInterval(supportUnreadTimer);
+    supportUnreadTimer = null;
+  }
+}
+
+function startSupportUnreadPolling() {
+  if (supportUnreadTimer) clearInterval(supportUnreadTimer);
+  void refreshSupportUnread();
+  supportUnreadTimer = setInterval(() => {
+    if (!supportChatOpen) void refreshSupportUnread();
+  }, 10000);
+}
+
+async function openSupportChat() {
+  const drawer = document.getElementById("support-chat-drawer");
+  if (!drawer || !idToken) return;
+  drawer.hidden = false;
+  supportChatOpen = true;
+  setSupportStatus("Loading…");
+  try {
+    await ensureSupportThread();
+    await loadSupportMessages();
+    await markSupportRead();
+    setSupportStatus("");
+  } catch (e) {
+    setSupportStatus(e instanceof Error ? e.message : String(e));
+  }
+  if (supportPollTimer) clearInterval(supportPollTimer);
+  supportPollTimer = setInterval(async () => {
+    if (!supportChatOpen || !idToken) return;
+    try {
+      const last = supportMessages.length
+        ? Number(supportMessages[supportMessages.length - 1].createdAt || 0)
+        : 0;
+      if (last) await loadSupportMessages({ after: last });
+      else await loadSupportMessages();
+      await markSupportRead();
+    } catch {
+      /* ignore poll errors */
+    }
+  }, 2500);
+}
+
+function closeSupportChat() {
+  const drawer = document.getElementById("support-chat-drawer");
+  if (drawer) drawer.hidden = true;
+  supportChatOpen = false;
+  if (supportPollTimer) {
+    clearInterval(supportPollTimer);
+    supportPollTimer = null;
+  }
+}
+
+async function ensureSupportThread() {
+  return api("/api/device/support/thread");
+}
+
+document.getElementById("support-fab")?.addEventListener("click", () => {
+  void openSupportChat();
+});
+document.getElementById("btn-open-support-chat")?.addEventListener("click", () => {
+  void openSupportChat();
+});
+document.getElementById("btn-support-close")?.addEventListener("click", () => closeSupportChat());
+document.getElementById("support-chat-drawer")?.addEventListener("click", (ev) => {
+  if (ev.target?.id === "support-chat-drawer") closeSupportChat();
+});
+document.getElementById("btn-support-attach")?.addEventListener("click", () => {
+  document.getElementById("support-file-input")?.click();
+});
+document.getElementById("support-file-input")?.addEventListener("change", (ev) => {
+  const file = ev.target?.files?.[0] || null;
+  if (!file) {
+    clearSupportAttach();
+    return;
+  }
+  const okType =
+    /^(image\/(jpeg|png|webp)|video\/(mp4|webm))$/i.test(file.type);
+  const max = file.type.startsWith("video/") ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+  if (!okType) {
+    alert("Only JPEG/PNG/WebP images or MP4/WebM videos are allowed.");
+    clearSupportAttach();
+    return;
+  }
+  if (file.size > max) {
+    alert(file.type.startsWith("video/") ? "Video max 50MB." : "Image max 10MB.");
+    clearSupportAttach();
+    return;
+  }
+  supportPendingFile = file;
+  setSupportAttachPreview(file);
+});
+document.getElementById("btn-support-send")?.addEventListener("click", () => {
+  void sendSupportChat();
+});
+document.getElementById("support-chat-input")?.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    void sendSupportChat();
+  }
+});

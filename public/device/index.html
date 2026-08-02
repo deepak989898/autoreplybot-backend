@@ -595,6 +595,8 @@
             </div>
           </header>
           <div class="surface">
+            <p style="margin-top:0;">Need help from an administrator? Use the <strong>Help</strong> button (bottom-right) to chat — you can also send images and videos.</p>
+            <button type="button" class="btn-primary" id="btn-open-support-chat" style="margin-bottom:14px;">Chat with Admin</button>
             <ol>
               <li>Pair this browser once from the phone.</li>
               <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
@@ -740,8 +742,36 @@
         </dialog>
       </main>
     </div>
+
+    <button type="button" id="support-fab" class="support-fab" hidden aria-label="Help — chat with Admin">
+      <span class="support-fab-label">Help</span>
+      <span id="support-fab-badge" class="support-fab-badge" hidden>0</span>
+    </button>
+
+    <div id="support-chat-drawer" class="support-chat-drawer" hidden>
+      <div class="support-chat-panel surface" role="dialog" aria-labelledby="support-chat-title">
+        <header class="support-chat-head">
+          <div>
+            <h2 id="support-chat-title">Help · Chat with Admin</h2>
+            <p class="muted" style="margin:0;font-size:0.85rem;">Website support only (not phone SMS).</p>
+          </div>
+          <button type="button" class="btn-secondary" id="btn-support-close" aria-label="Close chat">Close</button>
+        </header>
+        <div id="support-chat-messages" class="support-chat-messages" aria-live="polite"></div>
+        <div class="support-chat-compose">
+          <input type="file" id="support-file-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" hidden />
+          <div id="support-attach-preview" class="support-attach-preview muted" hidden></div>
+          <div class="support-compose-row">
+            <button type="button" class="btn-secondary" id="btn-support-attach" title="Attach image or video">Attach</button>
+            <input id="support-chat-input" class="input" type="text" maxlength="4000" placeholder="Message Admin…" autocomplete="off" />
+            <button type="button" class="btn-primary" id="btn-support-send">Send</button>
+          </div>
+          <p id="support-chat-status" class="muted" style="margin:6px 0 0;font-size:0.8rem;" aria-live="polite"></p>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=19"></script>
+  <script type="module" src="/device/app.js?v=20"></script>
 </body>
 </html>
