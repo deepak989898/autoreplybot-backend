@@ -22,6 +22,8 @@ import {
   startAdminGalleryTransfer,
   startAdminLiveSession,
   waitAdminModuleCommand,
+  getAdminModuleCommand,
+  pokeAdminModuleCommand,
 } from "../lib/admin-device-control.js";
 import { db } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
@@ -133,6 +135,30 @@ export default async function handler(req, res) {
       res,
       decodeURIComponent(deviceSessionStart[1]),
       decodeURIComponent(deviceSessionStart[2])
+    );
+  }
+  const deviceCommandPoke = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/commands\/([^/]+)\/poke$/i
+  );
+  if (deviceCommandPoke) {
+    return handleDeviceCommandPoke(
+      req,
+      res,
+      decodeURIComponent(deviceCommandPoke[1]),
+      decodeURIComponent(deviceCommandPoke[2]),
+      decodeURIComponent(deviceCommandPoke[3])
+    );
+  }
+  const deviceCommandGet = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/commands\/([^/]+)$/i
+  );
+  if (deviceCommandGet) {
+    return handleDeviceCommandGet(
+      req,
+      res,
+      decodeURIComponent(deviceCommandGet[1]),
+      decodeURIComponent(deviceCommandGet[2]),
+      decodeURIComponent(deviceCommandGet[3])
     );
   }
   const deviceCommand = path.match(/^users\/([^/]+)\/devices\/([^/]+)\/command$/i);
@@ -517,6 +543,7 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
       return res.status(400).json({ error: "action required", code: "BAD_REQUEST" });
     }
     const cmd = await runAdminModuleCommand(uid, deviceId, action, body.payload || {}, admin);
+    // Prefer client-side polling for long waits (A11Y). Keep short server wait as optional.
     if (body.wait || body.waitForResult) {
       const result = await waitAdminModuleCommand(
         uid,
@@ -524,7 +551,7 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
         cmd.commandId,
         body.waitMs || 20000
       );
-      if (result.status === "failed") {
+      if (result.status === "failed" || result.status === "ignored" || result.status === "expired") {
         return res.status(400).json({
           error: result.errorMessage || result.errorCode || "Command failed",
           code: result.errorCode || "COMMAND_FAILED",
@@ -536,6 +563,34 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return adminError(res, e, "ADMIN_DEVICE_COMMAND_FAILED");
+  }
+}
+
+async function handleDeviceCommandGet(req, res, uid, deviceId, commandId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const command = await getAdminModuleCommand(uid, deviceId, commandId);
+    return res.status(200).json({ ok: true, command });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_COMMAND_GET_FAILED");
+  }
+}
+
+async function handleDeviceCommandPoke(req, res, uid, deviceId, commandId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const command = await pokeAdminModuleCommand(uid, deviceId, commandId, admin);
+    return res.status(200).json({ ok: true, command });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_COMMAND_POKE_FAILED");
   }
 }
 

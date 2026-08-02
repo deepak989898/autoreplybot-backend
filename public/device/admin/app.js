@@ -1132,6 +1132,44 @@ function showAdminRcMarker(x, y, ok) {
   }, 650);
 }
 
+async function waitAdminCommandResult(commandId, opts = {}) {
+  if (!exploreCtx || !commandId) throw new Error("Missing command");
+  const timeoutMs = Math.min(Math.max(Number(opts.timeoutMs) || 45000, 5000), 90000);
+  const deadline = Date.now() + timeoutMs;
+  const base = `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/commands/${encodeURIComponent(commandId)}`;
+  let poked = false;
+  while (Date.now() < deadline) {
+    const data = await api(base);
+    const cmd = data?.command || data;
+    const status = String(cmd?.status || "");
+    if (status === "acked") return cmd;
+    if (status === "failed" || status === "expired" || status === "ignored") {
+      const err = new ApiError(
+        cmd.errorMessage || cmd.errorCode || "Command failed",
+        cmd.errorCode || "COMMAND_FAILED",
+        "",
+        cmd
+      );
+      throw err;
+    }
+    // Mid-wait: re-wake the phone once so it drains pending module commands.
+    if (!poked && Date.now() + timeoutMs - deadline > 4000) {
+      poked = true;
+      try {
+        await api(`${base}/poke`, { method: "POST", body: "{}" });
+      } catch {
+        /* ignore */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const err = new ApiError(
+    "Command timed out — phone did not confirm remote control. Keep the AutoReplyBot app open, enable Accessibility + Remote Control, install the latest APK if needed, then retry.",
+    "TIMEOUT"
+  );
+  throw err;
+}
+
 async function sendAdminA11yCommand(action, payload = {}, opts = {}) {
   if (!exploreCtx) throw new Error("Select a device first");
   const video = document.getElementById("admin-screen-video");
@@ -1139,7 +1177,8 @@ async function sendAdminA11yCommand(action, payload = {}, opts = {}) {
     videoWidth: Number(video?.videoWidth || 0),
     videoHeight: Number(video?.videoHeight || 0),
   };
-  const wait = opts.wait !== false;
+  // Never block the serverless function for A11Y — poll status from the browser.
+  const wait = opts.wait === true && opts.serverWait === true;
   const body = {
     action,
     payload: {
@@ -1149,19 +1188,34 @@ async function sendAdminA11yCommand(action, payload = {}, opts = {}) {
       normalized: true,
     },
     wait,
-    waitMs: opts.waitMs || (wait ? 20000 : undefined),
+    waitMs: wait ? opts.waitMs || 15000 : undefined,
   };
   const result = await api(
     `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/command`,
     { method: "POST", body: JSON.stringify(body) }
   );
-  return result?.command || result;
+  const command = result?.command || result;
+  if (opts.wait !== false && command?.commandId && String(command.status || "pending") === "pending") {
+    return waitAdminCommandResult(command.commandId, { timeoutMs: opts.waitMs || 45000 });
+  }
+  if (command?.status === "failed" || command?.status === "ignored" || command?.status === "expired") {
+    throw new ApiError(
+      command.errorMessage || command.errorCode || "Command failed",
+      command.errorCode || "COMMAND_FAILED",
+      "",
+      command
+    );
+  }
+  return command;
 }
 
 async function startAdminRemoteControlSession() {
   setAdminRcStatus("Starting…");
   try {
-    await sendAdminA11yCommand("A11Y_START_SESSION", { durationMs: 30 * 60 * 1000 }, { wait: true });
+    await sendAdminA11yCommand("A11Y_START_SESSION", { durationMs: 30 * 60 * 1000 }, {
+      wait: true,
+      waitMs: 45000,
+    });
     adminRcSessionActive = true;
     setAdminRcStatus("Remote control active");
   } catch (e) {
@@ -1169,8 +1223,9 @@ async function startAdminRemoteControlSession() {
     const box = document.getElementById("admin-rc-control-enabled");
     if (box) box.checked = false;
     const msg = e instanceof Error ? e.message : String(e);
+    const code = e?.code || "";
     setAdminRcStatus("Remote control disabled");
-    if (/ACCESSIBILITY_REQUIRED|MODULE_DISABLED/i.test(msg) || e.code === "ACCESSIBILITY_REQUIRED") {
+    if (/ACCESSIBILITY_REQUIRED|MODULE_DISABLED/i.test(msg) || code === "ACCESSIBILITY_REQUIRED") {
       alert(
         "Accessibility control is disabled on the phone.\n\n" +
           "1) Phone → Management → Remote Control Setup\n" +
