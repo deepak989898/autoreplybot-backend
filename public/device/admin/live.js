@@ -15,6 +15,21 @@ import {
   orderBy,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 
+const SIGNAL_TTL_MS = 120000;
+
+/**
+ * Phone writes payload as a JSON string (same as user panel). Accept string or object.
+ * @param {unknown} raw
+ */
+function parseSignalPayload(raw) {
+  if (raw && typeof raw === "object") return raw;
+  try {
+    return JSON.parse(String(raw || "{}"));
+  } catch {
+    throw new Error("Invalid signal payload");
+  }
+}
+
 /**
  * @param {object} opts
  * @param {object} opts.firebaseConfig
@@ -61,6 +76,19 @@ export async function startAdminLiveViewer(opts) {
   /** @type {MediaStream | null} */
   let remoteStream = null;
 
+  async function writeSignal(type, payloadObj) {
+    const signalId = `admin_${type}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    await setDoc(doc(db, "users", ownerUid, "sessions", sessionId, "signals", signalId), {
+      signalId,
+      type,
+      sender: "client",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + SIGNAL_TTL_MS,
+      // Firestore rules require payload as text — same as user website.
+      payload: JSON.stringify(payloadObj || {}),
+    });
+  }
+
   function attachTrack(track) {
     if (!track) return;
     if (!remoteStream) remoteStream = new MediaStream();
@@ -96,26 +124,31 @@ export async function startAdminLiveViewer(opts) {
 
   pc.onicecandidate = async (ev) => {
     if (!ev.candidate) return;
-    const signalId = `ice_admin_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    await setDoc(doc(db, "users", ownerUid, "sessions", sessionId, "signals", signalId), {
-      signalId,
-      type: "ice",
-      sender: "client",
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 120000,
-      payload: {
+    try {
+      await writeSignal("ice", {
         candidate: ev.candidate.candidate,
         sdpMid: ev.candidate.sdpMid,
         sdpMLineIndex: ev.candidate.sdpMLineIndex,
-      },
-    });
+      });
+    } catch (e) {
+      console.warn("Admin ICE write failed", e);
+    }
   };
 
   async function applySignal(data) {
     const type = String(data.type || "");
-    const payload = data.payload || {};
+    const payload = parseSignalPayload(data.payload);
+
     if (type === "offer") {
-      await pc.setRemoteDescription({ type: "offer", sdp: String(payload.sdp || "") });
+      const sdp = String(payload.sdp || "");
+      if (!sdp || !sdp.includes("v=")) {
+        status("Waiting for a valid phone offer…");
+        return;
+      }
+      await pc.setRemoteDescription({
+        type: payload.type || "offer",
+        sdp,
+      });
       remoteSet = true;
       for (const c of pendingIce) {
         try {
@@ -127,21 +160,16 @@ export async function startAdminLiveViewer(opts) {
       pendingIce.length = 0;
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      const signalId = `answer_admin_${Date.now()}`;
-      await setDoc(doc(db, "users", ownerUid, "sessions", sessionId, "signals", signalId), {
-        signalId,
-        type: "answer",
-        sender: "client",
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 120000,
-        payload: { sdp: answer.sdp, type: "answer" },
-      });
+      await writeSignal("answer", { type: answer.type, sdp: answer.sdp });
       status("Answer sent — waiting for media");
     } else if (type === "ice") {
+      const candidate = String(payload.candidate || "");
+      if (!candidate) return;
       const cand = {
-        candidate: String(payload.candidate || ""),
+        candidate,
         sdpMid: payload.sdpMid ?? undefined,
-        sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
+        sdpMLineIndex:
+          typeof payload.sdpMLineIndex === "number" ? payload.sdpMLineIndex : undefined,
       };
       if (!remoteSet) pendingIce.push(cand);
       else await pc.addIceCandidate(cand);

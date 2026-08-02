@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=7";
+import { startAdminLiveViewer } from "./live.js?v=8";
 
 /** @type {string} */
 let adminGalleryFilter = "all";
