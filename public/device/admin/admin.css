@@ -2,6 +2,53 @@
   min-height: 100vh;
 }
 
+.admin-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: rgba(28, 31, 46, 0.45);
+  padding: 24px;
+}
+
+.admin-loading[hidden] {
+  display: none !important;
+}
+
+.admin-loading-card {
+  min-width: min(320px, 92vw);
+  text-align: center;
+  padding: 28px 22px;
+}
+
+.admin-loading-card p {
+  margin: 14px 0 0;
+  font-weight: 600;
+}
+
+.admin-spinner {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 3px solid var(--line);
+  border-top-color: var(--brand);
+  animation: admin-spin 0.8s linear infinite;
+}
+
+@keyframes admin-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.admin-login-busy .btn-primary,
+.admin-login-busy .btn-secondary {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 .admin-login-split {
   min-height: 100vh;
 }

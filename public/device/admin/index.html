@@ -10,9 +10,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=4" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=5" />
 </head>
 <body class="device-app admin-app">
+  <div id="admin-loading" class="admin-loading" hidden>
+    <div class="admin-loading-card surface">
+      <div class="admin-spinner" aria-hidden="true"></div>
+      <p id="admin-loading-text">Signing in…</p>
+    </div>
+  </div>
+
   <div id="view-login" class="login-shell">
     <div class="login-split admin-login-split">
       <aside class="login-hero">
@@ -38,6 +45,7 @@
             <button id="btn-login-email" class="btn-primary" type="button">Sign in</button>
             <button id="btn-login-google" class="btn-secondary" type="button">Google</button>
           </div>
+          <p id="auth-loading-hint" class="muted" hidden style="margin-top:12px;">Please wait — checking admin access and loading dashboard…</p>
           <p class="muted" style="margin-top:14px;">
             <a href="/device/">← Back to device dashboard</a>
           </p>
@@ -290,6 +298,6 @@
     </main>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=4"></script>
+  <script type="module" src="/device/admin/app.js?v=5"></script>
 </body>
 </html>

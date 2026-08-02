@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=4";
+import { startAdminLiveViewer } from "./live.js?v=5";
 
 const viewLogin = document.getElementById("view-login");
 const viewDenied = document.getElementById("view-denied");
@@ -1114,21 +1114,62 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality
   }
 }
 
-async function enterAdmin(user) {
-  idToken = await user.getIdToken(true);
-  const me = await api("/api/admin/me");
-  if (!me.isAdmin) {
-    show(viewLogin, false);
-    show(viewApp, false);
-    show(viewDenied, true);
-    if (deniedEmail) deniedEmail.textContent = `Signed in as ${user.email || user.uid}`;
-    return;
+function setLoginBusy(on, message = "") {
+  const hint = document.getElementById("auth-loading-hint");
+  const emailBtn = document.getElementById("btn-login-email");
+  const googleBtn = document.getElementById("btn-login-google");
+  document.body.classList.toggle("admin-login-busy", Boolean(on));
+  if (emailBtn) emailBtn.disabled = Boolean(on);
+  if (googleBtn) googleBtn.disabled = Boolean(on);
+  if (hint) {
+    hint.hidden = !on;
+    if (on && message) hint.textContent = message;
   }
-  show(viewLogin, false);
-  show(viewDenied, false);
-  show(viewApp, true);
-  if (adminUser) adminUser.textContent = me.email || user.email || "";
-  setTab(activeTab || "dashboard");
+  if (authStatus && message) authStatus.textContent = message;
+}
+
+function setAdminLoading(on, message = "Loading…") {
+  const overlay = document.getElementById("admin-loading");
+  const text = document.getElementById("admin-loading-text");
+  if (text && message) text.textContent = message;
+  show(overlay, Boolean(on));
+}
+
+async function enterAdmin(user) {
+  setAdminLoading(true, "Checking admin access…");
+  setLoginBusy(true, "Checking admin access…");
+  try {
+    idToken = await user.getIdToken(true);
+    setAdminLoading(true, "Verifying admin permissions…");
+    const me = await api("/api/admin/me");
+    if (!me.isAdmin) {
+      setAdminLoading(false);
+      setLoginBusy(false);
+      show(viewLogin, false);
+      show(viewApp, false);
+      show(viewDenied, true);
+      if (deniedEmail) deniedEmail.textContent = `Signed in as ${user.email || user.uid}`;
+      return;
+    }
+    show(viewLogin, false);
+    show(viewDenied, false);
+    show(viewApp, true);
+    if (adminUser) adminUser.textContent = me.email || user.email || "";
+    setAdminLoading(true, "Loading dashboard…");
+    activeTab = "dashboard";
+    document.querySelectorAll("#admin-main-tabs .admin-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === "dashboard");
+    });
+    document.querySelectorAll(".admin-panel").forEach((panel) => {
+      panel.hidden = panel.id !== "tab-dashboard";
+    });
+    setUsersSubview("list");
+    await loadDashboard();
+    if (authStatus) authStatus.textContent = "";
+  } finally {
+    setAdminLoading(false);
+    setLoginBusy(false);
+  }
 }
 
 function setLoggedOut() {
@@ -1136,9 +1177,30 @@ function setLoggedOut() {
   void stopLiveViewer();
   exploreCtx = null;
   openUserUid = "";
+  setAdminLoading(false);
+  setLoginBusy(false);
   show(viewApp, false);
   show(viewDenied, false);
   show(viewLogin, true);
+}
+
+/** Complete login even when Firebase session already exists (onAuthStateChanged may not re-fire). */
+async function completeAdminLogin(user) {
+  if (!user) return;
+  try {
+    await enterAdmin(user);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (authStatus) authStatus.textContent = msg;
+    setAdminLoading(false);
+    setLoginBusy(false);
+    // Sign out so the next Sign in always re-triggers a clean auth cycle.
+    try {
+      await signOut(auth);
+    } catch {
+      setLoggedOut();
+    }
+  }
 }
 
 async function main() {
@@ -1217,35 +1279,45 @@ async function main() {
       if (authStatus) authStatus.textContent = "Enter email and password.";
       return;
     }
+    setAdminLoading(true, "Signing in…");
+    setLoginBusy(true, "Signing in…");
     try {
-      if (authStatus) authStatus.textContent = "Signing in…";
-      await signInWithEmailAndPassword(auth, email, password);
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      await completeAdminLogin(cred.user);
     } catch (e) {
+      setAdminLoading(false);
+      setLoginBusy(false);
       if (authStatus) authStatus.textContent = e instanceof Error ? e.message : String(e);
     }
   });
 
   document.getElementById("btn-login-google")?.addEventListener("click", async () => {
+    setAdminLoading(true, "Opening Google…");
+    setLoginBusy(true, "Opening Google…");
     try {
-      if (authStatus) authStatus.textContent = "Opening Google…";
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+      await completeAdminLogin(cred.user);
     } catch (e) {
+      setAdminLoading(false);
+      setLoginBusy(false);
       if (authStatus) authStatus.textContent = e instanceof Error ? e.message : String(e);
     }
   });
 
+  let authReady = false;
   onAuthStateChanged(auth, async (user) => {
+    // Initial session restore only — button handlers call completeAdminLogin themselves.
+    if (authReady) {
+      if (!user) setLoggedOut();
+      return;
+    }
+    authReady = true;
     if (!user) {
       setLoggedOut();
       return;
     }
-    try {
-      if (authStatus) authStatus.textContent = "Checking admin access…";
-      await enterAdmin(user);
-    } catch (e) {
-      if (authStatus) authStatus.textContent = e instanceof Error ? e.message : String(e);
-      setLoggedOut();
-    }
+    setAdminLoading(true, "Restoring admin session…");
+    await completeAdminLogin(user);
   });
 }
 
