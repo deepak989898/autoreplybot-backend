@@ -117,20 +117,9 @@ export async function startAdminLiveViewer(opts) {
     }
   }
 
-  const sessionRef = doc(db, "users", ownerUid, "sessions", sessionId);
-  const unsubSession = onSnapshot(sessionRef, (snap) => {
-    if (!snap.exists()) return;
-    const st = String(snap.data()?.status || "");
-    if (st === "ended" || st === "failed") {
-      status(`Session ${st} on phone. Tap Start again after unlocking the phone.`);
-    } else if (st === "connecting" || st === "connected") {
-      status(`Phone session: ${st}. Waiting for WebRTC offer…`);
-    }
-  });
-
   const signalsRef = collection(db, "users", ownerUid, "sessions", sessionId, "signals");
   const signalsQuery = query(signalsRef, orderBy("createdAt", "asc"));
-  status("Listening for phone offer… (unlock phone / tap notification if needed)");
+  status("Listening for phone offer…");
   unsubSignals = onSnapshot(signalsQuery, async (snap) => {
     for (const change of snap.docChanges()) {
       if (change.type === "removed") continue;
@@ -152,11 +141,6 @@ export async function startAdminLiveViewer(opts) {
     async stop() {
       try {
         if (unsubSignals) unsubSignals();
-      } catch {
-        /* ignore */
-      }
-      try {
-        unsubSession();
       } catch {
         /* ignore */
       }

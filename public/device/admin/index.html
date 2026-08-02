@@ -5,18 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#5b5ce2" />
   <meta name="robots" content="noindex,nofollow" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="ARB Admin" />
   <title>AutoReplyBot — Admin</title>
-  <link rel="manifest" href="/device/admin/manifest.webmanifest" />
-  <link rel="icon" type="image/png" sizes="192x192" href="/device/icons/icon-192.png" />
-  <link rel="apple-touch-icon" href="/device/icons/apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=3" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=1" />
 </head>
 <body class="device-app admin-app">
   <div id="view-login" class="login-shell">
@@ -121,7 +115,6 @@
               </tbody>
             </table>
           </div>
-          <div id="users-cards" class="admin-user-cards" hidden></div>
           <p id="users-status-text" class="muted" style="margin-top:10px;" aria-live="polite"></p>
         </div>
       </section>
@@ -141,35 +134,36 @@
     </main>
   </div>
 
-  <!-- Full-page user detail (not a side drawer) -->
-  <div id="view-user" class="admin-page" hidden>
-    <header class="admin-page-bar">
-      <button type="button" class="btn-secondary" id="btn-user-back">← Back</button>
-      <div class="admin-page-bar-text">
-        <h1 id="user-page-title">User</h1>
-        <p id="user-page-sub" class="muted"></p>
-      </div>
-    </header>
-    <div id="user-page-actions" class="admin-cmd-row"></div>
-    <div id="user-page-body" class="admin-page-body muted">Loading…</div>
-  </div>
+  <aside id="user-drawer" class="admin-drawer" hidden>
+    <div class="admin-drawer-inner surface">
+      <header class="admin-drawer-head">
+        <div>
+          <h2 id="drawer-title">User</h2>
+          <p id="drawer-sub" class="muted"></p>
+        </div>
+        <button id="btn-drawer-close" class="btn-secondary" type="button">Close</button>
+      </header>
+      <div id="drawer-actions" class="row-gap" style="margin:12px 0;"></div>
+      <div id="drawer-body" class="admin-drawer-body muted">Select a user.</div>
+    </div>
+  </aside>
 
-  <!-- Full-page device explore -->
-  <div id="view-device" class="admin-page" hidden>
-    <header class="admin-page-bar">
-      <button type="button" class="btn-secondary" id="btn-device-back">← Back</button>
-      <div class="admin-page-bar-text">
-        <h1 id="device-page-title">Device</h1>
-        <p id="device-page-sub" class="muted"></p>
-      </div>
-    </header>
-    <p class="muted admin-page-hint">
-      Control uses a hidden <strong>Platform Admin</strong> client. User browsers stay paired.
-      If someone else is already live, you will be asked before taking over.
-    </p>
-    <div id="device-page-body" class="admin-page-body">Loading…</div>
-  </div>
+  <aside id="device-drawer" class="admin-drawer" hidden>
+    <div class="admin-drawer-inner surface admin-device-drawer">
+      <header class="admin-drawer-head">
+        <div>
+          <h2 id="device-drawer-title">Device</h2>
+          <p id="device-drawer-sub" class="muted"></p>
+        </div>
+        <button id="btn-device-drawer-close" class="btn-secondary" type="button">Close</button>
+      </header>
+      <p class="muted" style="margin:8px 0 0;">
+        Control uses a hidden <strong>Platform Admin</strong> client. User browsers stay paired. Live camera/screen may ask to take over if they are already live.
+      </p>
+      <div id="device-drawer-body" class="admin-drawer-body">Loading…</div>
+    </div>
+  </aside>
 
-  <script type="module" src="/device/admin/app.js?v=3"></script>
+  <script type="module" src="/device/admin/app.js?v=2"></script>
 </body>
 </html>
