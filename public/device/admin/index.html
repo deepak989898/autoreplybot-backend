@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#5b5ce2" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>AutoReplyBot — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/device/styles.css" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=1" />
+</head>
+<body class="device-app admin-app">
+  <div id="view-login" class="login-shell">
+    <div class="login-split admin-login-split">
+      <aside class="login-hero">
+        <div class="login-hero-inner">
+          <p class="login-brand">AutoReplyBot</p>
+          <h1>Platform Admin</h1>
+          <p class="login-lead">Track users, devices, and block access. Only listed admin emails can enter.</p>
+        </div>
+      </aside>
+      <section class="login-panel">
+        <div class="login-card">
+          <h2>Admin sign in</h2>
+          <p id="auth-status" class="muted" aria-live="polite"></p>
+          <label class="field">
+            <span>Email</span>
+            <input id="auth-email" class="input" type="email" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="auth-password" class="input" type="password" autocomplete="current-password" />
+          </label>
+          <div class="row-gap" style="margin-top:12px;flex-wrap:wrap;">
+            <button id="btn-login-email" class="btn-primary" type="button">Sign in</button>
+            <button id="btn-login-google" class="btn-secondary" type="button">Google</button>
+          </div>
+          <p class="muted" style="margin-top:14px;">
+            <a href="/device/">← Back to device dashboard</a>
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="view-denied" class="admin-denied" hidden>
+    <div class="surface admin-denied-card">
+      <h1>Access denied</h1>
+      <p class="muted">This account is not an admin. Ask an existing admin to add your email, or set <code>ADMIN_EMAILS</code> on the server for the first admin.</p>
+      <p id="denied-email" class="muted"></p>
+      <div class="row-gap" style="margin-top:12px;">
+        <button id="btn-denied-logout" class="btn-secondary" type="button">Sign out</button>
+        <a class="btn-primary" href="/device/">Device dashboard</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-app" class="admin-shell" hidden>
+    <header class="admin-top">
+      <div>
+        <p class="admin-brand">AutoReplyBot Admin</p>
+        <p id="admin-user" class="muted"></p>
+      </div>
+      <div class="row-gap admin-top-actions">
+        <button id="btn-sync" class="btn-secondary" type="button">Sync users</button>
+        <button id="btn-logout" class="btn-danger-soft" type="button">Logout</button>
+      </div>
+    </header>
+
+    <nav class="admin-tabs" role="tablist">
+      <button type="button" class="admin-tab active" data-tab="dashboard">Dashboard</button>
+      <button type="button" class="admin-tab" data-tab="users">Users</button>
+      <button type="button" class="admin-tab" data-tab="admins">Admins</button>
+    </nav>
+
+    <main class="admin-main">
+      <section id="tab-dashboard" class="admin-panel">
+        <div class="admin-kpi-grid">
+          <article class="surface admin-kpi"><p class="muted">Users</p><p id="kpi-users" class="admin-kpi-value">—</p></article>
+          <article class="surface admin-kpi"><p class="muted">Devices</p><p id="kpi-devices" class="admin-kpi-value">—</p></article>
+          <article class="surface admin-kpi"><p class="muted">Online</p><p id="kpi-online" class="admin-kpi-value">—</p></article>
+          <article class="surface admin-kpi"><p class="muted">Blocked</p><p id="kpi-blocked" class="admin-kpi-value">—</p></article>
+        </div>
+        <p id="dashboard-status" class="muted" style="margin-top:12px;" aria-live="polite"></p>
+      </section>
+
+      <section id="tab-users" class="admin-panel" hidden>
+        <div class="surface">
+          <div class="admin-toolbar">
+            <input id="users-search" class="input" type="search" placeholder="Search email, uid, device…" />
+            <select id="users-status" class="input">
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="blocked">Blocked</option>
+            </select>
+            <button id="btn-users-refresh" class="btn-secondary" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Devices</th>
+                  <th>Online</th>
+                  <th>Last seen</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody">
+                <tr><td colspan="6" class="muted">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p id="users-status-text" class="muted" style="margin-top:10px;" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section id="tab-admins" class="admin-panel" hidden>
+        <div class="surface">
+          <h2 class="settings-section-title" style="margin-top:0;">Admin emails</h2>
+          <p class="muted">Stored in Firestore. First admins are seeded from <code>ADMIN_EMAILS</code> env if the list is empty.</p>
+          <ul id="admins-list" class="admin-email-list"></ul>
+          <div class="admin-toolbar" style="margin-top:12px;">
+            <input id="admin-email-input" class="input" type="email" placeholder="new-admin@example.com" />
+            <button id="btn-admin-add" class="btn-primary" type="button">Add admin</button>
+          </div>
+          <p id="admins-status" class="muted" style="margin-top:10px;" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <aside id="user-drawer" class="admin-drawer" hidden>
+    <div class="admin-drawer-inner surface">
+      <header class="admin-drawer-head">
+        <div>
+          <h2 id="drawer-title">User</h2>
+          <p id="drawer-sub" class="muted"></p>
+        </div>
+        <button id="btn-drawer-close" class="btn-secondary" type="button">Close</button>
+      </header>
+      <div id="drawer-actions" class="row-gap" style="margin:12px 0;"></div>
+      <div id="drawer-body" class="admin-drawer-body muted">Select a user.</div>
+    </div>
+  </aside>
+
+  <script type="module" src="/device/admin/app.js?v=1"></script>
+</body>
+</html>

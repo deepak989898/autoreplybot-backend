@@ -37,12 +37,22 @@
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
       ]
+    },
+    {
+      "source": "/device/admin/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
     }
   ],
   "rewrites": [
     {
       "source": "/api/pair/:action",
       "destination": "/api/pair-router?action=:action"
+    },
+    {
+      "source": "/api/admin/:path*",
+      "destination": "/api/admin-router?slug=:path*"
     },
     {
       "source": "/api/device/session/:op",

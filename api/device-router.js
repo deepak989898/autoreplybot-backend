@@ -1,7 +1,11 @@
 import { randomBytes } from "crypto";
 import { getMessaging } from "firebase-admin/messaging";
-import { verifyFirebaseIdToken } from "../lib/auth.js";
 import { db } from "../lib/firebase.js";
+import {
+  refreshUserDeviceStats,
+  requireAuthedUser,
+  touchPlatformUserFromAuth,
+} from "../lib/platform-admin.js";
 import { buildIceServers } from "../lib/ice-servers.js";
 import {
   canonicalSessionRequest,
@@ -47,6 +51,7 @@ export default async function handler(req, res) {
   }
   path = path.replace(/^\/+/, "").replace(/\/+$/, "");
 
+  if (path === "account-status") return handleAccountStatus(req, res);
   if (path === "list") return handleList(req, res);
   if (path === "sessions") return handleSessions(req, res);
   if (path === "media") return handleMediaList(req, res);
@@ -191,13 +196,32 @@ function normalizeCapabilities(caps) {
   return [...new Set(out)];
 }
 
+async function handleAccountStatus(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    void touchPlatformUserFromAuth(uid, req._platformEmail, req._platformName);
+    return res.status(200).json({
+      ok: true,
+      blocked: false,
+      uid,
+      email: req._platformEmail || "",
+    });
+  } catch (e) {
+    return clientError(res, e, "ACCOUNT_STATUS_FAILED");
+  }
+}
+
 async function handleList(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const uid = await requireAuthed(req);
     const snap = await db()
       .collection(R.COL_USERS)
       .doc(uid)
@@ -209,14 +233,12 @@ async function handleList(req, res) {
       if (item && !item.revoked) devices.push(item);
     });
     devices.sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
+    // Keep platform admin registry fresh (best-effort).
+    void touchPlatformUserFromAuth(uid, req._platformEmail, req._platformName);
+    void refreshUserDeviceStats(uid);
     return res.status(200).json({ ok: true, devices });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const code = msg.includes("Authorization") ? 401 : 500;
-    return res.status(code).json({
-      error: code === 401 ? "Unauthorized" : "Device list failed",
-      code: code === 401 ? "AUTH_FAILED" : "DEVICE_LIST_FAILED",
-    });
+    return clientError(res, e, "DEVICE_LIST_FAILED");
   }
 }
 
@@ -226,7 +248,7 @@ async function handleSessions(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const uid = await requireAuthed(req);
     const limitRaw = Number(req.query?.limit || 40);
     const limit = Number.isFinite(limitRaw)
       ? Math.min(100, Math.max(1, Math.floor(limitRaw)))
@@ -282,7 +304,7 @@ async function handleMediaList(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const uid = await requireAuthed(req);
     const limitRaw = Number(req.query?.limit || 80);
     const limit = Number.isFinite(limitRaw)
       ? Math.min(200, Math.max(1, Math.floor(limitRaw)))
@@ -315,7 +337,7 @@ async function handleIceServers(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    await verifyFirebaseIdToken(req.headers.authorization);
+    await requireAuthed(req);
     const iceServers = buildIceServers({ includeTurn: true });
     return res.status(200).json({ ok: true, iceServers });
   } catch (e) {
@@ -334,7 +356,7 @@ async function handleSessionRequest(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const uid = await requireAuthed(req);
     const body = parseBody(req.body);
     const deviceId = String(body.deviceId || "").trim();
     let clientId = String(body.clientId || "").trim();
@@ -713,7 +735,7 @@ async function handleSessionEnd(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const uid = await requireAuthed(req);
     const body = parseBody(req.body);
     const sessionId = String(body.sessionId || "").trim();
     const reason =
@@ -777,12 +799,10 @@ async function handleSessionEnd(req, res) {
 }
 
 async function requireAuthed(req) {
-  const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
-  if (!uid) {
-    const err = new Error("Unauthorized");
-    err.code = "AUTH_FAILED";
-    throw err;
-  }
+  const { uid, email, name } = await requireAuthedUser(req);
+  req._platformUid = uid;
+  req._platformEmail = email;
+  req._platformName = name;
   return uid;
 }
 
@@ -893,8 +913,14 @@ function clientError(res, e, fallback) {
   const code = e?.code || fallback || "FAILED";
   let status = 400;
   if (code === "AUTH_FAILED" || msg.includes("Authorization")) status = 401;
-  else if (code === "CAPABILITY_DENIED" || code === "CLIENT_REVOKED") status = 403;
-  else if (code === "DEVICE_NOT_FOUND" || code === "CLIENT_NOT_FOUND") status = 404;
+  else if (
+    code === "CAPABILITY_DENIED" ||
+    code === "CLIENT_REVOKED" ||
+    code === "ACCOUNT_BLOCKED" ||
+    code === "ADMIN_FORBIDDEN"
+  ) {
+    status = 403;
+  } else if (code === "DEVICE_NOT_FOUND" || code === "CLIENT_NOT_FOUND") status = 404;
   return res.status(status).json({ error: msg, code });
 }
 

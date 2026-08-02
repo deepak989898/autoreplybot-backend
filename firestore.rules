@@ -1,8 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function notBlocked() {
+      // Custom claim set by Admin SDK when platform admin blocks a user.
+      return !(request.auth.token.blocked == true);
+    }
     function owner(uid) {
-      return request.auth != null && request.auth.uid == uid;
+      return request.auth != null && request.auth.uid == uid && notBlocked();
     }
     function id(v) {
       return v is string && v.size() >= 1 && v.size() <= 128
@@ -655,6 +659,15 @@ service cloud.firestore {
     match /users/{uid}/integrations/{doc} {
       allow read, write: if false;
     }
+
+    // Platform admin registry — Admin SDK only (no client access).
+    match /platform/{document=**} {
+      allow read, write: if false;
+    }
+    match /platformUsers/{uid} {
+      allow read, write: if false;
+    }
+
     match /{doc=**} {
       allow read, write: if false;
     }

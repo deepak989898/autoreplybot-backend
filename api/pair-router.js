@@ -18,8 +18,8 @@ import {
   mergeCapabilitiesWithoutElevation,
   normalizeAllowedCapabilities,
 } from "../lib/browser-identity.js";
-import { verifyFirebaseIdToken } from "../lib/auth.js";
 import { checkRateLimit } from "../lib/rate-limit.js";
+import { requireAuthedUser, touchPlatformUserFromAuth } from "../lib/platform-admin.js";
 import * as R from "../lib/remote-constants.js";
 import { randomBytes } from "crypto";
 
@@ -79,7 +79,8 @@ async function handleCreate(req, res) {
   }
   try {
     requirePairingSecret();
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
 
     const rl = checkRateLimit(`pair-create:${uid}`, PAIR_CREATE_LIMIT, PAIR_CREATE_WINDOW_MS);
     if (!rl.allowed) {
@@ -183,7 +184,9 @@ async function handleComplete(req, res) {
   let deviceId = "";
   try {
     requirePairingSecret();
-    ({ uid } = await verifyFirebaseIdToken(req.headers.authorization));
+    const authed = await requireAuthedUser(req);
+    uid = authed.uid;
+    void touchPlatformUserFromAuth(uid, authed.email);
     const body = parseBody(req.body);
     const code = String(body.code || "").trim();
     const token = String(body.token || "").trim();
@@ -376,7 +379,8 @@ async function handleRevoke(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
     const body = parseBody(req.body);
     const clientId = String(body.clientId || "").trim();
     if (!clientId || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) {
@@ -443,7 +447,8 @@ async function handleUpdateClient(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
     const body = parseBody(req.body);
     const clientId = String(body.clientId || "").trim();
     if (!clientId || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) {
@@ -524,7 +529,8 @@ async function handleClients(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
     const snap = await trustedClientsRef(uid).get();
     const clients = [];
     snap.forEach((doc) => {
@@ -536,8 +542,8 @@ async function handleClients(req, res) {
   } catch (e) {
     const mapped = pairingErrorResponse(e);
     return res.status(mapped.status).json({
-      error: mapped.status === 401 ? "Unauthorized" : "Client list failed",
-      code: mapped.status === 401 ? "AUTH_FAILED" : "CLIENT_LIST_FAILED",
+      error: mapped.code === "ACCOUNT_BLOCKED" ? mapped.error : mapped.status === 401 ? "Unauthorized" : "Client list failed",
+      code: mapped.code === "ACCOUNT_BLOCKED" ? "ACCOUNT_BLOCKED" : mapped.status === 401 ? "AUTH_FAILED" : "CLIENT_LIST_FAILED",
     });
   }
 }

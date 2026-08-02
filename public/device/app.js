@@ -155,7 +155,21 @@ function showPanel(panelId) {
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "social") ensureSocialFrame();
   if (id === "multiview") refreshMultiViewPanel().catch(() => {});
-  if (id === "settings") prepareApkDownloadLink().catch(() => {});
+  if (id === "settings") {
+    prepareApkDownloadLink().catch(() => {});
+    refreshAdminSettingsLink().catch(() => {});
+  }
+}
+
+async function refreshAdminSettingsLink() {
+  const card = document.getElementById("settings-admin-card");
+  if (!card) return;
+  try {
+    const data = await api("/api/admin/me");
+    card.hidden = !data?.isAdmin;
+  } catch {
+    card.hidden = true;
+  }
 }
 
 function syncHiddenDeviceSelects(deviceId) {
@@ -547,6 +561,13 @@ async function api(path, options = {}) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (body.code === "ACCOUNT_BLOCKED") {
+      const err = new Error(
+        body.error || "Your account has been disabled by an administrator."
+      );
+      err.code = "ACCOUNT_BLOCKED";
+      throw err;
+    }
     throw new Error(
       body.error || body.message || body.code || `HTTP ${res.status}`
     );
