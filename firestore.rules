@@ -1,12 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function notBlocked() {
-      // Custom claim set by Admin SDK when platform admin blocks a user.
-      return !(request.auth.token.blocked == true);
-    }
+    // Account blocking is enforced by Admin SDK APIs (requireAuthedUser), not here.
+    // Client rules stay owner-only — same as before the admin panel — so camera/voice
+    // WebRTC signaling is never broken by a stale blocked custom claim on the ID token.
     function owner(uid) {
-      return request.auth != null && request.auth.uid == uid && notBlocked();
+      return request.auth != null && request.auth.uid == uid;
     }
     function id(v) {
       return v is string && v.size() >= 1 && v.size() <= 128
