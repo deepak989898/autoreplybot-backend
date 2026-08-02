@@ -6399,45 +6399,99 @@ function showRcMarker(x, y, ok) {
   }, 650);
 }
 
-async function waitModuleCommand(commandId, timeoutMs = 20000) {
-  if (!firebaseUid || !selectedWorkspaceDeviceId || !commandId || !db) {
+/**
+ * Wait for phone to ack a module command.
+ * Polls API (reliable) + optional Firestore snapshot; mid-wait FCM poke wakes the phone.
+ * @param {string} commandId
+ * @param {{ timeoutMs?: number }} [opts]
+ */
+async function waitModuleCommand(commandId, opts = {}) {
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!firebaseUid || !deviceId || !commandId) {
     throw new Error("Missing auth/device for command wait");
   }
-  const ref = doc(
-    db,
-    "users",
-    firebaseUid,
-    "devices",
-    selectedWorkspaceDeviceId,
-    "moduleCommands",
-    commandId
-  );
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      if (unsub) unsub();
-      reject(new Error("Command timed out"));
-    }, timeoutMs);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        if (!snap.exists()) return;
-        const data = snap.data() || {};
-        const status = String(data.status || "");
-        if (status === "acked" || status === "failed" || status === "expired" || status === "ignored") {
-          clearTimeout(timer);
-          unsub();
-          resolve(data);
+  const timeoutMs = Math.min(Math.max(Number(opts.timeoutMs) || 45000, 5000), 90000);
+  const deadline = Date.now() + timeoutMs;
+  let poked = false;
+  let snapshotDone = null;
+  let unsub = null;
+
+  if (db) {
+    const ref = doc(db, "users", firebaseUid, "devices", deviceId, "moduleCommands", commandId);
+    snapshotDone = new Promise((resolve) => {
+      unsub = onSnapshot(
+        ref,
+        (snap) => {
+          if (!snap.exists()) return;
+          const data = snap.data() || {};
+          const status = String(data.status || "");
+          if (status === "acked" || status === "failed" || status === "expired" || status === "ignored") {
+            resolve({ commandId, ...data });
+          }
+        },
+        () => {
+          /* fall through to API poll */
         }
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
+      );
+    });
+  }
+
+  try {
+    while (Date.now() < deadline) {
+      if (snapshotDone) {
+        const raced = await Promise.race([
+          snapshotDone.then((v) => ({ via: "snap", v })),
+          new Promise((r) => setTimeout(() => r({ via: "tick" }), 400)),
+        ]);
+        if (raced.via === "snap") return raced.v;
       }
-    );
-  });
+
+      try {
+        const data = await api(
+          `/api/device/command/status?deviceId=${encodeURIComponent(deviceId)}&commandId=${encodeURIComponent(commandId)}`
+        );
+        const cmd = data?.command || data;
+        const status = String(cmd?.status || "");
+        if (status === "acked" || status === "failed" || status === "expired" || status === "ignored") {
+          return cmd;
+        }
+      } catch {
+        /* keep waiting */
+      }
+
+      if (!poked && Date.now() + timeoutMs - deadline > 2500) {
+        poked = true;
+        try {
+          await api("/api/device/command/poke", {
+            method: "POST",
+            body: JSON.stringify({ deviceId, commandId }),
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      await new Promise((r) => setTimeout(r, 450));
+    }
+  } finally {
+    try {
+      unsub?.();
+    } catch {
+      /* ignore */
+    }
+  }
+  const err = new Error(
+    "Command timed out — phone did not confirm remote control. Keep AutoReplyBot open, enable Accessibility + Remote Control, allow Remote Accessibility for this browser, then retry."
+  );
+  err.code = "TIMEOUT";
+  throw err;
 }
 
-async function sendA11yCommand(action, payload = {}) {
+/**
+ * @param {string} action
+ * @param {object} [payload]
+ * @param {{ wait?: boolean, timeoutMs?: number }} [opts]
+ */
+async function sendA11yCommand(action, payload = {}, opts = {}) {
   const deviceId = selectedWorkspaceDeviceId;
   const clientId = requireClientId();
   if (!deviceId) throw new Error("Select a device first");
@@ -6455,10 +6509,24 @@ async function sendA11yCommand(action, payload = {}) {
       payload: { ...payload, ...videoMeta, clientId, normalized: true },
     }),
   });
-  const commandId = created?.command?.commandId;
+  const command = created?.command || created;
+  const commandId = command?.commandId;
   if (!commandId) throw new Error("No commandId returned");
-  const result = await waitModuleCommand(commandId);
-  if (result.status === "failed") {
+
+  const wait = opts.wait !== false;
+  if (!wait) {
+    // Fire-and-forget gestures: still poke once so the phone drains quickly.
+    api("/api/device/command/poke", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, commandId }),
+    }).catch(() => {});
+    return command;
+  }
+
+  const result = await waitModuleCommand(commandId, {
+    timeoutMs: opts.timeoutMs || 45000,
+  });
+  if (result.status === "failed" || result.status === "ignored" || result.status === "expired") {
     const err = new Error(result.errorMessage || result.errorCode || "Command failed");
     err.code = result.errorCode;
     throw err;
@@ -6467,11 +6535,13 @@ async function sendA11yCommand(action, payload = {}) {
 }
 
 async function startRemoteControlSession() {
-  setRcStatus("Starting…");
+  setRcStatus("Starting remote control…");
   try {
-    await sendA11yCommand("A11Y_START_SESSION", {
-      durationMs: 30 * 60 * 1000,
-    });
+    await sendA11yCommand(
+      "A11Y_START_SESSION",
+      { durationMs: 30 * 60 * 1000 },
+      { wait: true, timeoutMs: 45000 }
+    );
     rcSessionActive = true;
     setRcStatus("Remote control active");
   } catch (e) {
@@ -6493,6 +6563,16 @@ async function startRemoteControlSession() {
       alert(
         "This browser is not allowed to use Remote Control.\n\n" +
           "Phone → Trusted Browsers → enable Remote Accessibility Control.\n\n" +
+          msg
+      );
+    } else if (/TIMEOUT|timed out/i.test(msg) || e.code === "TIMEOUT") {
+      alert(
+        "Remote control timed out.\n\n" +
+          "• Keep the AutoReplyBot app open (not force-stopped)\n" +
+          "• Phone → enable Accessibility service + Remote Control ON\n" +
+          "• Trusted Browsers → enable Remote Accessibility\n" +
+          "• Install the latest APK if the phone build is old\n" +
+          "• Then uncheck/check Remote Control again\n\n" +
           msg
       );
     } else alert(msg);
@@ -6599,16 +6679,24 @@ function wireRemoteControlUi() {
     else await stopRemoteControlSession(false);
   });
   document.getElementById("btn-rc-back")?.addEventListener("click", () =>
-    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 1 }).then(() => setRcStatus("Back")).catch((e) => setRcStatus(e.message || String(e)))
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 1 }, { wait: false })
+      .then(() => setRcStatus("Back"))
+      .catch((e) => setRcStatus(e.message || String(e)))
   );
   document.getElementById("btn-rc-home")?.addEventListener("click", () =>
-    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 2 }).then(() => setRcStatus("Home")).catch((e) => setRcStatus(e.message || String(e)))
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 2 }, { wait: false })
+      .then(() => setRcStatus("Home"))
+      .catch((e) => setRcStatus(e.message || String(e)))
   );
   document.getElementById("btn-rc-recents")?.addEventListener("click", () =>
-    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 3 }).then(() => setRcStatus("Recents")).catch((e) => setRcStatus(e.message || String(e)))
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 3 }, { wait: false })
+      .then(() => setRcStatus("Recents"))
+      .catch((e) => setRcStatus(e.message || String(e)))
   );
   document.getElementById("btn-rc-notif")?.addEventListener("click", () =>
-    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 4 }).then(() => setRcStatus("Notifications")).catch((e) => setRcStatus(e.message || String(e)))
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 4 }, { wait: false })
+      .then(() => setRcStatus("Notifications"))
+      .catch((e) => setRcStatus(e.message || String(e)))
   );
   document.getElementById("btn-rc-tree")?.addEventListener("click", () => refreshRcTree());
   document.getElementById("btn-rc-stop")?.addEventListener("click", async () => {
@@ -6671,19 +6759,23 @@ function wireRemoteControlUi() {
         // (this was opening neighboring icons like PhonePe → Paytm).
         if (dx < 0.025 && dy < 0.025) {
           setRcStatus("Tap…");
-          await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny });
+          await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
           setRcStatus("Tap sent");
           rcDragStart = null;
           return;
         }
         setRcStatus(mode === "drag" ? "Dragging…" : "Swiping…");
-        await sendA11yCommand(mode === "drag" ? "A11Y_DRAG" : "A11Y_SWIPE", {
-          nx1: rcDragStart.nx,
-          ny1: rcDragStart.ny,
-          nx2: end.nx,
-          ny2: end.ny,
-          durationMs: mode === "drag" ? 400 : 250,
-        });
+        await sendA11yCommand(
+          mode === "drag" ? "A11Y_DRAG" : "A11Y_SWIPE",
+          {
+            nx1: rcDragStart.nx,
+            ny1: rcDragStart.ny,
+            nx2: end.nx,
+            ny2: end.ny,
+            durationMs: mode === "drag" ? 400 : 250,
+          },
+          { wait: false }
+        );
         setRcStatus("Gesture ok");
         rcDragStart = null;
         return;
@@ -6691,13 +6783,17 @@ function wireRemoteControlUi() {
       const now = Date.now();
       if (mode === "double" || (mode === "tap" && now - rcLastClickAt < 280)) {
         setRcStatus("Double tap…");
-        await sendA11yCommand("A11Y_DOUBLE_TAP", { nx: end.nx, ny: end.ny });
+        await sendA11yCommand("A11Y_DOUBLE_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
       } else if (mode === "long" || ev.button === 2) {
         setRcStatus("Long press…");
-        await sendA11yCommand("A11Y_LONG_PRESS", { nx: end.nx, ny: end.ny, durationMs: 700 });
+        await sendA11yCommand(
+          "A11Y_LONG_PRESS",
+          { nx: end.nx, ny: end.ny, durationMs: 700 },
+          { wait: false }
+        );
       } else {
         setRcStatus("Tap…");
-        await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny });
+        await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
       }
       rcLastClickAt = now;
       setRcStatus("Tap sent");
@@ -6720,13 +6816,17 @@ function wireRemoteControlUi() {
     if (!p) return;
     const dy = ev.deltaY > 0 ? 0.18 : -0.18;
     try {
-      await sendA11yCommand("A11Y_SWIPE", {
-        nx1: p.nx,
-        ny1: Math.min(0.85, Math.max(0.15, p.ny)),
-        nx2: p.nx,
-        ny2: Math.min(0.95, Math.max(0.05, p.ny + dy)),
-        durationMs: 220,
-      });
+      await sendA11yCommand(
+        "A11Y_SWIPE",
+        {
+          nx1: p.nx,
+          ny1: Math.min(0.85, Math.max(0.15, p.ny)),
+          nx2: p.nx,
+          ny2: Math.min(0.95, Math.max(0.05, p.ny + dy)),
+          durationMs: 220,
+        },
+        { wait: false }
+      );
     } catch (e) {
       setRcStatus(e instanceof Error ? e.message : String(e));
     }

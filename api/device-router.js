@@ -20,7 +20,12 @@ import {
   writeAuditLog,
 } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
-import { createModuleCommand, createTransfer } from "../lib/module-commands.js";
+import {
+  createModuleCommand,
+  createTransfer,
+  getModuleCommand,
+  pokeModuleCommand,
+} from "../lib/module-commands.js";
 import { getStorage } from "firebase-admin/storage";
 import { bucket as storageBucket } from "../lib/firebase.js";
 import {
@@ -123,6 +128,8 @@ export default async function handler(req, res) {
   if (path === "transfers/content") return handleTransferContent(req, res);
   if (path === "transfers/cancel") return handleTransferCancel(req, res);
   if (path === "command") return handleModuleCommand(req, res);
+  if (path === "command/status") return handleModuleCommandStatus(req, res);
+  if (path === "command/poke") return handleModuleCommandPoke(req, res);
   if (path === "capability-secret") return handleCapabilitySecret(req, res);
   if (path === "phone-capabilities") return handlePhoneCapabilities(req, res);
   if (path === "app-download") return handleAppDownload(req, res);
@@ -2644,6 +2651,39 @@ async function handleModuleCommand(req, res) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return clientError(res, e, "COMMAND_FAILED");
+  }
+}
+
+async function handleModuleCommandStatus(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    const commandId = String(req.query?.commandId || "").trim();
+    const command = await getModuleCommand(uid, deviceId, commandId);
+    return res.status(200).json({ ok: true, command });
+  } catch (e) {
+    return clientError(res, e, "COMMAND_STATUS_FAILED");
+  }
+}
+
+async function handleModuleCommandPoke(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || req.query?.deviceId || "").trim();
+    const commandId = String(body.commandId || req.query?.commandId || "").trim();
+    const command = await pokeModuleCommand(uid, deviceId, commandId);
+    return res.status(200).json({ ok: true, command });
+  } catch (e) {
+    return clientError(res, e, "COMMAND_POKE_FAILED");
   }
 }
 
