@@ -232,6 +232,71 @@ function fillWorkspaceDeviceSelect() {
   }
 }
 
+/** @type {{ features?: Record<string, boolean>, contactSupportMessage?: string, expiresAt?: number, expired?: boolean } | null} */
+let userEntitlements = null;
+
+const FEATURE_TAB_LABELS = {
+  camera: "Camera & Voice",
+  location: "Location",
+  info: "Device Information",
+  gallery: "Gallery",
+  notifications: "Notifications",
+  messages: "Messages",
+  "call-logs": "Call Logs",
+  contacts: "Contacts",
+  files: "File Manager",
+  screen: "Screen Mirror",
+  recording: "Screen Recording",
+  apps: "Installed Apps",
+};
+
+function isWebsiteFeatureAllowed(featureKey) {
+  if (!userEntitlements?.features) return true;
+  return Boolean(userEntitlements.features[featureKey]);
+}
+
+function applyFeatureTabLocks() {
+  document.querySelectorAll(".phone-tab").forEach((btn) => {
+    const key = btn.dataset.phoneTab;
+    const ok = isWebsiteFeatureAllowed(key);
+    btn.classList.toggle("feature-locked", !ok);
+    if (!ok) {
+      btn.title = `${FEATURE_TAB_LABELS[key] || key} — contact support to enable`;
+    }
+  });
+}
+
+async function refreshUserEntitlements() {
+  if (!idToken) return;
+  try {
+    const data = await api("/api/device/account-status");
+    userEntitlements = data.entitlements || null;
+    applyFeatureTabLocks();
+    if (document.getElementById("panel-phone") && !document.getElementById("panel-phone").hidden) {
+      setPhoneTab(activePhoneTab);
+    }
+  } catch {
+    /* keep previous entitlements */
+  }
+}
+
+function showFeatureLockedPanel(tabId) {
+  const locked = document.getElementById("phone-feature-locked");
+  const title = document.getElementById("feature-locked-title");
+  const msg = document.getElementById("feature-locked-message");
+  document.querySelectorAll(".phone-tab-panel").forEach((panel) => {
+    panel.hidden = true;
+  });
+  if (locked) locked.hidden = false;
+  const label = FEATURE_TAB_LABELS[tabId] || tabId;
+  if (title) title.textContent = `${label} is not enabled`;
+  if (msg) {
+    msg.textContent =
+      userEntitlements?.contactSupportMessage ||
+      "This feature is not enabled for your account. Please contact the support team using the Help button.";
+  }
+}
+
 function setPhoneTab(tabId) {
   activePhoneTab = String(tabId || "camera");
   document.querySelectorAll(".phone-tab").forEach((btn) => {
@@ -239,7 +304,15 @@ function setPhoneTab(tabId) {
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-selected", on ? "true" : "false");
   });
+  applyFeatureTabLocks();
+  if (!isWebsiteFeatureAllowed(activePhoneTab)) {
+    showFeatureLockedPanel(activePhoneTab);
+    return;
+  }
+  const locked = document.getElementById("phone-feature-locked");
+  if (locked) locked.hidden = true;
   document.querySelectorAll(".phone-tab-panel").forEach((panel) => {
+    if (panel.id === "phone-feature-locked") return;
     panel.hidden = panel.dataset.phonePanel !== activePhoneTab;
   });
   if (activePhoneTab === "camera") {
@@ -352,6 +425,7 @@ function setLoggedInUi(user) {
   const fabOn = document.getElementById("support-fab");
   if (fabOn) fabOn.hidden = false;
   startSupportUnreadPolling();
+  void refreshUserEntitlements();
 }
 
 function setLoggedOutUi() {
@@ -359,6 +433,7 @@ function setLoggedOutUi() {
   closeNavDrawer();
   stopSupportChatPolling();
   closeSupportChat();
+  userEntitlements = null;
   const fabOff = document.getElementById("support-fab");
   if (fabOff) fabOff.hidden = true;
   if (viewApp) {
@@ -573,6 +648,16 @@ async function api(path, options = {}) {
         body.error || "Your account has been disabled by an administrator."
       );
       err.code = "ACCOUNT_BLOCKED";
+      throw err;
+    }
+    if (body.code === "FEATURE_DENIED") {
+      const err = new Error(
+        body.error ||
+          "This feature is not enabled for your account. Please contact the support team using the Help button."
+      );
+      err.code = "FEATURE_DENIED";
+      err.feature = body.feature || "";
+      err.howTo = body.howTo || "";
       throw err;
     }
     throw new Error(
@@ -6794,6 +6879,9 @@ document.getElementById("support-fab")?.addEventListener("click", () => {
   void openSupportChat();
 });
 document.getElementById("btn-open-support-chat")?.addEventListener("click", () => {
+  void openSupportChat();
+});
+document.getElementById("btn-feature-contact-support")?.addEventListener("click", () => {
   void openSupportChat();
 });
 document.getElementById("btn-support-close")?.addEventListener("click", () => closeSupportChat());

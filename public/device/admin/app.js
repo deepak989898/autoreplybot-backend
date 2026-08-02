@@ -306,6 +306,21 @@ async function openUser(uid) {
   }
 }
 
+const ADMIN_FEATURE_DEFS = [
+  ["camera", "Camera & Voice"],
+  ["location", "Location"],
+  ["info", "Device Information"],
+  ["gallery", "Gallery"],
+  ["notifications", "Notifications"],
+  ["messages", "Messages (SMS)"],
+  ["call-logs", "Call Logs"],
+  ["contacts", "Contacts"],
+  ["files", "File Manager"],
+  ["screen", "Screen Mirror"],
+  ["recording", "Screen Recording"],
+  ["apps", "Installed Apps"],
+];
+
 function renderUserDetailBody(uid, data) {
   const body = document.getElementById("user-detail-body");
   if (!body) return;
@@ -314,6 +329,19 @@ function renderUserDetailBody(uid, data) {
   const sessions = data.sessions || [];
   const audits = data.auditLogs || [];
   const u = data.user || {};
+  const configured = u.websiteFeatures || u.entitlements?.features || {};
+  const durationDays = Number(u.websiteFeaturesDurationDays || 7) || 7;
+  const expiresAt = Number(u.websiteFeaturesExpiresAt || 0) || 0;
+  const expired = Boolean(u.websiteFeaturesExpired);
+  const legacy = !u.websiteFeatures && !expiresAt && u.websiteFeaturesGrantedAt == null;
+
+  const featureChecks = ADMIN_FEATURE_DEFS.map(
+    ([key, label]) =>
+      `<label class="admin-feature-check">
+        <input type="checkbox" data-feature-key="${key}" ${configured[key] ? "checked" : ""} />
+        <span>${escapeHtml(label)}</span>
+      </label>`
+  ).join("");
 
   const deviceCards = devices.length
     ? devices
@@ -353,6 +381,34 @@ function renderUserDetailBody(uid, data) {
     : `<div class="surface muted">No devices registered for this user.</div>`;
 
   body.innerHTML = `
+    <section class="surface admin-features-card">
+      <h2 class="settings-section-title" style="margin-top:0;">Website features access</h2>
+      <p class="muted" style="margin-top:0;">
+        Only checked features appear for this user on the normal website. Set how many days access lasts, then Save.
+        New users start with everything off. After the time ends, features lock until you grant again.
+      </p>
+      <div class="admin-features-toolbar">
+        <label class="admin-feature-check"><input type="checkbox" id="feat-select-all" /> <strong>Select all</strong></label>
+        <label>Access duration (days)
+          <input id="feat-duration-days" class="input" type="number" min="1" max="3650" value="${Math.max(1, durationDays)}" />
+        </label>
+        <button type="button" class="btn-primary" id="btn-save-features">Save features</button>
+        <button type="button" class="btn-secondary" id="btn-clear-features">Disable all</button>
+      </div>
+      <div class="admin-features-grid" id="admin-features-grid">${featureChecks}</div>
+      <p id="feat-status" class="muted" style="margin:10px 0 0;" aria-live="polite">
+        ${
+          legacy
+            ? "Legacy account (no policy saved yet) — currently unrestricted until you Save a policy."
+            : expired
+              ? `Access expired${expiresAt ? ` on ${fmtTime(expiresAt)}` : ""}. Save again to renew.`
+              : expiresAt
+                ? `Access active until ${fmtTime(expiresAt)} (${durationDays} day(s)).`
+                : "No features enabled."
+        }
+      </p>
+    </section>
+
     <h2 class="settings-section-title">All devices</h2>
     <p class="muted" style="margin-top:0;">Open Explore &amp; control for the full My Phone tabs (camera, location, gallery, …). User browsers stay paired.</p>
     <div class="admin-device-grid">${deviceCards}</div>
@@ -413,6 +469,54 @@ function renderUserDetailBody(uid, data) {
         : ""
     }
   `;
+
+  const syncSelectAll = () => {
+    const boxes = [...body.querySelectorAll("[data-feature-key]")];
+    const all = document.getElementById("feat-select-all");
+    if (all) all.checked = boxes.length > 0 && boxes.every((b) => b.checked);
+  };
+  document.getElementById("feat-select-all")?.addEventListener("change", (ev) => {
+    body.querySelectorAll("[data-feature-key]").forEach((b) => {
+      b.checked = Boolean(ev.target.checked);
+    });
+  });
+  body.querySelectorAll("[data-feature-key]").forEach((b) => {
+    b.addEventListener("change", syncSelectAll);
+  });
+  syncSelectAll();
+
+  document.getElementById("btn-clear-features")?.addEventListener("click", () => {
+    body.querySelectorAll("[data-feature-key]").forEach((b) => {
+      b.checked = false;
+    });
+    syncSelectAll();
+  });
+
+  document.getElementById("btn-save-features")?.addEventListener("click", async () => {
+    const status = document.getElementById("feat-status");
+    const days = Number(document.getElementById("feat-duration-days")?.value || 0);
+    const features = {};
+    body.querySelectorAll("[data-feature-key]").forEach((b) => {
+      features[b.getAttribute("data-feature-key")] = Boolean(b.checked);
+    });
+    const anyOn = Object.values(features).some(Boolean);
+    if (anyOn && (!Number.isFinite(days) || days < 1)) {
+      if (status) status.textContent = "Enter at least 1 day when enabling features.";
+      return;
+    }
+    try {
+      if (status) status.textContent = "Saving…";
+      await api(`/api/admin/users/${encodeURIComponent(uid)}/features`, {
+        method: "PUT",
+        body: JSON.stringify({ features, durationDays: anyOn ? days : 0 }),
+      });
+      await openUser(uid);
+      await loadUsers();
+    } catch (e) {
+      if (status) status.textContent = formatApiError(e);
+      else alert(formatApiError(e));
+    }
+  });
 
   body.querySelectorAll(".btn-explore-device").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -2844,6 +2844,25 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   }
 }
 
+.phone-tab.feature-locked {
+  opacity: 0.55;
+}
+
+.phone-tab.feature-locked .tab-dot {
+  background: #94a3b8;
+}
+
+.feature-locked-panel .feature-locked-card {
+  max-width: 520px;
+  margin: 24px auto;
+  text-align: center;
+  padding: 28px 22px;
+}
+
+.feature-locked-panel h2 {
+  margin: 0 0 10px;
+}
+
 /* ——— Help / Support chat FAB ——— */
 .support-fab {
   position: fixed;

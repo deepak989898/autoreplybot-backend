@@ -8,8 +8,16 @@ import {
   sanitizePlatformUser,
   setUserBlocked,
   syncUsersFromAuth,
+  writeAdminAudit,
   COL_PLATFORM_USERS,
 } from "../lib/platform-admin.js";
+import {
+  FEATURE_KEYS,
+  FEATURE_LABELS,
+  entitlementsPublicView,
+  loadUserEntitlements,
+  setUserWebsiteFeatures,
+} from "../lib/feature-entitlements.js";
 import {
   createOwnerImpersonationToken,
   downloadAdminTransferContent,
@@ -72,6 +80,10 @@ export default async function handler(req, res) {
   const userBlock = path.match(/^users\/([^/]+)\/(block|unblock)$/i);
   if (userBlock) {
     return handleUserBlock(req, res, decodeURIComponent(userBlock[1]), userBlock[2].toLowerCase());
+  }
+  const userFeatures = path.match(/^users\/([^/]+)\/features$/i);
+  if (userFeatures) {
+    return handleUserFeatures(req, res, decodeURIComponent(userFeatures[1]));
   }
 
   const galleryTransfer = path.match(
@@ -447,6 +459,50 @@ async function handleUserDetail(req, res, uid) {
   } catch (e) {
     return adminError(res, e, "ADMIN_USER_DETAIL_FAILED");
   }
+}
+
+async function handleUserFeatures(req, res, uid) {
+  if (req.method === "GET") {
+    try {
+      await requirePlatformAdmin(req);
+      const ent = await loadUserEntitlements(uid);
+      return res.status(200).json({
+        ok: true,
+        uid,
+        keys: FEATURE_KEYS,
+        labels: FEATURE_LABELS,
+        entitlements: entitlementsPublicView(ent),
+        configuredFeatures: ent.configuredFeatures,
+      });
+    } catch (e) {
+      return adminError(res, e, "ADMIN_FEATURES_GET_FAILED");
+    }
+  }
+  if (req.method === "PUT" || req.method === "POST") {
+    try {
+      const admin = await requirePlatformAdmin(req);
+      const body = parseBody(req.body);
+      const result = await setUserWebsiteFeatures(
+        uid,
+        { features: body.features, durationDays: body.durationDays },
+        admin
+      );
+      if (result._audit) {
+        await writeAdminAudit(result._audit);
+        delete result._audit;
+      }
+      const snap = await db().collection(COL_PLATFORM_USERS).doc(uid).get();
+      return res.status(200).json({
+        ok: true,
+        entitlements: entitlementsPublicView(result),
+        user: sanitizePlatformUser(uid, snap.data() || { uid }),
+      });
+    } catch (e) {
+      return adminError(res, e, "ADMIN_FEATURES_SET_FAILED");
+    }
+  }
+  res.setHeader("Allow", "GET, PUT, POST");
+  return res.status(405).json({ error: "Method not allowed" });
 }
 
 async function handleUserBlock(req, res, uid, op) {

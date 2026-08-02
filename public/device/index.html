@@ -245,6 +245,18 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps" title="Installed Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
           </div>
 
+          <div id="phone-feature-locked" class="phone-tab-panel feature-locked-panel" hidden>
+            <div class="surface feature-locked-card">
+              <h2 id="feature-locked-title">Feature not available</h2>
+              <p id="feature-locked-message" class="page-sub">
+                This feature is not enabled for your account. Please contact the support team using the Help button.
+              </p>
+              <div class="page-actions" style="margin-top:14px;">
+                <button type="button" class="btn-primary" id="btn-feature-contact-support">Contact support team</button>
+              </div>
+            </div>
+          </div>
+
           <div id="phone-tab-camera" class="phone-tab-panel" data-phone-panel="camera">
             <p class="page-sub tab-intro">Connect sends a request — approve on the phone to start live view.</p>
             <div id="device-list" class="device-list muted">Select a device above.</div>
@@ -772,6 +784,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=21"></script>
+  <script type="module" src="/device/app.js?v=22"></script>
 </body>
 </html>

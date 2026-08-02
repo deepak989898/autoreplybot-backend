@@ -412,6 +412,36 @@
   }
 }
 
+.admin-features-card {
+  margin-bottom: 18px;
+}
+
+.admin-features-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 12px 0;
+}
+
+.admin-features-toolbar .input {
+  width: 110px;
+}
+
+.admin-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 12px;
+}
+
+.admin-feature-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
 /* ——— Support chat tab ——— */
 .support-tab-badge {
   display: inline-grid;

@@ -33,6 +33,14 @@ import {
   sendMessage,
   uploadSupportMediaDirect,
 } from "../lib/support-chat.js";
+import {
+  assertWebsiteFeature,
+  entitlementsPublicView,
+  featureKeyForDevicePath,
+  featureKeyForModuleAction,
+  featureKeysForSessionCapabilities,
+  loadUserEntitlements,
+} from "../lib/feature-entitlements.js";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
 const SIGNATURE_SKEW_MS = 2 * 60 * 1000;
@@ -60,6 +68,17 @@ export default async function handler(req, res) {
     if (m) path = decodeURIComponent(m[1]).replace(/\/+$/, "");
   }
   path = path.replace(/^\/+/, "").replace(/\/+$/, "");
+
+  // Gate My Phone feature APIs (admin panel is separate and unrestricted).
+  const featureKey = featureKeyForDevicePath(path);
+  if (featureKey && featureKey !== "__session__" && featureKey !== "__command__") {
+    try {
+      const uid = await requireAuthed(req);
+      await assertWebsiteFeature(uid, featureKey);
+    } catch (e) {
+      return clientError(res, e, "FEATURE_DENIED");
+    }
+  }
 
   if (path === "account-status") return handleAccountStatus(req, res);
   if (path === "list") return handleList(req, res);
@@ -221,11 +240,13 @@ async function handleAccountStatus(req, res) {
   try {
     const uid = await requireAuthed(req);
     void touchPlatformUserFromAuth(uid, req._platformEmail, req._platformName);
+    const ent = await loadUserEntitlements(uid);
     return res.status(200).json({
       ok: true,
       blocked: false,
       uid,
       email: req._platformEmail || "",
+      entitlements: entitlementsPublicView(ent),
     });
   } catch (e) {
     return clientError(res, e, "ACCOUNT_STATUS_FAILED");
@@ -391,6 +412,9 @@ async function handleSessionRequest(req, res) {
         error: "Select camera, microphone, and/or screen mirror",
         code: "BAD_CAPABILITIES",
       });
+    }
+    for (const fk of featureKeysForSessionCapabilities(capabilities)) {
+      await assertWebsiteFeature(uid, fk);
     }
 
     const deviceSnap = await db()
@@ -930,15 +954,19 @@ function clientError(res, e, fallback) {
   const code = e?.code || fallback || "FAILED";
   let status = 400;
   if (code === "AUTH_FAILED" || msg.includes("Authorization")) status = 401;
-  else if (
+  else   if (
     code === "CAPABILITY_DENIED" ||
     code === "CLIENT_REVOKED" ||
     code === "ACCOUNT_BLOCKED" ||
-    code === "ADMIN_FORBIDDEN"
+    code === "ADMIN_FORBIDDEN" ||
+    code === "FEATURE_DENIED"
   ) {
     status = 403;
   } else if (code === "DEVICE_NOT_FOUND" || code === "CLIENT_NOT_FOUND") status = 404;
-  return res.status(status).json({ error: msg, code });
+  const body = { error: msg, code };
+  if (e?.howTo) body.howTo = String(e.howTo);
+  if (e?.feature) body.feature = String(e.feature);
+  return res.status(status).json(body);
 }
 
 async function handleSummary(req, res) {
@@ -2606,11 +2634,14 @@ async function handleModuleCommand(req, res) {
   try {
     const uid = await requireAuthed(req);
     const body = parseBody(req.body);
+    const action = String(body.action || "").trim().toUpperCase();
+    const feature = featureKeyForModuleAction(action);
+    if (feature) await assertWebsiteFeature(uid, feature);
     const cmd = await createModuleCommand(
       uid,
       String(body.deviceId || "").trim(),
       String(body.clientId || "").trim(),
-      String(body.action || "").trim().toUpperCase(),
+      action,
       body.payload || {},
       body.idempotencyKey
     );
