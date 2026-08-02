@@ -2970,6 +2970,29 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   background: #0b0d14;
 }
 
+.support-msg-media-btn {
+  display: block;
+  position: relative;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  max-width: 100%;
+  text-align: left;
+}
+
+.support-msg-media-btn .support-msg-media {
+  margin-top: 0;
+}
+
+.support-zoom-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
 .support-chat-compose {
   padding: 12px 14px 14px;
   border-top: 1px solid var(--line);

@@ -31,6 +31,7 @@ import {
   listMessages,
   markRead,
   sendMessage,
+  uploadSupportMediaDirect,
 } from "../lib/support-chat.js";
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
@@ -111,6 +112,7 @@ export default async function handler(req, res) {
 
   if (path === "support/thread") return handleSupportThread(req, res);
   if (path === "support/messages") return handleSupportMessages(req, res);
+  if (path === "support/upload") return handleSupportUpload(req, res);
   if (path === "support/upload-url") return handleSupportUploadUrl(req, res);
   if (path === "support/messages/media") return handleSupportMediaMessage(req, res);
   if (path === "support/read") return handleSupportRead(req, res);
@@ -2896,6 +2898,30 @@ async function handleSupportUploadUrl(req, res) {
     return res.status(200).json({ ok: true, ...slot });
   } catch (e) {
     return clientError(res, e, "SUPPORT_UPLOAD_URL_FAILED");
+  }
+}
+
+async function handleSupportUpload(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const message = await uploadSupportMediaDirect({
+      uid,
+      contentType: body.contentType,
+      fileName: body.fileName,
+      dataBase64: body.dataBase64 || body.data || "",
+      text: body.text || "",
+      senderRole: "user",
+      senderUid: uid,
+      senderEmail: req._platformEmail || "",
+    });
+    return res.status(200).json({ ok: true, message });
+  } catch (e) {
+    return clientError(res, e, "SUPPORT_UPLOAD_FAILED");
   }
 }
 

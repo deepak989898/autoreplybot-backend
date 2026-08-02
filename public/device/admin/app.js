@@ -1686,6 +1686,70 @@ function renderSupportChatList() {
   });
 }
 
+function openAdminSupportImage(url, fileName) {
+  const viewer = document.getElementById("admin-media-viewer");
+  const body = document.getElementById("admin-media-body");
+  const title = document.getElementById("admin-media-title");
+  const status = document.getElementById("admin-media-status");
+  show(viewer, true);
+  if (title) title.textContent = fileName || "Support image";
+  if (status) status.textContent = "Scroll / pinch to zoom · drag to pan";
+  if (!body) return;
+  body.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "admin-support-zoom-wrap";
+  const img = document.createElement("img");
+  img.src = url;
+  img.alt = fileName || "image";
+  img.className = "admin-support-zoom-img";
+  img.draggable = false;
+  wrap.appendChild(img);
+  body.appendChild(wrap);
+  let scale = 1;
+  let x = 0;
+  let y = 0;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  const apply = () => {
+    img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  };
+  wrap.addEventListener(
+    "wheel",
+    (ev) => {
+      ev.preventDefault();
+      scale = Math.min(6, Math.max(1, scale + (ev.deltaY < 0 ? 0.2 : -0.2)));
+      if (scale === 1) {
+        x = 0;
+        y = 0;
+      }
+      apply();
+    },
+    { passive: false }
+  );
+  img.addEventListener("pointerdown", (ev) => {
+    if (scale <= 1) return;
+    dragging = true;
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    img.setPointerCapture?.(ev.pointerId);
+  });
+  img.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    x += ev.clientX - lastX;
+    y += ev.clientY - lastY;
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    apply();
+  });
+  const end = () => {
+    dragging = false;
+  };
+  img.addEventListener("pointerup", end);
+  img.addEventListener("pointercancel", end);
+  apply();
+}
+
 function renderAdminSupportMessages() {
   const box = document.getElementById("support-thread-messages");
   if (!box) return;
@@ -1701,17 +1765,30 @@ function renderAdminSupportMessages() {
       const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
       const media = (m.attachments || [])
         .map((a) => {
-          if (!a?.url) return "";
+          if (!a?.url) {
+            return `<div class="muted" style="font-size:0.8rem;">[Attachment unavailable]</div>`;
+          }
           if (a.type === "video") {
             return `<video src="${escapeHtml(a.url)}" controls playsinline></video>`;
           }
-          return `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener"><img src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" /></a>`;
+          return `<button type="button" class="admin-support-img-btn" data-admin-support-img="${escapeHtml(a.url)}" data-admin-support-name="${escapeHtml(a.fileName || "image")}" title="Tap to zoom">
+            <img src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" />
+            <span class="admin-support-zoom-hint">Tap to zoom</span>
+          </button>`;
         })
         .join("");
       const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
       return `<div class="admin-support-msg ${isAdmin ? "admin" : "user"}">${text}${media}<span class="meta">${escapeHtml(who)} · ${escapeHtml(time)}</span></div>`;
     })
     .join("");
+  box.querySelectorAll("[data-admin-support-img]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openAdminSupportImage(
+        btn.getAttribute("data-admin-support-img") || "",
+        btn.getAttribute("data-admin-support-name") || "image"
+      );
+    });
+  });
   if (nearBottom || supportThreadMessages.length < 4) box.scrollTop = box.scrollHeight;
 }
 
@@ -1805,29 +1882,68 @@ function clearAdminSupportAttach() {
   }
 }
 
-async function uploadAdminSupportMedia(uid, file, text) {
-  const slot = await api(`/api/admin/support/chats/${encodeURIComponent(uid)}/upload-url`, {
-    method: "POST",
-    body: JSON.stringify({
-      contentType: file.type,
+async function adminFileToBase64(file) {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function prepareAdminSupportUploadFile(file) {
+  const maxBytes = 2.8 * 1024 * 1024;
+  if (!file.type.startsWith("image/") || file.size <= maxBytes) {
+    return {
+      contentType: file.type || "application/octet-stream",
       fileName: file.name,
+      dataBase64: await adminFileToBase64(file),
       sizeBytes: file.size,
-    }),
+    };
+  }
+  const bitmap = await createImageBitmap(file);
+  const maxDim = 1920;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.max(1, Math.round(w * scale));
+  h = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  let quality = 0.85;
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  while (blob && blob.size > maxBytes && quality > 0.45) {
+    quality -= 0.1;
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  }
+  if (!blob) throw new Error("Could not compress image");
+  const compressed = new File([blob], (file.name || "image").replace(/\.\w+$/, "") + ".jpg", {
+    type: "image/jpeg",
   });
-  const put = await fetch(slot.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": file.type },
-    body: file,
-  });
-  if (!put.ok) throw new Error(`Upload failed (${put.status})`);
-  const result = await api(`/api/admin/support/chats/${encodeURIComponent(uid)}/messages/media`, {
+  return {
+    contentType: "image/jpeg",
+    fileName: compressed.name,
+    dataBase64: await adminFileToBase64(compressed),
+    sizeBytes: compressed.size,
+  };
+}
+
+async function uploadAdminSupportMedia(uid, file, text) {
+  const prepared = await prepareAdminSupportUploadFile(file);
+  if (prepared.sizeBytes > 3 * 1024 * 1024) {
+    throw new Error("File is still too large after compression (max ~3MB). Try a smaller image.");
+  }
+  const result = await api(`/api/admin/support/chats/${encodeURIComponent(uid)}/upload`, {
     method: "POST",
     body: JSON.stringify({
-      messageId: slot.messageId,
-      storagePath: slot.storagePath,
-      contentType: slot.contentType,
-      sizeBytes: slot.sizeBytes,
-      fileName: slot.fileName,
+      contentType: prepared.contentType,
+      fileName: prepared.fileName,
+      dataBase64: prepared.dataBase64,
       text: text || "",
     }),
   });

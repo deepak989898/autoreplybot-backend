@@ -37,6 +37,7 @@ import {
   listThreadsForAdmin,
   markRead,
   sendMessage,
+  uploadSupportMediaDirect,
 } from "../lib/support-chat.js";
 
 /**
@@ -201,6 +202,10 @@ export default async function handler(req, res) {
   const supportChatRead = path.match(/^support\/chats\/([^/]+)\/read$/i);
   if (supportChatRead) {
     return handleAdminSupportRead(req, res, decodeURIComponent(supportChatRead[1]));
+  }
+  const supportChatUploadDirect = path.match(/^support\/chats\/([^/]+)\/upload$/i);
+  if (supportChatUploadDirect) {
+    return handleAdminSupportUpload(req, res, decodeURIComponent(supportChatUploadDirect[1]));
   }
   const supportChatUpload = path.match(/^support\/chats\/([^/]+)\/upload-url$/i);
   if (supportChatUpload) {
@@ -808,6 +813,30 @@ async function handleAdminSupportUploadUrl(req, res, uid) {
     return res.status(200).json({ ok: true, ...slot });
   } catch (e) {
     return adminError(res, e, "ADMIN_SUPPORT_UPLOAD_URL_FAILED");
+  }
+}
+
+async function handleAdminSupportUpload(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const message = await uploadSupportMediaDirect({
+      uid,
+      contentType: body.contentType,
+      fileName: body.fileName,
+      dataBase64: body.dataBase64 || body.data || "",
+      text: body.text || "",
+      senderRole: "admin",
+      senderUid: admin.uid,
+      senderEmail: admin.email,
+    });
+    return res.status(200).json({ ok: true, message });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_UPLOAD_FAILED");
   }
 }
 

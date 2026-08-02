@@ -6502,6 +6502,16 @@ function updateSupportFabBadge(n) {
   badge.textContent = count > 99 ? "99+" : String(count);
 }
 
+function openSupportImageViewer(url, fileName) {
+  openMediaViewer({
+    kind: "image",
+    contentType: "image/*",
+    downloadUrl: url,
+    fileName: fileName || "image",
+    displayName: fileName || "Support chat image",
+  });
+}
+
 function renderSupportMessages() {
   const box = document.getElementById("support-chat-messages");
   if (!box) return;
@@ -6516,18 +6526,31 @@ function renderSupportMessages() {
       const who = mine ? "You" : "Admin";
       const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
       const media = (m.attachments || [])
-        .map((a) => {
-          if (!a?.url) return "";
+        .map((a, idx) => {
+          if (!a?.url) {
+            return `<div class="muted" style="font-size:0.8rem;">[Attachment unavailable]</div>`;
+          }
           if (a.type === "video") {
             return `<video class="support-msg-media" src="${escapeHtml(a.url)}" controls playsinline></video>`;
           }
-          return `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener"><img class="support-msg-media" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" /></a>`;
+          return `<button type="button" class="support-msg-media-btn" data-support-img="${escapeHtml(a.url)}" data-support-name="${escapeHtml(a.fileName || "image")}" title="Tap to zoom">
+            <img class="support-msg-media" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" />
+            <span class="support-zoom-hint">Tap to zoom</span>
+          </button>`;
         })
         .join("");
       const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
       return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(who)} · ${escapeHtml(time)}</span></div>`;
     })
     .join("");
+  box.querySelectorAll("[data-support-img]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openSupportImageViewer(
+        btn.getAttribute("data-support-img") || "",
+        btn.getAttribute("data-support-name") || "image"
+      );
+    });
+  });
   if (nearBottom || supportMessages.length < 3) {
     box.scrollTop = box.scrollHeight;
   }
@@ -6596,31 +6619,71 @@ function setSupportAttachPreview(file) {
   prev.textContent = `Attached: ${file.name} (${mb} MB) — will send with your next message.`;
 }
 
-async function uploadSupportMedia(file, text) {
-  const slot = await api("/api/device/support/upload-url", {
-    method: "POST",
-    body: JSON.stringify({
-      contentType: file.type,
-      fileName: file.name,
-      sizeBytes: file.size,
-    }),
-  });
-  const put = await fetch(slot.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": file.type },
-    body: file,
-  });
-  if (!put.ok) {
-    throw new Error(`Upload failed (${put.status})`);
+async function fileToBase64(file) {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-  const result = await api("/api/device/support/messages/media", {
+  return btoa(binary);
+}
+
+/** Compress large images so they fit the API upload limit (~3MB). */
+async function prepareSupportUploadFile(file) {
+  const maxBytes = 2.8 * 1024 * 1024;
+  if (!file.type.startsWith("image/") || file.size <= maxBytes) {
+    return {
+      contentType: file.type || "application/octet-stream",
+      fileName: file.name,
+      dataBase64: await fileToBase64(file),
+      sizeBytes: file.size,
+    };
+  }
+  const bitmap = await createImageBitmap(file);
+  const maxDim = 1920;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.max(1, Math.round(w * scale));
+  h = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  let quality = 0.85;
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  while (blob && blob.size > maxBytes && quality > 0.45) {
+    quality -= 0.1;
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  }
+  if (!blob) throw new Error("Could not compress image");
+  const compressed = new File([blob], (file.name || "image").replace(/\.\w+$/, "") + ".jpg", {
+    type: "image/jpeg",
+  });
+  return {
+    contentType: "image/jpeg",
+    fileName: compressed.name,
+    dataBase64: await fileToBase64(compressed),
+    sizeBytes: compressed.size,
+  };
+}
+
+async function uploadSupportMedia(file, text) {
+  // Direct API upload (Admin SDK) — avoids browser CORS failures on GCS signed PUT.
+  const prepared = await prepareSupportUploadFile(file);
+  if (prepared.sizeBytes > 3 * 1024 * 1024) {
+    throw new Error("File is still too large after compression (max ~3MB). Try a smaller image.");
+  }
+  const result = await api("/api/device/support/upload", {
     method: "POST",
     body: JSON.stringify({
-      messageId: slot.messageId,
-      storagePath: slot.storagePath,
-      contentType: slot.contentType,
-      sizeBytes: slot.sizeBytes,
-      fileName: slot.fileName,
+      contentType: prepared.contentType,
+      fileName: prepared.fileName,
+      dataBase64: prepared.dataBase64,
       text: text || "",
     }),
   });
