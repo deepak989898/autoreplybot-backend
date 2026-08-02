@@ -263,12 +263,77 @@
   word-break: break-word;
 }
 
-.admin-live-video {
+.admin-live-video,
+.admin-live-video.live-video {
   width: 100%;
-  max-height: 420px;
+  min-height: min(52vh, 520px);
+  max-height: min(82vh, 920px);
+  height: min(72vh, 820px);
+  aspect-ratio: auto;
   background: #0b0d14;
   border-radius: 12px;
   margin-top: 10px;
+  object-fit: contain;
+  display: block;
+}
+
+.admin-screen-stage {
+  position: relative;
+  margin-top: 12px;
+  min-height: min(70vh, 720px);
+  padding: 8px;
+  background: #0f1218;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.admin-screen-stage .admin-live-video,
+#admin-screen-video {
+  margin-top: 0;
+  min-height: min(68vh, 700px);
+  max-height: min(88vh, 980px);
+  height: min(80vh, 900px);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.admin-rc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.admin-rc-toolbar .input {
+  max-width: 140px;
+}
+
+.admin-rc-text-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.admin-rc-text-panel .row-gap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#admin-rc-touch-marker {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(91, 92, 226, 0.55);
+  pointer-events: none;
+  z-index: 3;
+  box-shadow: 0 0 0 3px rgba(91, 92, 226, 0.35);
 }
 
 #device-control-view .phone-tabs {

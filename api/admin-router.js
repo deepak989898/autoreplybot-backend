@@ -21,6 +21,7 @@ import {
   sendAdminLiveCommand,
   startAdminGalleryTransfer,
   startAdminLiveSession,
+  waitAdminModuleCommand,
 } from "../lib/admin-device-control.js";
 import { db } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
@@ -487,6 +488,22 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
       return res.status(400).json({ error: "action required", code: "BAD_REQUEST" });
     }
     const cmd = await runAdminModuleCommand(uid, deviceId, action, body.payload || {}, admin);
+    if (body.wait || body.waitForResult) {
+      const result = await waitAdminModuleCommand(
+        uid,
+        deviceId,
+        cmd.commandId,
+        body.waitMs || 20000
+      );
+      if (result.status === "failed") {
+        return res.status(400).json({
+          error: result.errorMessage || result.errorCode || "Command failed",
+          code: result.errorCode || "COMMAND_FAILED",
+          command: result,
+        });
+      }
+      return res.status(200).json({ ok: true, command: result });
+    }
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return adminError(res, e, "ADMIN_DEVICE_COMMAND_FAILED");
