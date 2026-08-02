@@ -84,6 +84,19 @@ function fmtTime(ms) {
   }
 }
 
+/** Newest first. `fields` are tried in order (first non-zero wins per item). */
+function sortNewestFirst(items, ...fields) {
+  const keys = fields.length ? fields : ["createdAt"];
+  const ts = (row) => {
+    for (const f of keys) {
+      const n = Number(row?.[f] || 0);
+      if (n) return n;
+    }
+    return 0;
+  };
+  return [...(items || [])].sort((a, b) => ts(b) - ts(a));
+}
+
 function escapeHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -944,7 +957,7 @@ function renderGalleryPanel() {
     { once: true }
   );
 
-  let items = exploreCtx.data.gallery || [];
+  let items = sortNewestFirst(exploreCtx.data.gallery || [], "dateAdded", "createdAt");
   if (adminGalleryFilter !== "all") {
     items = items.filter((g) => String(g.type || "").toLowerCase() === adminGalleryFilter);
   }
@@ -1001,7 +1014,7 @@ function renderNotificationsPanel() {
     },
     { once: true }
   );
-  const items = exploreCtx.data.notifications || [];
+  const items = sortNewestFirst(exploreCtx.data.notifications || [], "postedAt", "createdAt");
   if (!items.length) {
     el.innerHTML = emptyHint(
       "No notifications cached.\n\nOn the phone: Permissions → Notification access ON, then Sync from phone here."
@@ -1228,7 +1241,7 @@ async function openAdminRecording(transferId, displayName) {
 function renderMessagesPanel() {
   const el = document.getElementById("admin-messages-body");
   if (!el || !exploreCtx) return;
-  const items = exploreCtx.data.messages || [];
+  const items = sortNewestFirst(exploreCtx.data.messages || [], "date", "createdAt");
   if (!items.length) {
     el.innerHTML = emptyHint("No messages cached. Tap Sync from phone.");
     return;
@@ -1250,7 +1263,7 @@ function renderMessagesPanel() {
 function renderCallLogsPanel() {
   const el = document.getElementById("admin-call-logs-body");
   if (!el || !exploreCtx) return;
-  const items = exploreCtx.data.callLogs || [];
+  const items = sortNewestFirst(exploreCtx.data.callLogs || [], "date", "createdAt");
   if (!items.length) {
     el.innerHTML = emptyHint("No call logs cached. Tap Sync from phone.");
     return;
