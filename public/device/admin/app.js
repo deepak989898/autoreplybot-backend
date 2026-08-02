@@ -11,6 +11,8 @@ import { startAdminLiveViewer } from "./live.js?v=8";
 
 /** @type {string} */
 let adminGalleryFilter = "all";
+/** @type {Map<string, { objectUrl: string, mimeType: string, displayName: string, type: string }>} */
+const adminGalleryCache = new Map();
 
 /** Prevents auth-state logout from wiping an in-progress Sign in. */
 let loginInProgress = false;
@@ -1024,14 +1026,96 @@ function renderNotificationsPanel() {
     .join("")}</div>`;
 }
 
+function renderAdminMediaBody(body, { objectUrl, mimeType, displayName, type }) {
+  if (!body) return;
+  const name = displayName || "file";
+  const mime = String(mimeType || "");
+  const kind = String(type || "").toLowerCase();
+  const safeName = escapeHtml(name);
+  if (kind === "image" || mime.startsWith("image/")) {
+    body.innerHTML = `<div class="admin-support-zoom-wrap"><img class="admin-support-zoom-img" src="${objectUrl}" alt="${safeName}" draggable="false" /></div>
+      <p style="margin-top:10px;"><a class="btn-secondary" href="${objectUrl}" download="${safeName}">Download image</a>
+      <span class="muted" style="margin-left:8px;">Scroll to zoom · drag to pan</span></p>`;
+    const img = body.querySelector("img");
+    const wrap = body.querySelector(".admin-support-zoom-wrap");
+    if (img && wrap) bindAdminMediaZoom(wrap, img);
+  } else if (kind === "video" || mime.startsWith("video/")) {
+    body.innerHTML = `<video controls playsinline preload="metadata" style="width:100%;max-height:70vh;border-radius:12px;background:#0b0d14">
+        <source src="${objectUrl}" type="${escapeHtml(mime || "video/mp4")}" />
+      </video>
+      <p style="margin-top:10px;"><a class="btn-primary" href="${objectUrl}" download="${safeName}">Download video</a></p>`;
+  } else if (kind === "audio" || mime.startsWith("audio/")) {
+    body.innerHTML = `<audio controls preload="metadata" style="width:100%">
+        <source src="${objectUrl}" type="${escapeHtml(mime || "audio/mpeg")}" />
+      </audio>
+      <p class="muted" style="margin-top:8px;">If playback fails in-browser, use Download (some phone formats need a player app).</p>
+      <p style="margin-top:10px;"><a class="btn-primary" href="${objectUrl}" download="${safeName}">Download audio</a></p>`;
+  } else {
+    body.innerHTML = `<p class="muted">File ready.</p>
+      <p><a class="btn-primary" href="${objectUrl}" download="${safeName}">Download file</a></p>`;
+  }
+}
+
+function bindAdminMediaZoom(wrap, img) {
+  let scale = 1;
+  let x = 0;
+  let y = 0;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  const apply = () => {
+    img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  };
+  wrap.addEventListener(
+    "wheel",
+    (ev) => {
+      ev.preventDefault();
+      scale = Math.min(6, Math.max(1, scale + (ev.deltaY < 0 ? 0.2 : -0.2)));
+      if (scale === 1) {
+        x = 0;
+        y = 0;
+      }
+      apply();
+    },
+    { passive: false }
+  );
+  img.addEventListener("pointerdown", (ev) => {
+    if (scale <= 1) return;
+    dragging = true;
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    img.setPointerCapture?.(ev.pointerId);
+  });
+  img.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    x += ev.clientX - lastX;
+    y += ev.clientY - lastY;
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    apply();
+  });
+  const end = () => {
+    dragging = false;
+  };
+  img.addEventListener("pointerup", end);
+  img.addEventListener("pointercancel", end);
+}
+
 async function openAdminGalleryItem(item) {
   if (!exploreCtx || !item?.itemId) return;
   const viewer = document.getElementById("admin-media-viewer");
   const body = document.getElementById("admin-media-body");
   const title = document.getElementById("admin-media-title");
   const status = document.getElementById("admin-media-status");
+  const cacheKey = `${exploreCtx.ownerUid}:${exploreCtx.deviceId}:${item.itemId}`;
   show(viewer, true);
   if (title) title.textContent = item.displayName || item.itemId;
+  const cached = adminGalleryCache.get(cacheKey);
+  if (cached?.objectUrl) {
+    renderAdminMediaBody(body, cached);
+    if (status) status.textContent = "Loaded from cache.";
+    return;
+  }
   if (body) body.textContent = "Requesting file from phone…";
   if (status) status.textContent = "Starting transfer…";
   try {
@@ -1050,14 +1134,14 @@ async function openAdminGalleryItem(item) {
     const transferId = started.transfer?.transferId || started.transferId;
     if (!transferId) throw new Error("No transferId returned");
     if (status) status.textContent = "Waiting for phone upload…";
-    await pollAdminTransfer(exploreCtx.ownerUid, transferId, item, body, status);
+    await pollAdminTransfer(exploreCtx.ownerUid, transferId, item, body, status, cacheKey);
   } catch (e) {
     if (body) body.textContent = formatApiError(e);
     if (status) status.textContent = "";
   }
 }
 
-async function pollAdminTransfer(ownerUid, transferId, item, body, status) {
+async function pollAdminTransfer(ownerUid, transferId, item, body, status, cacheKey) {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     const data = await api(
@@ -1078,21 +1162,20 @@ async function pollAdminTransfer(ownerUid, transferId, item, body, status) {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
       if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
       const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      if (type === "image" || mime.startsWith("image/")) {
-        body.innerHTML = `<img src="${objectUrl}" alt="${escapeHtml(item.displayName || "")}" />
-          <p style="margin-top:10px;"><a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(item.displayName || "image")}">Download image</a></p>`;
-      } else if (type === "video" || mime.startsWith("video/")) {
-        body.innerHTML = `<video src="${objectUrl}" controls playsinline></video>
-          <p style="margin-top:10px;"><a class="btn-primary" href="${objectUrl}" download="${escapeHtml(item.displayName || "video")}">Download video</a></p>`;
-      } else if (type === "audio" || mime.startsWith("audio/")) {
-        body.innerHTML = `<audio src="${objectUrl}" controls></audio>
-          <p style="margin-top:10px;"><a class="btn-primary" href="${objectUrl}" download="${escapeHtml(item.displayName || "audio")}">Download audio</a></p>`;
-      } else {
-        body.innerHTML = `<p class="muted">File ready.</p>
-          <p><a class="btn-primary" href="${objectUrl}" download="${escapeHtml(item.displayName || "file")}">Download file</a></p>`;
-      }
-      if (status) status.textContent = "Loaded.";
+      const typed =
+        mime && (!blob.type || blob.type === "application/octet-stream")
+          ? new Blob([blob], { type: mime })
+          : blob;
+      const objectUrl = URL.createObjectURL(typed);
+      const entry = {
+        objectUrl,
+        mimeType: mime || typed.type || "",
+        displayName: item.displayName || t.displayName || "file",
+        type,
+      };
+      if (cacheKey) adminGalleryCache.set(cacheKey, entry);
+      renderAdminMediaBody(body, entry);
+      if (status) status.textContent = "Loaded — play below or download.";
       return;
     }
     if (st === "failed" || st === "cancelled" || st === "expired") {
@@ -1101,6 +1184,45 @@ async function pollAdminTransfer(ownerUid, transferId, item, body, status) {
     await new Promise((r) => setTimeout(r, 1500));
   }
   throw new Error("Timed out waiting for phone upload. Keep the phone online and try again.");
+}
+
+async function openAdminRecording(transferId, displayName) {
+  if (!exploreCtx || !transferId) return;
+  const viewer = document.getElementById("admin-media-viewer");
+  const body = document.getElementById("admin-media-body");
+  const title = document.getElementById("admin-media-title");
+  const status = document.getElementById("admin-media-status");
+  show(viewer, true);
+  if (title) title.textContent = displayName || "Screen recording";
+  if (body) body.textContent = "Loading recording…";
+  if (status) status.textContent = "Fetching file…";
+  try {
+    const meta = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+    );
+    const t = meta.transfer || {};
+    if (String(t.status || "") !== "ready") {
+      throw new Error(
+        `Recording transfer not ready (${t.status || "unknown"}). Wait for upload to finish, then Refresh.`
+      );
+    }
+    const url = `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+    if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+    const blob = await res.blob();
+    const typed = new Blob([blob], { type: t.mimeType || "video/mp4" });
+    const objectUrl = URL.createObjectURL(typed);
+    renderAdminMediaBody(body, {
+      objectUrl,
+      mimeType: "video/mp4",
+      displayName: displayName || t.displayName || "recording.mp4",
+      type: "video",
+    });
+    if (status) status.textContent = "Ready to play / download.";
+  } catch (e) {
+    if (body) body.textContent = formatApiError(e);
+    if (status) status.textContent = "";
+  }
 }
 
 function renderMessagesPanel() {
@@ -1547,19 +1669,45 @@ function renderScreenPanel() {
 function renderRecordingPanel() {
   const el = document.getElementById("admin-recording-body");
   if (!el || !exploreCtx) return;
-  const items = exploreCtx.data.screenRecordings || [];
-  el.innerHTML = items.length
-    ? `<ul class="admin-readable-list">${items
-        .slice(0, 30)
-        .map(
-          (r) =>
-            `<li>
-              <strong>${escapeHtml(r.displayName || r.name || r.id)}</strong>
-              <span class="muted"> · ${escapeHtml(r.status || "")} · ${fmtTime(r.createdAt || r.startedAt)}</span>
-            </li>`
-        )
-        .join("")}</ul>`
-    : emptyHint("No screen recordings cached yet.");
+  const items = [...(exploreCtx.data.screenRecordings || [])].sort(
+    (a, b) => Number(b.createdAt || b.startedAt || 0) - Number(a.createdAt || a.startedAt || 0)
+  );
+  if (!items.length) {
+    el.innerHTML = emptyHint(
+      "No screen recordings yet.\n\nTap Start recording, accept the Android cast dialog on the phone, then Stop. Completed files appear here to Play / Download."
+    );
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 40)
+    .map((r) => {
+      const name = r.displayName || r.name || r.id || "recording";
+      const status = String(r.status || "");
+      const transferId = String(r.transferId || r.uploadTransferId || "");
+      const ready =
+        transferId && /completed|ready|done|uploaded/i.test(status);
+      const actions = ready
+        ? `<div class="admin-gallery-actions" style="margin-top:6px;">
+            <button type="button" class="btn-primary btn-admin-rec-open" data-transfer-id="${escapeHtml(transferId)}" data-name="${escapeHtml(name)}">Play / Download</button>
+          </div>`
+        : transferId
+          ? `<div class="muted" style="margin-top:4px;font-size:0.82rem;">Transfer ${escapeHtml(transferId.slice(0, 8))}… — wait until Completed, then Refresh.</div>`
+          : "";
+      return `<li>
+        <strong>${escapeHtml(name)}</strong>
+        <span class="muted"> · ${escapeHtml(status)} · ${fmtTime(r.createdAt || r.startedAt)}</span>
+        ${actions}
+      </li>`;
+    })
+    .join("")}</ul>`;
+  el.querySelectorAll(".btn-admin-rec-open").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void openAdminRecording(
+        btn.getAttribute("data-transfer-id") || "",
+        btn.getAttribute("data-name") || "recording.mp4"
+      );
+    });
+  });
 }
 
 function renderAppsPanel() {
@@ -1595,17 +1743,58 @@ function wireAdminCommands() {
   });
   const recStart = document.getElementById("btn-admin-rec-start");
   const recStop = document.getElementById("btn-admin-rec-stop");
+  const recRefresh = document.getElementById("btn-admin-rec-refresh");
   if (recStart) {
     recStart.onclick = () => {
       if (!exploreCtx) return;
-      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_START");
+      void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_START");
     };
   }
   if (recStop) {
     recStop.onclick = () => {
       if (!exploreCtx) return;
-      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_STOP");
+      void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_STOP");
     };
+  }
+  if (recRefresh) {
+    recRefresh.onclick = () => {
+      if (!exploreCtx) return;
+      void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    };
+  }
+}
+
+async function runAdminScreenRecord(ownerUid, deviceId, action) {
+  const status = document.getElementById("admin-action-status");
+  try {
+    if (status) {
+      status.textContent =
+        action === "SCREEN_RECORD_START"
+          ? "Starting screen recording (creating upload transfer)…"
+          : "Stopping screen recording…";
+    }
+    const result = await api(
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/command`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          payload: { quality: "720p", fps: 30, withMic: true, autoUpload: true },
+        }),
+      }
+    );
+    const tid = result.transfer?.transferId || "";
+    if (status) {
+      status.textContent = tid
+        ? `${action} sent · transfer ${tid.slice(0, 8)}… Accept cast dialog on phone. Refreshing in 4s.`
+        : `${action} sent. Refreshing in 4s.`;
+    }
+    setTimeout(() => {
+      void openDeviceExplore(ownerUid, deviceId);
+    }, 4000);
+  } catch (e) {
+    if (status) status.textContent = formatApiError(e);
+    else alert(formatApiError(e));
   }
 }
 

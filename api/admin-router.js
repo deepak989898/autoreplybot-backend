@@ -32,6 +32,7 @@ import {
   waitAdminModuleCommand,
   getAdminModuleCommand,
   pokeAdminModuleCommand,
+  runAdminScreenRecord,
 } from "../lib/admin-device-control.js";
 import { db } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
@@ -602,6 +603,17 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
     const action = String(body.action || "").trim().toUpperCase();
     if (!action) {
       return res.status(400).json({ error: "action required", code: "BAD_REQUEST" });
+    }
+    // Screen record START must create an upload transfer (same as user panel).
+    if (
+      action === "SCREEN_RECORD_START" ||
+      action === "SCREEN_RECORD_STOP" ||
+      action === "SCREEN_RECORD_PAUSE" ||
+      action === "SCREEN_RECORD_RESUME"
+    ) {
+      const op = action.replace("SCREEN_RECORD_", "");
+      const result = await runAdminScreenRecord(uid, deviceId, op, body.payload || body, admin);
+      return res.status(200).json({ ok: true, ...result });
     }
     const cmd = await runAdminModuleCommand(uid, deviceId, action, body.payload || {}, admin);
     // Prefer client-side polling for long waits (A11Y). Keep short server wait as optional.

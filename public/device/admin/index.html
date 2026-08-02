@@ -218,7 +218,7 @@
           </div>
           <div id="admin-panel-gallery" class="phone-tab-panel" data-phone-panel="gallery" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">View images and download video/audio from the phone index (Platform Admin client — user browsers stay paired).</p>
+              <p class="page-sub">View / play / download images, video, and audio from the phone index (Platform Admin — user browsers stay paired).</p>
               <div class="page-actions">
                 <button type="button" class="btn-secondary" data-admin-cmd="GALLERY_INDEX">Request index</button>
                 <button type="button" class="btn-primary" id="btn-admin-gallery-refresh">Refresh</button>
@@ -287,10 +287,11 @@
           </div>
           <div id="admin-panel-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Screen recordings cached from the phone (system cast consent required to start).</p>
+              <p class="page-sub">Start/Stop like the user panel (Android cast consent on the phone). Completed recordings can be played and downloaded here.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" id="btn-admin-rec-start">Start recording</button>
                 <button type="button" class="btn-danger-soft" id="btn-admin-rec-stop">Stop</button>
+                <button type="button" class="btn-secondary" id="btn-admin-rec-refresh">Refresh list</button>
               </div>
             </div>
             <div id="admin-recording-body" class="surface muted">Loading…</div>
@@ -368,7 +369,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=13"></script>
+  <script type="module" src="/device/admin/app.js?v=14"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {
