@@ -892,20 +892,20 @@ async function resolveApkDownloadUrl(file, objectPath, fileName) {
   }
 }
 
-/** Signed download for the Android APK uploaded to Storage root (autoreplybot.apk). */
+/**
+ * Public Android APK download (login not required).
+ * Same Storage object / ANDROID_APK_DOWNLOAD_URL as Settings → Download App.
+ */
 async function handleAppDownload(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    // Same-origin ?redirect=1 navigations cannot send Authorization headers.
-    // Allow a one-shot access_token query (Referrer-Policy strips it on the 302 hop).
-    let queryToken = String(req.query?.access_token || "").trim();
-    if (!queryToken && typeof req.url === "string") {
+    // Parse redirect from query when Vercel passes a raw URL.
+    if (typeof req.url === "string") {
       try {
         const q = new URL(req.url, "http://localhost").searchParams;
-        queryToken = String(q.get("access_token") || "").trim();
         if (!req.query) req.query = {};
         if (req.query.redirect == null && q.get("redirect") != null) {
           req.query.redirect = q.get("redirect");
@@ -914,10 +914,6 @@ async function handleAppDownload(req, res) {
         /* ignore */
       }
     }
-    if (queryToken) {
-      req.headers.authorization = `Bearer ${queryToken}`;
-    }
-    await requireAuthed(req);
     const objectPath = apkObjectPath();
     const fileName = apkFileName();
     const file = storageBucket().file(objectPath);

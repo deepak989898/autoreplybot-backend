@@ -4877,41 +4877,67 @@ document.getElementById("btn-msg-refresh")?.addEventListener("click", () => refr
 document.getElementById("btn-download-apk")?.addEventListener("click", (e) => {
   void downloadAndroidApk(e);
 });
+document.getElementById("btn-download-apk-login")?.addEventListener("click", (e) => {
+  void downloadAndroidApk(e);
+});
 
 let apkDownloadUrlCache = "";
 let apkDownloadUrlExpiresAt = 0;
 
-async function prepareApkDownloadLink() {
-  if (!idToken) return null;
-  if (apkDownloadUrlCache && Date.now() < apkDownloadUrlExpiresAt) {
-    const btn = document.getElementById("btn-download-apk");
-    if (btn) {
-      btn.href = apkDownloadUrlCache;
-      btn.setAttribute("download", "AutoReplyBot.apk");
-      btn.target = "_blank";
-      btn.rel = "noopener noreferrer";
-    }
-    return apkDownloadUrlCache;
+function apkDownloadButtons() {
+  return [
+    document.getElementById("btn-download-apk"),
+    document.getElementById("btn-download-apk-login"),
+  ].filter(Boolean);
+}
+
+function setApkDownloadStatus(text) {
+  for (const id of ["apk-download-status", "apk-download-status-login"]) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
   }
-  const data = await api("/api/device/app-download");
-  const url = String(data.url || "").trim();
-  if (!url) throw new Error("Download URL missing");
-  apkDownloadUrlCache = url;
-  apkDownloadUrlExpiresAt = Date.now() + 45 * 60 * 1000;
-  const btn = document.getElementById("btn-download-apk");
-  if (btn) {
+}
+
+function applyApkHrefToButtons(url, fileName) {
+  for (const btn of apkDownloadButtons()) {
     btn.href = url;
-    btn.setAttribute("download", String(data.fileName || "AutoReplyBot.apk"));
+    btn.setAttribute("download", fileName || "AutoReplyBot.apk");
     btn.target = "_blank";
     btn.rel = "noopener noreferrer";
     btn.dataset.ready = "1";
   }
+}
+
+/** Public endpoint — same APK as Settings; works before login. */
+async function fetchApkDownloadJson() {
+  const res = await fetch("/api/device/app-download");
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || body.message || body.code || `HTTP ${res.status}`);
+  }
+  return body;
+}
+
+async function prepareApkDownloadLink() {
+  if (apkDownloadUrlCache && Date.now() < apkDownloadUrlExpiresAt) {
+    applyApkHrefToButtons(apkDownloadUrlCache, "AutoReplyBot.apk");
+    return apkDownloadUrlCache;
+  }
+  const data = await fetchApkDownloadJson();
+  const url = String(data.url || "").trim();
+  if (!url) throw new Error("Download URL missing");
+  apkDownloadUrlCache = url;
+  apkDownloadUrlExpiresAt = Date.now() + 45 * 60 * 1000;
+  applyApkHrefToButtons(url, String(data.fileName || "AutoReplyBot.apk"));
   return url;
 }
 
 async function downloadAndroidApk(e) {
-  const btn = document.getElementById("btn-download-apk");
-  const status = document.getElementById("apk-download-status");
+  const btn =
+    e?.currentTarget instanceof HTMLElement
+      ? e.currentTarget
+      : document.getElementById("btn-download-apk") ||
+        document.getElementById("btn-download-apk-login");
   // If href was prefetched to a real Storage URL, let the browser handle the click.
   const readyHref = String(btn?.href || "");
   if (
@@ -4921,33 +4947,26 @@ async function downloadAndroidApk(e) {
     !readyHref.endsWith("/device/") &&
     !readyHref.endsWith("/device")
   ) {
-    if (status) status.textContent = "Download starting… check your browser downloads bar.";
+    setApkDownloadStatus("Download starting… check your browser downloads bar.");
     return;
   }
   e?.preventDefault?.();
   if (btn) btn.setAttribute("aria-disabled", "true");
-  if (status) status.textContent = "Preparing download…";
+  setApkDownloadStatus("Preparing download…");
   try {
-    if (!idToken) throw new Error("Not signed in");
-    // Same-origin redirect: Chrome starts the file download from a real navigation
-    // (avoids cross-origin <a download> being ignored after async fetch).
-    const redirectUrl =
-      `/api/device/app-download?redirect=1&access_token=${encodeURIComponent(idToken)}`;
-    if (status) status.textContent = "Download starting…";
-    // Prefer a new tab so Settings stays open; fall back to same-tab navigation.
+    // Public same-origin redirect — login not required (Settings + login use the same API).
+    const redirectUrl = "/api/device/app-download?redirect=1";
+    setApkDownloadStatus("Download starting…");
     const opened = window.open(redirectUrl, "_blank");
     if (!opened) {
       window.location.assign(redirectUrl);
       return;
     }
-    if (status) {
-      status.textContent = "Download started. Check your browser downloads bar.";
-    }
-    // Also warm the direct link for the next click.
+    setApkDownloadStatus("Download started. Check your browser downloads bar.");
     prepareApkDownloadLink().catch(() => {});
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (status) status.textContent = "";
+    setApkDownloadStatus("");
     alert(msg || "Could not download the app");
   } finally {
     if (btn) btn.removeAttribute("aria-disabled");

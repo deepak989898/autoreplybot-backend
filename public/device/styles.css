@@ -284,6 +284,22 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
 
 .login-card .btn-primary { margin-bottom: 10px; }
 
+.login-apk-download {
+  margin: 12px 0 4px;
+}
+
+.login-apk-download .btn-secondary {
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.login-apk-status {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  min-height: 1.2em;
+}
+
 .login-card .btn-primary.is-loading,
 .login-card .btn-google.is-loading {
   position: relative;
