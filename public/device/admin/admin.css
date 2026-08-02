@@ -121,120 +121,117 @@
   color: var(--danger);
 }
 
-.admin-drawer {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  background: rgba(28, 31, 46, 0.35);
-  display: flex;
-  justify-content: flex-end;
+/* Full-page user / device views (no side drawer) */
+.admin-user-detail-body {
+  margin-top: 8px;
 }
 
-.admin-drawer[hidden] {
-  display: none !important;
-}
-
-.admin-drawer-inner {
-  width: min(520px, 100%);
-  height: 100%;
-  overflow: auto;
-  border-radius: 0;
-  padding: 18px;
-}
-
-.admin-drawer-head {
-  display: flex;
-  justify-content: space-between;
+.admin-device-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
+  margin: 12px 0 24px;
+}
+
+.admin-device-card h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.admin-device-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
   align-items: flex-start;
 }
 
-.admin-drawer-body h3 {
-  margin: 18px 0 8px;
-  color: var(--text);
-  font-size: 0.95rem;
+.admin-device-meta {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
-.admin-drawer-body ul {
+.admin-readable-list {
+  list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
 }
 
-.admin-drawer-body li {
-  margin-bottom: 6px;
+.admin-readable-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
 }
 
-.admin-device-drawer {
-  width: min(720px, 100%);
+.admin-readable-list li:last-child {
+  border-bottom: 0;
 }
 
-.admin-device-tabs {
+.admin-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+
+.admin-kv {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0;
-}
-
-.admin-device-tabs button {
-  border: 1px solid var(--line);
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
   background: var(--bg);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
+  border: 1px solid var(--line);
 }
 
-.admin-device-tabs button.active {
-  background: var(--brand-soft);
-  border-color: var(--brand);
-  color: var(--brand-dark);
+.admin-kv strong {
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.admin-item-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.admin-item-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.88rem;
+}
+
+.admin-item-card strong {
+  word-break: break-word;
 }
 
 .admin-live-video {
   width: 100%;
-  max-height: 360px;
+  max-height: 420px;
   background: #0b0d14;
   border-radius: 12px;
   margin-top: 10px;
 }
 
-.admin-limit-card {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  background: var(--bg);
+#device-control-view .phone-tabs {
+  margin-top: 14px;
 }
 
-.admin-limit-card strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--text);
-}
-
-.admin-cmd-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.admin-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 0.82rem;
-  max-height: 280px;
-  overflow: auto;
-  background: var(--bg);
-  border-radius: 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
+#device-control-view .device-card {
+  margin-top: 0;
 }
 
 @media (max-width: 860px) {
   .admin-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-device-grid {
+    grid-template-columns: 1fr;
   }
 }

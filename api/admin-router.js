@@ -205,7 +205,14 @@ function sanitizeDeviceAdmin(id, data) {
     online,
     lastSeenAt,
     revoked: Boolean(data.revoked),
-    remoteControlEnabled: Boolean(data.remoteControlEnabled),
+    remoteControlEnabled: data.remoteControlEnabled !== false,
+    batteryLevel: data.batteryLevel ?? null,
+    isCharging: Boolean(data.isCharging),
+    networkType: String(data.networkType || ""),
+    cameraAvailable: data.cameraAvailable !== false,
+    microphoneAvailable: data.microphoneAvailable !== false,
+    cameraPermission: String(data.cameraPermission || ""),
+    microphonePermission: String(data.microphonePermission || ""),
     createdAt: Number(data.createdAt || 0),
   };
 }
@@ -214,11 +221,13 @@ function sanitizeClientAdmin(id, data) {
   if (!data || typeof data !== "object") return null;
   return {
     clientId: data.clientId || id,
-    label: String(data.label || data.browserName || "Browser"),
+    label: String(data.label || data.clientName || data.browserName || "Browser"),
+    clientName: String(data.clientName || ""),
     browserName: String(data.browserName || ""),
     operatingSystem: String(data.operatingSystem || ""),
     revoked: Boolean(data.revoked),
     autoApproveSessions: Boolean(data.autoApproveSessions),
+    isPlatformAdminClient: Boolean(data.isPlatformAdminClient) || id === "platform_admin",
     createdAt: Number(data.createdAt || 0),
     lastUsedAt: Number(data.lastUsedAt || data.updatedAt || 0),
   };

