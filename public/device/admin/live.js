@@ -1,6 +1,7 @@
 /**
- * Minimal WebRTC viewer for admin live sessions (phone → admin).
+ * WebRTC viewer for admin live sessions (phone → admin).
  * Uses an impersonation custom token so Firestore signal rules (owner) allow access.
+ * Same offer/answer flow as the normal user dashboard — does not change user panel code.
  */
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
 import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
@@ -22,6 +23,7 @@ import {
  * @param {string} opts.sessionId
  * @param {object[]} opts.iceServers
  * @param {HTMLVideoElement} opts.videoEl
+ * @param {HTMLAudioElement} [opts.audioEl]
  * @param {(msg: string) => void} [opts.onStatus]
  */
 export async function startAdminLiveViewer(opts) {
@@ -32,6 +34,7 @@ export async function startAdminLiveViewer(opts) {
     sessionId,
     iceServers,
     videoEl,
+    audioEl,
     onStatus,
   } = opts;
   const status = (m) => {
@@ -44,23 +47,51 @@ export async function startAdminLiveViewer(opts) {
   await signInWithCustomToken(auth, customToken);
   const db = getFirestore(app);
 
+  // Same peer setup as the normal user dashboard viewer (phone publishes offer).
   const pc = new RTCPeerConnection({ iceServers: iceServers || [] });
+
   const seen = new Set();
   let remoteSet = false;
   /** @type {RTCIceCandidateInit[]} */
   const pendingIce = [];
   /** @type {(() => void) | null} */
   let unsubSignals = null;
+  /** @type {(() => void) | null} */
+  let unsubSession = null;
   /** @type {MediaStream | null} */
   let remoteStream = null;
 
-  pc.ontrack = (ev) => {
-    if (!ev.track) return;
+  function attachTrack(track) {
+    if (!track) return;
     if (!remoteStream) remoteStream = new MediaStream();
-    remoteStream.addTrack(ev.track);
-    videoEl.srcObject = remoteStream;
-    videoEl.play().catch(() => {});
-    status("Receiving media…");
+    if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
+      remoteStream.addTrack(track);
+    }
+    if (track.kind === "video" && videoEl) {
+      videoEl.srcObject = remoteStream;
+      videoEl.play().catch(() => {});
+    }
+    if (track.kind === "audio" && audioEl) {
+      audioEl.srcObject = remoteStream;
+    }
+    status(track.kind === "video" ? "Receiving video…" : "Receiving audio…");
+  }
+
+  pc.ontrack = (ev) => {
+    attachTrack(ev.track);
+    if (ev.track) {
+      ev.track.onunmute = () => attachTrack(ev.track);
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "connected") {
+      status("Connected — waiting for camera frames if video is still black");
+    } else if (pc.connectionState === "failed") {
+      status("WebRTC failed. Check network / TURN.");
+    } else if (pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+      status(`Peer ${pc.connectionState}`);
+    }
   };
 
   pc.onicecandidate = async (ev) => {
@@ -117,15 +148,26 @@ export async function startAdminLiveViewer(opts) {
     }
   }
 
+  const sessionRef = doc(db, "users", ownerUid, "sessions", sessionId);
+  unsubSession = onSnapshot(sessionRef, (snap) => {
+    if (!snap.exists()) return;
+    const st = String(snap.data()?.status || "");
+    if (st === "ended" || st === "failed") {
+      status(`Session ${st}`);
+    }
+  });
+
   const signalsRef = collection(db, "users", ownerUid, "sessions", sessionId, "signals");
   const signalsQuery = query(signalsRef, orderBy("createdAt", "asc"));
-  status("Listening for phone offer…");
+  status("Listening for phone offer… Tap the phone notification if needed.");
   unsubSignals = onSnapshot(signalsQuery, async (snap) => {
+    const now = Date.now();
     for (const change of snap.docChanges()) {
       if (change.type === "removed") continue;
       const data = change.doc.data() || {};
       const id = String(data.signalId || change.doc.id);
       if (seen.has(id)) continue;
+      if (Number(data.expiresAt || 0) > 0 && now >= Number(data.expiresAt)) continue;
       if (String(data.sender || "") !== "device") continue;
       seen.add(id);
       try {
@@ -138,9 +180,26 @@ export async function startAdminLiveViewer(opts) {
   });
 
   return {
+    sessionId,
+    async enableSpeaker() {
+      if (!audioEl || !remoteStream) return false;
+      audioEl.srcObject = remoteStream;
+      audioEl.muted = false;
+      try {
+        await audioEl.play();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     async stop() {
       try {
         if (unsubSignals) unsubSignals();
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (unsubSession) unsubSession();
       } catch {
         /* ignore */
       }
@@ -149,7 +208,8 @@ export async function startAdminLiveViewer(opts) {
       } catch {
         /* ignore */
       }
-      videoEl.srcObject = null;
+      if (videoEl) videoEl.srcObject = null;
+      if (audioEl) audioEl.srcObject = null;
       try {
         await deleteApp(app);
       } catch {

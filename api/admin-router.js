@@ -16,6 +16,7 @@ import {
   ensureAdminTrustedClient,
   getDeviceExplore,
   runAdminModuleCommand,
+  sendAdminLiveCommand,
   startAdminLiveSession,
 } from "../lib/admin-device-control.js";
 import { db } from "../lib/firebase.js";
@@ -28,6 +29,7 @@ import * as R from "../lib/remote-constants.js";
  * POST   /api/admin/users/:uid/devices/:deviceId/command
  * POST   /api/admin/users/:uid/devices/:deviceId/session/start
  * POST   /api/admin/users/:uid/devices/:deviceId/session/end
+ * POST   /api/admin/users/:uid/devices/:deviceId/session/command
  * POST   /api/admin/users/:uid/devices/:deviceId/impersonate
  */
 export default async function handler(req, res) {
@@ -64,6 +66,17 @@ export default async function handler(req, res) {
       res,
       decodeURIComponent(deviceSessionEnd[1]),
       decodeURIComponent(deviceSessionEnd[2])
+    );
+  }
+  const deviceSessionCommand = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/session\/command$/i
+  );
+  if (deviceSessionCommand) {
+    return handleDeviceSessionCommand(
+      req,
+      res,
+      decodeURIComponent(deviceSessionCommand[1]),
+      decodeURIComponent(deviceSessionCommand[2])
     );
   }
   const deviceSessionStart = path.match(
@@ -443,6 +456,27 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return adminError(res, e, "ADMIN_DEVICE_COMMAND_FAILED");
+  }
+}
+
+async function handleDeviceSessionCommand(req, res, uid, deviceId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const result = await sendAdminLiveCommand(
+      uid,
+      deviceId,
+      String(body.sessionId || "").trim(),
+      String(body.action || "").trim(),
+      admin
+    );
+    return res.status(200).json(result);
+  } catch (e) {
+    return adminError(res, e, "ADMIN_LIVE_COMMAND_FAILED");
   }
 }
 

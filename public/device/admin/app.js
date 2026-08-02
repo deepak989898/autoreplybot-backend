@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=3";
+import { startAdminLiveViewer } from "./live.js?v=4";
 
 const viewLogin = document.getElementById("view-login");
 const viewDenied = document.getElementById("view-denied");
@@ -26,8 +26,14 @@ let firebaseConfig = null;
 let activeTab = "dashboard";
 /** @type {object[]} */
 let cachedUsers = [];
-/** @type {{ stop: () => Promise<void> } | null} */
+/** @type {{ stop: () => Promise<void>, enableSpeaker?: () => Promise<boolean>, sessionId?: string } | null} */
 let liveViewer = null;
+/** @type {string} */
+let activeLiveSessionId = "";
+/** @type {{ torch: boolean, micMuted: boolean, videoRec: boolean, audioRec: boolean }} */
+let liveControlState = { torch: false, micMuted: false, videoRec: false, audioRec: false };
+/** @type {string} */
+let activeLiveSessionId = "";
 /** @type {string} */
 let openUserUid = "";
 /** @type {object | null} */
@@ -36,6 +42,11 @@ let userDetailCache = null;
 let exploreCtx = null;
 /** @type {string} */
 let activePhoneTab = "camera";
+/** Live control UI state (admin only — does not touch user panel). */
+let adminTorchOn = false;
+let adminMicMuted = false;
+let adminVideoRec = false;
+let adminAudioRec = false;
 
 function show(el, on) {
   if (!el) return;
@@ -398,6 +409,7 @@ async function stopLiveViewer() {
     }
     liveViewer = null;
   }
+  activeLiveSessionId = "";
 }
 
 async function openDeviceExplore(ownerUid, deviceId) {
@@ -507,6 +519,7 @@ function renderCameraPanel() {
     d.cameraPermission || (d.cameraAvailable !== false ? "granted" : "missing");
   const mic =
     d.microphonePermission || (d.microphoneAvailable !== false ? "granted" : "missing");
+  const liveOpen = Boolean(activeLiveSessionId && liveViewer);
   el.innerHTML = `
     <article class="device-card surface" style="padding:16px;">
       <h3>${escapeHtml(d.deviceName || exploreCtx.deviceId)}</h3>
@@ -538,11 +551,23 @@ function renderCameraPanel() {
         </label>
         <div class="connect-actions">
           <button type="button" class="btn-primary" id="btn-admin-connect">Connect</button>
-          <button type="button" class="btn-danger" id="btn-admin-end-live" hidden>End Session</button>
+          <button type="button" class="btn-danger" id="btn-admin-end-live" ${liveOpen ? "" : "hidden"}>End Session</button>
         </div>
-        <p id="live-status" class="live-status muted">Idle — tap Connect to start live view.</p>
-        <div class="live-panel" id="admin-live-panel" hidden>
+        <p id="live-status" class="live-status muted">Idle — tap Connect to start live view (same as user panel; tap phone notification if needed).</p>
+        <div class="live-panel" id="admin-live-panel" ${liveOpen ? "" : "hidden"}>
           <video id="admin-live-video" class="admin-live-video live-video" autoplay playsinline muted controls></video>
+          <audio id="admin-live-audio" class="live-audio" autoplay playsinline></audio>
+          <p class="muted" style="margin-top:8px;">Live mic is on the phone stream. Tap <strong>Enable speaker</strong> if you hear no voice.</p>
+          <div class="live-controls" id="admin-live-controls" ${liveOpen ? "" : "hidden"}>
+            <button type="button" class="btn-enable-sound" id="btn-admin-speaker">Enable speaker</button>
+            <button type="button" data-live-cmd="SWITCH_CAMERA">Switch camera</button>
+            <button type="button" data-live-toggle="torch" aria-pressed="false">Torch: OFF</button>
+            <button type="button" data-live-toggle="mic" aria-pressed="false">Mic: ON</button>
+            <button type="button" data-live-cmd="CAPTURE_PHOTO">Capture photo</button>
+            <button type="button" data-live-toggle="video-rec" aria-pressed="false">Start video</button>
+            <button type="button" data-live-toggle="audio-rec" aria-pressed="false">Record audio file</button>
+            <button type="button" class="btn-end-live" data-live-cmd="END_SESSION">End session</button>
+          </div>
         </div>
       </div>
     </article>
@@ -558,14 +583,124 @@ function renderCameraPanel() {
     const quality = document.getElementById("admin-quality")?.value || "auto";
     void startLive(exploreCtx.ownerUid, exploreCtx.deviceId, caps, false, quality);
   });
-  document.getElementById("btn-admin-end-live")?.addEventListener("click", async () => {
-    await stopLiveViewer();
+  document.getElementById("btn-admin-end-live")?.addEventListener("click", () => {
+    void endAdminLive("client_ended");
+  });
+  wireLiveControls();
+}
+
+function wireLiveControls() {
+  document.getElementById("btn-admin-speaker")?.addEventListener("click", async () => {
+    const ok = liveViewer?.enableSpeaker ? await liveViewer.enableSpeaker() : false;
     const st = document.getElementById("live-status");
-    if (st) st.textContent = "Live session ended.";
+    if (st) {
+      st.textContent = ok
+        ? "Speaker enabled"
+        : "Browser blocked speaker — tap Enable speaker again after media starts";
+    }
+  });
+  document.querySelectorAll("[data-live-cmd]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void sendLiveCommand(btn.getAttribute("data-live-cmd")).catch(() => {});
+    });
+  });
+  document.querySelectorAll("[data-live-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void toggleLiveControl(btn.getAttribute("data-live-toggle"), btn).catch(() => {});
+    });
+  });
+}
+
+async function sendLiveCommand(action) {
+  if (!exploreCtx || !activeLiveSessionId) {
+    const st = document.getElementById("live-status");
+    if (st) st.textContent = "No active session for commands.";
+    return;
+  }
+  const act = String(action || "").trim().toUpperCase();
+  const st = document.getElementById("live-status");
+  try {
+    if (act === "END_SESSION") {
+      await endAdminLive("client_ended");
+      return;
+    }
+    await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/session/command`,
+      {
+        method: "POST",
+        body: JSON.stringify({ sessionId: activeLiveSessionId, action: act }),
+      }
+    );
+    if (st) st.textContent = `Command ${act} sent`;
+  } catch (e) {
+    if (st) st.textContent = formatApiError(e);
+    throw e;
+  }
+}
+
+async function toggleLiveControl(toggle, btn) {
+  if (!activeLiveSessionId) return;
+  try {
+    if (toggle === "torch") {
+      const next = !liveControlState.torch;
+      await sendLiveCommand(next ? "TORCH_ON" : "TORCH_OFF");
+      liveControlState.torch = next;
+      if (btn) {
+        btn.setAttribute("aria-pressed", next ? "true" : "false");
+        btn.textContent = next ? "Torch: ON" : "Torch: OFF";
+      }
+    } else if (toggle === "mic") {
+      const nextMuted = !liveControlState.micMuted;
+      await sendLiveCommand(nextMuted ? "MIC_MUTE" : "MIC_UNMUTE");
+      liveControlState.micMuted = nextMuted;
+      if (btn) {
+        btn.setAttribute("aria-pressed", nextMuted ? "true" : "false");
+        btn.textContent = nextMuted ? "Mic: OFF" : "Mic: ON";
+      }
+    } else if (toggle === "video-rec") {
+      const next = !liveControlState.videoRec;
+      await sendLiveCommand(next ? "START_VIDEO_RECORDING" : "STOP_VIDEO_RECORDING");
+      liveControlState.videoRec = next;
+      if (btn) {
+        btn.setAttribute("aria-pressed", next ? "true" : "false");
+        btn.textContent = next ? "Stop video" : "Start video";
+      }
+    } else if (toggle === "audio-rec") {
+      const next = !liveControlState.audioRec;
+      await sendLiveCommand(next ? "START_AUDIO_RECORDING" : "STOP_AUDIO_RECORDING");
+      liveControlState.audioRec = next;
+      if (btn) {
+        btn.setAttribute("aria-pressed", next ? "true" : "false");
+        btn.textContent = next ? "Stop audio file" : "Record audio file";
+      }
+    }
+  } catch {
+    /* status already set in sendLiveCommand */
+  }
+}
+
+async function endAdminLive(reason) {
+  const st = document.getElementById("live-status");
+  const ownerUid = exploreCtx?.ownerUid;
+  const deviceId = exploreCtx?.deviceId;
+  const sessionId = activeLiveSessionId;
+  try {
+    if (ownerUid && deviceId && sessionId) {
+      await api(
+        `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/end`,
+        { method: "POST", body: JSON.stringify({ sessionId, reason: reason || "admin_ended" }) }
+      ).catch(() => {});
+    }
+  } finally {
+    await stopLiveViewer();
+    activeLiveSessionId = "";
+    liveControlState = { torch: false, micMuted: false, videoRec: false, audioRec: false };
     show(document.getElementById("admin-live-panel"), false);
+    show(document.getElementById("admin-live-controls"), false);
     const endBtn = document.getElementById("btn-admin-end-live");
     if (endBtn) endBtn.hidden = true;
-  });
+    if (st) st.textContent = "Live session ended.";
+  }
 }
 
 function renderLocationPanel() {
@@ -910,11 +1045,14 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality
   const videoId = opts.videoId || "admin-live-video";
   const status = document.getElementById(statusId);
   const video = document.getElementById(videoId);
+  const audio = document.getElementById("admin-live-audio");
   try {
     await stopLiveViewer();
+    liveControlState = { torch: false, micMuted: false, videoRec: false, audioRec: false };
     if (status) status.textContent = "Starting live session…";
     if (video) video.hidden = false;
     show(document.getElementById("admin-live-panel"), true);
+    show(document.getElementById("admin-live-controls"), true);
     const endBtn = document.getElementById("btn-admin-end-live");
     if (endBtn) endBtn.hidden = false;
 
@@ -949,7 +1087,12 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality
     }
     if (!firebaseConfig) throw new Error("Firebase config missing");
     if (!video) throw new Error("Video element missing");
-    if (status) status.textContent = result.notes || "Connecting WebRTC…";
+    activeLiveSessionId = String(result.sessionId || "");
+    if (status) {
+      status.textContent =
+        result.notes ||
+        "Request authorized. Tap the notification on your phone to start.";
+    }
     liveViewer = await startAdminLiveViewer({
       firebaseConfig,
       customToken: result.customToken,
@@ -959,11 +1102,13 @@ async function startLive(ownerUid, deviceId, capabilities, forceReplace, quality
         ? result.iceServers
         : result.iceServers?.iceServers || [],
       videoEl: video,
+      audioEl: audio || undefined,
       onStatus: (m) => {
         if (status) status.textContent = m;
       },
     });
   } catch (e) {
+    activeLiveSessionId = "";
     if (status) status.textContent = formatApiError(e);
     else alert(formatApiError(e));
   }
