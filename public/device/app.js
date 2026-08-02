@@ -3565,14 +3565,15 @@ function syncUninstallPolicyUi(device) {
   const toggle = document.getElementById("toggle-allow-uninstall");
   const status = document.getElementById("uninstall-policy-status");
   if (!toggle) return;
-  const allow = Boolean(device?.allowUninstall);
+  // Default allow (checked) unless the device explicitly disables uninstall.
+  const allow = !device || device.allowUninstall !== false;
   toggle.checked = allow;
   if (status) {
     if (!device) {
       status.textContent = "Select a device.";
     } else if (allow) {
       status.textContent =
-        "Uninstall allowed on this device. Phone will remove Device Admin so the user can uninstall.";
+        "Uninstall allowed (default). Uncheck to protect this device from uninstall.";
     } else {
       const admin = device.deviceAdminReady ? "Device Admin on" : "Device Admin off — enable it on the phone for stronger protection";
       status.textContent = `Uninstall protected. ${admin}. Accessibility helps block uninstall screens.`;

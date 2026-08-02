@@ -301,10 +301,10 @@
             <div class="surface" style="margin-bottom:12px;">
               <h2 class="settings-section-title" style="margin-top:0;">Uninstall protection</h2>
               <p class="muted" id="uninstall-policy-hint">
-                By default the phone app cannot be uninstalled easily. Turn this on only when you want to allow uninstall for the selected device.
+                Uninstall is allowed by default. Uncheck this only when you want to protect this device from uninstall.
               </p>
               <label class="row-gap" style="margin-top:10px;align-items:center;gap:10px;">
-                <input id="toggle-allow-uninstall" type="checkbox" />
+                <input id="toggle-allow-uninstall" type="checkbox" checked />
                 <span>Allow uninstall on this device</span>
               </label>
               <p class="muted" id="uninstall-policy-status" style="margin-top:8px;" aria-live="polite"></p>
@@ -788,6 +788,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=25"></script>
+  <script type="module" src="/device/app.js?v=26"></script>
 </body>
 </html>

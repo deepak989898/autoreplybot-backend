@@ -182,8 +182,9 @@ function sanitizeDevice(id, data) {
     screenRecordEnabled: Boolean(data.screenRecordEnabled),
     installedAppsSharingEnabled: Boolean(data.installedAppsSharingEnabled),
     appControlEnabled: Boolean(data.appControlEnabled),
-    allowUninstall: Boolean(data.allowUninstall),
-    uninstallProtected: !Boolean(data.allowUninstall),
+    // Default allow uninstall when the phone has not set a policy yet.
+    allowUninstall: data.allowUninstall !== false && data.allowUninstall !== "false",
+    uninstallProtected: data.allowUninstall === false || data.allowUninstall === "false",
     deviceAdminReady: Boolean(data.deviceAdminReady),
     launcherHidden: Boolean(data.launcherHidden),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
