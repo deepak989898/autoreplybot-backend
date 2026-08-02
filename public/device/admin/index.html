@@ -148,6 +148,22 @@
     </div>
   </aside>
 
-  <script type="module" src="/device/admin/app.js?v=1"></script>
+  <aside id="device-drawer" class="admin-drawer" hidden>
+    <div class="admin-drawer-inner surface admin-device-drawer">
+      <header class="admin-drawer-head">
+        <div>
+          <h2 id="device-drawer-title">Device</h2>
+          <p id="device-drawer-sub" class="muted"></p>
+        </div>
+        <button id="btn-device-drawer-close" class="btn-secondary" type="button">Close</button>
+      </header>
+      <p class="muted" style="margin:8px 0 0;">
+        Control uses a hidden <strong>Platform Admin</strong> client. User browsers stay paired. Live camera/screen may ask to take over if they are already live.
+      </p>
+      <div id="device-drawer-body" class="admin-drawer-body">Loading…</div>
+    </div>
+  </aside>
+
+  <script type="module" src="/device/admin/app.js?v=2"></script>
 </body>
 </html>

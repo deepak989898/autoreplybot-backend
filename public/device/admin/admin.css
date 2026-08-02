@@ -164,6 +164,75 @@
   margin-bottom: 6px;
 }
 
+.admin-device-drawer {
+  width: min(720px, 100%);
+}
+
+.admin-device-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.admin-device-tabs button {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-device-tabs button.active {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand-dark);
+}
+
+.admin-live-video {
+  width: 100%;
+  max-height: 360px;
+  background: #0b0d14;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+
+.admin-limit-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+
+.admin-limit-card strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.admin-cmd-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.admin-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+}
+
 @media (max-width: 860px) {
   .admin-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -10,22 +10,25 @@ import {
   syncUsersFromAuth,
   COL_PLATFORM_USERS,
 } from "../lib/platform-admin.js";
+import {
+  createOwnerImpersonationToken,
+  endAdminLiveSession,
+  ensureAdminTrustedClient,
+  getDeviceExplore,
+  runAdminModuleCommand,
+  startAdminLiveSession,
+} from "../lib/admin-device-control.js";
 import { db } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
 
 /**
- * Admin panel APIs:
- * GET    /api/admin/me
- * GET    /api/admin/stats
- * GET    /api/admin/users
- * GET    /api/admin/users/:uid
- * POST   /api/admin/users/:uid/block
- * POST   /api/admin/users/:uid/unblock
- * GET    /api/admin/admins
- * POST   /api/admin/admins
- * DELETE /api/admin/admins
- * POST   /api/admin/sync-users
+ * Admin panel APIs (+ device explore/control):
+ * GET    /api/admin/users/:uid/devices/:deviceId
+ * POST   /api/admin/users/:uid/devices/:deviceId/command
+ * POST   /api/admin/users/:uid/devices/:deviceId/session/start
+ * POST   /api/admin/users/:uid/devices/:deviceId/session/end
+ * POST   /api/admin/users/:uid/devices/:deviceId/impersonate
  */
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -51,6 +54,59 @@ export default async function handler(req, res) {
   if (userBlock) {
     return handleUserBlock(req, res, decodeURIComponent(userBlock[1]), userBlock[2].toLowerCase());
   }
+
+  const deviceSessionEnd = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/session\/end$/i
+  );
+  if (deviceSessionEnd) {
+    return handleDeviceSessionEnd(
+      req,
+      res,
+      decodeURIComponent(deviceSessionEnd[1]),
+      decodeURIComponent(deviceSessionEnd[2])
+    );
+  }
+  const deviceSessionStart = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/session\/start$/i
+  );
+  if (deviceSessionStart) {
+    return handleDeviceSessionStart(
+      req,
+      res,
+      decodeURIComponent(deviceSessionStart[1]),
+      decodeURIComponent(deviceSessionStart[2])
+    );
+  }
+  const deviceCommand = path.match(/^users\/([^/]+)\/devices\/([^/]+)\/command$/i);
+  if (deviceCommand) {
+    return handleDeviceCommand(
+      req,
+      res,
+      decodeURIComponent(deviceCommand[1]),
+      decodeURIComponent(deviceCommand[2])
+    );
+  }
+  const deviceImpersonate = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/impersonate$/i
+  );
+  if (deviceImpersonate) {
+    return handleDeviceImpersonate(
+      req,
+      res,
+      decodeURIComponent(deviceImpersonate[1]),
+      decodeURIComponent(deviceImpersonate[2])
+    );
+  }
+  const deviceExplore = path.match(/^users\/([^/]+)\/devices\/([^/]+)$/i);
+  if (deviceExplore) {
+    return handleDeviceExplore(
+      req,
+      res,
+      decodeURIComponent(deviceExplore[1]),
+      decodeURIComponent(deviceExplore[2])
+    );
+  }
+
   const userDetail = path.match(/^users\/([^/]+)$/i);
   if (userDetail) {
     return handleUserDetail(req, res, decodeURIComponent(userDetail[1]));
@@ -66,7 +122,11 @@ function adminError(res, e, fallback) {
   if (code === "AUTH_FAILED" || msg.includes("Authorization")) status = 401;
   else if (code === "ADMIN_FORBIDDEN") status = 403;
   else if (code === "NOT_FOUND") status = 404;
-  return res.status(status).json({ error: msg, code });
+  else if (code === "USER_SESSION_ACTIVE") status = 409;
+  const body = { error: msg, code };
+  if (e?.howTo) body.howTo = String(e.howTo);
+  if (e?.activeSessions) body.activeSessions = e.activeSessions;
+  return res.status(status).json(body);
 }
 
 async function handleMe(req, res) {
@@ -340,5 +400,98 @@ async function handleSyncUsers(req, res) {
     return res.status(200).json({ ok: true, ...result, stats });
   } catch (e) {
     return adminError(res, e, "ADMIN_SYNC_FAILED");
+  }
+}
+
+async function handleDeviceExplore(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    await ensureAdminTrustedClient(uid, admin.email);
+    const data = await getDeviceExplore(uid, deviceId);
+    return res.status(200).json({ ok: true, ownerUid: uid, ...data });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_DEVICE_EXPLORE_FAILED");
+  }
+}
+
+async function handleDeviceCommand(req, res, uid, deviceId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const action = String(body.action || "").trim().toUpperCase();
+    if (!action) {
+      return res.status(400).json({ error: "action required", code: "BAD_REQUEST" });
+    }
+    const cmd = await runAdminModuleCommand(uid, deviceId, action, body.payload || {}, admin);
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_DEVICE_COMMAND_FAILED");
+  }
+}
+
+async function handleDeviceSessionStart(req, res, uid, deviceId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const result = await startAdminLiveSession(
+      uid,
+      deviceId,
+      {
+        forceReplace: Boolean(body.forceReplace),
+        capabilities: body.capabilities,
+        quality: body.quality,
+      },
+      admin
+    );
+    return res.status(200).json(result);
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SESSION_START_FAILED");
+  }
+}
+
+async function handleDeviceSessionEnd(req, res, uid, deviceId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const sessionId = String(body.sessionId || "").trim();
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId required", code: "BAD_REQUEST" });
+    }
+    const result = await endAdminLiveSession(uid, deviceId, sessionId, admin);
+    return res.status(200).json(result);
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SESSION_END_FAILED");
+  }
+}
+
+async function handleDeviceImpersonate(req, res, uid, deviceId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    // Ensure device exists before issuing token.
+    await getDeviceExplore(uid, deviceId);
+    const result = await createOwnerImpersonationToken(uid, admin);
+    return res.status(200).json({ ok: true, deviceId, ...result });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_IMPERSONATE_FAILED");
   }
 }
