@@ -275,6 +275,64 @@
   margin-top: 14px;
 }
 
+.admin-media-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(28, 31, 46, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.admin-media-viewer[hidden] {
+  display: none !important;
+}
+
+.admin-media-viewer-inner {
+  width: min(920px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 16px;
+}
+
+.admin-media-body img,
+.admin-media-body video,
+.admin-media-body audio {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 12px;
+  background: #0b0d14;
+}
+
+.admin-gallery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.notif-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+
+.notif-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.notif-message {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 #device-control-view .device-card {
   margin-top: 0;
 }

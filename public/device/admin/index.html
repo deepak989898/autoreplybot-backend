@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=6" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=7" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -214,18 +214,27 @@
           </div>
           <div id="admin-panel-gallery" class="phone-tab-panel" data-phone-panel="gallery" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Cached MediaStore index from the phone.</p>
+              <p class="page-sub">View images and download video/audio from the phone index (Platform Admin client — user browsers stay paired).</p>
               <div class="page-actions">
                 <button type="button" class="btn-secondary" data-admin-cmd="GALLERY_INDEX">Request index</button>
+                <button type="button" class="btn-primary" id="btn-admin-gallery-refresh">Refresh</button>
               </div>
+            </div>
+            <div class="gallery-filters" role="group" aria-label="Gallery filters" id="admin-gallery-filters">
+              <button type="button" class="gallery-filter active" data-gallery-filter="all">All</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="image">Images</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="video">Video</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="audio">Audio</button>
+              <button type="button" class="gallery-filter" data-gallery-filter="file">Files</button>
             </div>
             <div id="admin-gallery-body" class="surface muted">Loading…</div>
           </div>
           <div id="admin-panel-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Mirrored notifications cached on this device.</p>
+              <p class="page-sub">Mirrored notifications from the phone (title + message), same data the user website uses.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="NOTIFICATIONS_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" id="btn-admin-notif-refresh">Refresh</button>
               </div>
             </div>
             <div id="admin-notifications-body" class="surface muted">Loading…</div>
@@ -310,7 +319,18 @@
     </main>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=6"></script>
+  <div id="admin-media-viewer" class="admin-media-viewer" hidden>
+    <div class="admin-media-viewer-inner surface">
+      <header class="admin-drawer-head">
+        <h2 id="admin-media-title">Media</h2>
+        <button type="button" class="btn-secondary" id="btn-admin-media-close">Close</button>
+      </header>
+      <div id="admin-media-body" class="admin-media-body muted">Loading…</div>
+      <p id="admin-media-status" class="muted" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <script type="module" src="/device/admin/app.js?v=7"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {

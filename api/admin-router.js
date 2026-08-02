@@ -12,11 +12,14 @@ import {
 } from "../lib/platform-admin.js";
 import {
   createOwnerImpersonationToken,
+  downloadAdminTransferContent,
   endAdminLiveSession,
   ensureAdminTrustedClient,
+  getAdminTransfer,
   getDeviceExplore,
   runAdminModuleCommand,
   sendAdminLiveCommand,
+  startAdminGalleryTransfer,
   startAdminLiveSession,
 } from "../lib/admin-device-control.js";
 import { db } from "../lib/firebase.js";
@@ -57,6 +60,37 @@ export default async function handler(req, res) {
     return handleUserBlock(req, res, decodeURIComponent(userBlock[1]), userBlock[2].toLowerCase());
   }
 
+  const galleryTransfer = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/gallery\/transfer$/i
+  );
+  if (galleryTransfer) {
+    return handleAdminGalleryTransfer(
+      req,
+      res,
+      decodeURIComponent(galleryTransfer[1]),
+      decodeURIComponent(galleryTransfer[2])
+    );
+  }
+  const transferContent = path.match(
+    /^users\/([^/]+)\/transfers\/([^/]+)\/content$/i
+  );
+  if (transferContent) {
+    return handleAdminTransferContent(
+      req,
+      res,
+      decodeURIComponent(transferContent[1]),
+      decodeURIComponent(transferContent[2])
+    );
+  }
+  const transferStatus = path.match(/^users\/([^/]+)\/transfers\/([^/]+)$/i);
+  if (transferStatus) {
+    return handleAdminTransferStatus(
+      req,
+      res,
+      decodeURIComponent(transferStatus[1]),
+      decodeURIComponent(transferStatus[2])
+    );
+  }
   const deviceSessionEnd = path.match(
     /^users\/([^/]+)\/devices\/([^/]+)\/session\/end$/i
   );
@@ -135,7 +169,7 @@ function adminError(res, e, fallback) {
   if (code === "AUTH_FAILED" || msg.includes("Authorization")) status = 401;
   else if (code === "ADMIN_FORBIDDEN") status = 403;
   else if (code === "NOT_FOUND") status = 404;
-  else if (code === "USER_SESSION_ACTIVE") status = 409;
+  else if (code === "USER_SESSION_ACTIVE" || code === "NOT_READY") status = 409;
   const body = { error: msg, code };
   if (e?.howTo) body.howTo = String(e.howTo);
   if (e?.activeSessions) body.activeSessions = e.activeSessions;
@@ -456,6 +490,68 @@ async function handleDeviceCommand(req, res, uid, deviceId) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return adminError(res, e, "ADMIN_DEVICE_COMMAND_FAILED");
+  }
+}
+
+async function handleAdminGalleryTransfer(req, res, uid, deviceId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const result = await startAdminGalleryTransfer(
+      uid,
+      deviceId,
+      {
+        itemId: body.itemId || body.id,
+        id: body.id || body.itemId,
+        sizeBytes: body.sizeBytes,
+        mimeType: body.mimeType,
+        displayName: body.displayName,
+      },
+      admin
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_GALLERY_TRANSFER_FAILED");
+  }
+}
+
+async function handleAdminTransferStatus(req, res, uid, transferId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const transfer = await getAdminTransfer(uid, transferId);
+    return res.status(200).json({ ok: true, transfer });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_TRANSFER_STATUS_FAILED");
+  }
+}
+
+async function handleAdminTransferContent(req, res, uid, transferId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const file = await downloadAdminTransferContent(uid, transferId);
+    const name = String(file.displayName || "file").replace(/[^\w.\- ()[\]]+/g, "_");
+    res.setHeader("Content-Type", file.mimeType);
+    res.setHeader("Content-Length", String(file.buffer.length));
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${name.slice(0, 180)}"`
+    );
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.status(200).send(file.buffer);
+  } catch (e) {
+    return adminError(res, e, "ADMIN_TRANSFER_CONTENT_FAILED");
   }
 }
 

