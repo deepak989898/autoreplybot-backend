@@ -983,6 +983,68 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   background: var(--danger, #c0392b);
 }
 
+.live-captures {
+  margin-top: 4px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.live-captures-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.live-captures-head strong {
+  font-size: 0.95rem;
+}
+
+.live-captures-empty {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.live-captures-list {
+  display: grid;
+  gap: 12px;
+}
+
+.live-capture-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.live-capture-preview {
+  width: 100%;
+  max-height: 160px;
+  border-radius: 10px;
+  background: #0b1020;
+  object-fit: contain;
+}
+
+.live-capture-meta {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.live-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .live-capture-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .live-rec-badge {
   display: none;
   align-items: center;

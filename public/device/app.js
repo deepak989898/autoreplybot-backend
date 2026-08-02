@@ -18,7 +18,13 @@ import {
   query,
   orderBy,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
-import { getStorage, ref as storageRef, getBlob } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-storage.js";
+import {
+  getStorage,
+  ref as storageRef,
+  getBlob,
+  uploadBytes,
+  getDownloadURL,
+} from "https://www.gstatic.com/firebasejs/11.7.3/firebase-storage.js";
 import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm";
 import {
   canonicalSessionRequest,
@@ -486,6 +492,8 @@ let imageZoomState = null;
 let publicIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
 /** @type {Map<string, LiveSession>} */
 const liveByDevice = new Map();
+/** @type {Map<string, Array<{ localId: string, mediaId?: string, fileName: string, objectUrl: string, downloadUrl?: string, createdAt: number, sizeBytes: number, status: string }>>} */
+const liveVideoClipsByDevice = new Map();
 /** Independent screen-mirror sessions (do not share camera liveByDevice). */
 /** @type {Map<string, LiveSession>} */
 const screenLiveByDevice = new Map();
@@ -792,7 +800,8 @@ function renderDevices(devices, clients) {
             <audio class="live-audio" data-audio-for="${id}" autoplay playsinline></audio>
             <p class="live-audio-hint muted" data-audio-hint-for="${id}" hidden>
               Live microphone is on the phone stream. Tap <strong>Enable speaker</strong> if you hear no voice
-              (browser autoplay may block sound). “Start audio” only saves a file on the phone — it is not live voice.
+              (browser autoplay may block sound). <strong>Start video</strong> records camera + mic and lists the file below
+              (not kept on the phone). “Record audio file” still saves on the phone until upload finishes.
             </p>
             <div class="live-controls" data-controls-for="${id}">
               <span class="live-rec-badge" aria-live="polite">
@@ -804,9 +813,16 @@ function renderDevices(devices, clients) {
               <button type="button" data-toggle="torch" aria-pressed="false">Torch: OFF</button>
               <button type="button" data-toggle="mic" aria-pressed="false">Mic: ON</button>
               <button type="button" data-cmd="CAPTURE_PHOTO">Capture photo</button>
-              <button type="button" data-toggle="video-rec" aria-pressed="false">Start video</button>
+              <button type="button" data-toggle="video-rec" aria-pressed="false" title="Records live camera + mic in the browser, then saves here (not kept on the phone)">Start video</button>
               <button type="button" data-toggle="audio-rec" aria-pressed="false" title="Saves an audio file on the phone; may pause live mic">Record audio file</button>
               <button type="button" class="btn-end-live" data-cmd="END_SESSION">End session</button>
+            </div>
+            <div class="live-captures surface" data-captures-for="${id}">
+              <div class="live-captures-head">
+                <strong>Saved videos</strong>
+                <span class="muted">Live camera + mic · play / download below</span>
+              </div>
+              <div class="live-captures-list" data-captures-list-for="${id}"></div>
             </div>
           </div>
         </div>
@@ -853,9 +869,14 @@ function renderDevices(devices, clients) {
       btn.addEventListener("click", () => {
         const toggle = btn.getAttribute("data-toggle");
         if (!toggle) return;
-        handleLiveToggle(deviceId, toggle).catch(() => {});
+        handleLiveToggle(deviceId, toggle).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg) alert(msg);
+          applyLiveControlUi(deviceId);
+        });
       });
     });
+    renderLiveVideoClips(deviceId);
   });
 
   // Tab switches / refreshDevices rebuild this DOM — reattach any still-live sessions.
@@ -894,6 +915,7 @@ function restoreActiveLiveSessionsUi() {
         setConnectionLabel(deviceId, CONN.CONNECTED, "session still active");
       }
       applyLiveControlUi(deviceId);
+      renderLiveVideoClips(deviceId);
       continue;
     }
 
@@ -921,13 +943,9 @@ async function handleLiveToggle(deviceId, toggle) {
     st.micMuted = nextMuted;
   } else if (toggle === "video-rec") {
     if (!st.videoRecording) {
-      await sendCommand(deviceId, "START_VIDEO_RECORDING");
-      st.videoRecording = true;
-      st.videoStartedAt = Date.now();
+      await startLiveBrowserVideoRecording(deviceId);
     } else {
-      await sendCommand(deviceId, "STOP_VIDEO_RECORDING");
-      st.videoRecording = false;
-      st.videoStartedAt = 0;
+      await stopLiveBrowserVideoRecording(deviceId);
     }
   } else if (toggle === "audio-rec") {
     if (!st.audioRecording) {
@@ -947,6 +965,296 @@ async function handleLiveToggle(deviceId, toggle) {
     }
   }
   applyLiveControlUi(deviceId);
+}
+
+function pickLiveRecorderMime() {
+  const types = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4",
+  ];
+  for (const t of types) {
+    try {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
+function getLiveRecordMediaStream(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  const pc = live?.pc;
+  if (!pc) throw new Error("Connect to the phone first, then Start video.");
+  const stream = new MediaStream();
+  for (const receiver of pc.getReceivers()) {
+    const track = receiver.track;
+    if (track && track.readyState === "live") {
+      stream.addTrack(track);
+    }
+  }
+  if (!stream.getVideoTracks().length) {
+    throw new Error("No live camera video yet. Wait until the preview appears.");
+  }
+  return stream;
+}
+
+/**
+ * Record live camera + mic in the browser (phone keeps no local video file).
+ * @param {string} deviceId
+ */
+async function startLiveBrowserVideoRecording(deviceId) {
+  const st = getLiveControlState(deviceId);
+  const live = liveByDevice.get(deviceId);
+  if (!live?.pc) throw new Error("Connect to the phone first, then Start video.");
+  if (live.browserVideoRecorder) {
+    throw new Error("Already recording");
+  }
+
+  // Ensure phone mic is unmuted so the recording includes voice.
+  if (st.micMuted) {
+    await sendCommand(deviceId, "MIC_UNMUTE");
+    st.micMuted = false;
+  }
+
+  const stream = getLiveRecordMediaStream(deviceId);
+  if (!stream.getAudioTracks().length) {
+    const ok = window.confirm(
+      "Live microphone track is not available yet.\n\n" +
+        "Recording will be video-only (no mic). Continue anyway?"
+    );
+    if (!ok) return;
+  }
+
+  const mimeType = pickLiveRecorderMime();
+  const recorder = mimeType
+    ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 })
+    : new MediaRecorder(stream);
+  const chunks = [];
+  recorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+  };
+  recorder.onerror = () => {
+    st.videoRecording = false;
+    st.videoStartedAt = 0;
+    live.browserVideoRecorder = null;
+    live.browserVideoChunks = null;
+    applyLiveControlUi(deviceId);
+    alert("Video recording failed in this browser. Try Chrome/Edge.");
+  };
+  recorder.onstop = () => {
+    void finalizeLiveBrowserVideoRecording(deviceId, chunks, recorder.mimeType || mimeType || "video/webm");
+  };
+
+  live.browserVideoRecorder = recorder;
+  live.browserVideoChunks = chunks;
+  live.browserVideoMaxTimer = setTimeout(() => {
+    if (st.videoRecording) {
+      void stopLiveBrowserVideoRecording(deviceId).catch(() => {});
+    }
+  }, 10 * 60 * 1000);
+
+  recorder.start(1000);
+  st.videoRecording = true;
+  st.videoStartedAt = Date.now();
+  setDeviceStatus(deviceId, "Recording video + mic…");
+}
+
+/**
+ * @param {string} deviceId
+ */
+async function stopLiveBrowserVideoRecording(deviceId) {
+  const st = getLiveControlState(deviceId);
+  const live = liveByDevice.get(deviceId);
+  const recorder = live?.browserVideoRecorder;
+  if (!recorder) {
+    st.videoRecording = false;
+    st.videoStartedAt = 0;
+    return;
+  }
+  if (live.browserVideoMaxTimer) {
+    clearTimeout(live.browserVideoMaxTimer);
+    live.browserVideoMaxTimer = null;
+  }
+  if (recorder.state === "recording" || recorder.state === "paused") {
+    recorder.stop();
+  }
+  live.browserVideoRecorder = null;
+  st.videoRecording = false;
+  st.videoStartedAt = 0;
+  setDeviceStatus(deviceId, "Saving video…");
+}
+
+/**
+ * @param {string} deviceId
+ * @param {Blob[]} chunks
+ * @param {string} mimeType
+ */
+async function finalizeLiveBrowserVideoRecording(deviceId, chunks, mimeType) {
+  const live = liveByDevice.get(deviceId);
+  if (live) live.browserVideoChunks = null;
+  const type = String(mimeType || "video/webm").split(";")[0] || "video/webm";
+  const blob = new Blob(chunks || [], { type });
+  if (!blob.size) {
+    setDeviceStatus(deviceId, "Recording was empty — try again.");
+    return;
+  }
+  const ext = type.includes("mp4") ? "mp4" : "webm";
+  const fileName = `live_${deviceId.slice(0, 6)}_${Date.now()}.${ext}`;
+  const objectUrl = URL.createObjectURL(blob);
+  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const clip = {
+    localId,
+    fileName,
+    objectUrl,
+    createdAt: Date.now(),
+    sizeBytes: blob.size,
+    status: "Saving…",
+  };
+  const list = liveVideoClipsByDevice.get(deviceId) || [];
+  list.unshift(clip);
+  liveVideoClipsByDevice.set(deviceId, list.slice(0, 30));
+  renderLiveVideoClips(deviceId);
+  setDeviceStatus(deviceId, "Uploading video…");
+
+  try {
+    const uploaded = await uploadLiveVideoClip(deviceId, blob, fileName, type);
+    clip.mediaId = uploaded.mediaId;
+    clip.downloadUrl = uploaded.downloadUrl;
+    clip.status = "Saved";
+    setDeviceStatus(deviceId, "Video saved below (not kept on the phone).");
+    // Refresh Media Files panel if open.
+    if (typeof refreshMedia === "function") {
+      refreshMedia().catch(() => {});
+    }
+  } catch (e) {
+    clip.status = "Saved locally (upload failed)";
+    setDeviceStatus(
+      deviceId,
+      e instanceof Error ? e.message : "Video ready below — cloud upload failed."
+    );
+  }
+  renderLiveVideoClips(deviceId);
+}
+
+/**
+ * Upload browser-recorded clip to the same remoteMedia gallery (no phone storage).
+ * @param {string} deviceId
+ * @param {Blob} blob
+ * @param {string} fileName
+ * @param {string} contentType
+ */
+async function uploadLiveVideoClip(deviceId, blob, fileName, contentType) {
+  if (!storage || !db || !firebaseUid) throw new Error("Not signed in");
+  const live = liveByDevice.get(deviceId);
+  const mediaId = `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const ext = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : ".webm";
+  const storagePath = `remote_media/${firebaseUid}/${mediaId}${ext}`;
+  const fileRef = storageRef(storage, storagePath);
+  await uploadBytes(fileRef, blob, {
+    contentType: contentType || "video/webm",
+    customMetadata: {
+      kind: "video",
+      deviceId: String(deviceId || ""),
+      sessionId: String(live?.sessionId || ""),
+      source: "browser_live_record",
+    },
+  });
+  const downloadUrl = await getDownloadURL(fileRef);
+  const now = Date.now();
+  await setDoc(doc(db, "users", firebaseUid, "remoteMedia", mediaId), {
+    mediaId,
+    ownerUid: firebaseUid,
+    deviceId: String(deviceId || ""),
+    sessionId: String(live?.sessionId || ""),
+    clientId: String(live?.clientId || ""),
+    kind: "video",
+    fileName,
+    contentType: contentType || "video/webm",
+    storagePath,
+    downloadUrl,
+    sizeBytes: blob.size,
+    createdAt: now,
+    updatedAt: now,
+    revoked: false,
+    source: "browser_live_record",
+  });
+  return { mediaId, downloadUrl, storagePath };
+}
+
+/**
+ * @param {string} deviceId
+ */
+function renderLiveVideoClips(deviceId) {
+  if (!deviceList) return;
+  const el = deviceList.querySelector(
+    `[data-captures-list-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!el) return;
+  const items = liveVideoClipsByDevice.get(deviceId) || [];
+  if (!items.length) {
+    el.innerHTML = `<p class="muted live-captures-empty">No videos yet. Tap Start video (includes mic), then Stop — the file appears here and is not kept on the phone.</p>`;
+    return;
+  }
+  el.innerHTML = items
+    .map((clip) => {
+      const url = escapeHtml(clip.downloadUrl || clip.objectUrl || "");
+      const name = escapeHtml(clip.fileName || "video");
+      const when = escapeHtml(
+        clip.createdAt ? new Date(clip.createdAt).toLocaleString() : ""
+      );
+      const size = clip.sizeBytes
+        ? `${(clip.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+        : "";
+      const status = escapeHtml(clip.status || "Saved");
+      return `<article class="live-capture-row">
+        <video class="live-capture-preview" src="${url}" controls playsinline preload="metadata"></video>
+        <div class="live-capture-meta">
+          <strong>${name}</strong>
+          <span class="muted">${when}${size ? ` · ${escapeHtml(size)}` : ""} · ${status}</span>
+          <div class="live-capture-actions">
+            <a class="btn-secondary" href="${url}" download="${name}" target="_blank" rel="noopener">Download</a>
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+async function hydrateLiveVideoClips(deviceId) {
+  if (!idToken || !deviceId) return;
+  try {
+    const data = await api("/api/device/media?limit=40");
+    const remote = (data.media || [])
+      .filter(
+        (m) =>
+          String(m.kind || "") === "video" &&
+          (!m.deviceId || String(m.deviceId) === String(deviceId))
+      )
+      .map((m) => ({
+        localId: m.mediaId,
+        mediaId: m.mediaId,
+        fileName: m.fileName || "video",
+        objectUrl: m.downloadUrl || "",
+        downloadUrl: m.downloadUrl || "",
+        createdAt: Number(m.createdAt || 0),
+        sizeBytes: Number(m.sizeBytes || 0),
+        status: "Saved",
+      }));
+    const local = (liveVideoClipsByDevice.get(deviceId) || []).filter(
+      (c) => !c.mediaId || !remote.some((r) => r.mediaId === c.mediaId)
+    );
+    const merged = [...local, ...remote].sort(
+      (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+    );
+    liveVideoClipsByDevice.set(deviceId, merged.slice(0, 30));
+    renderLiveVideoClips(deviceId);
+  } catch {
+    renderLiveVideoClips(deviceId);
+  }
 }
 
 function setDeviceStatus(deviceId, text) {
@@ -1021,6 +1329,11 @@ function attachRemoteTrack(deviceId, track, stream) {
         .join(", ")
     : `${track.kind}:${track.readyState}`;
   setConnectionLabel(deviceId, CONN.CONNECTED, kinds || "media flowing");
+  if (!liveVideoClipsByDevice.has(deviceId)) {
+    void hydrateLiveVideoClips(deviceId);
+  } else {
+    renderLiveVideoClips(deviceId);
+  }
 }
 
 /**
@@ -1607,6 +1920,14 @@ async function writeSignal(sessionId, type, sender, payloadObj) {
  */
 async function endLiveSession(deviceId, reason) {
   const live = liveByDevice.get(deviceId);
+  const st = getLiveControlState(deviceId);
+  if (st.videoRecording || live?.browserVideoRecorder) {
+    try {
+      await stopLiveBrowserVideoRecording(deviceId);
+    } catch {
+      /* continue ending session */
+    }
+  }
   const sessionId = live?.sessionId;
   if (sessionId && db && firebaseUid) {
     try {
@@ -1647,8 +1968,21 @@ async function endLiveSession(deviceId, reason) {
  * @param {boolean} endOnServer
  */
 function cleanupLive(deviceId, endOnServer) {
-  resetLiveControlState(deviceId);
   const live = liveByDevice.get(deviceId);
+  if (live?.browserVideoRecorder) {
+    try {
+      if (live.browserVideoMaxTimer) {
+        clearTimeout(live.browserVideoMaxTimer);
+        live.browserVideoMaxTimer = null;
+      }
+      const rec = live.browserVideoRecorder;
+      live.browserVideoRecorder = null;
+      if (rec.state === "recording" || rec.state === "paused") rec.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+  resetLiveControlState(deviceId);
   if (!live) {
     setConnectUi(deviceId, { connecting: false, live: false });
     return;
