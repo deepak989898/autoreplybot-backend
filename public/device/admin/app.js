@@ -429,19 +429,26 @@ function renderUserDetailBody(uid, data) {
     <div class="admin-device-grid">${deviceCards}</div>
 
     <h2 class="settings-section-title">Trusted browsers</h2>
+    <p class="muted" style="margin-top:0;">Phone no longer shows Revoke — revoke user browsers here. System is the admin control channel (always kept).</p>
     <div class="surface">
       ${
         clients.length
           ? `<ul class="admin-readable-list">${clients
               .map((c) => {
-                const admin =
-                  c.clientId === "platform_admin" || c.isPlatformAdminClient
-                    ? ' <span class="admin-badge ok">Admin</span>'
+                const isSystem =
+                  c.clientId === "platform_admin" || c.isPlatformAdminClient;
+                const badge = isSystem
+                  ? ' <span class="admin-badge ok">System control</span>'
+                  : "";
+                const revokeBtn =
+                  !isSystem && !c.revoked
+                    ? `<button type="button" class="btn-secondary btn-admin-revoke-client" data-uid="${escapeHtml(uid)}" data-client-id="${escapeHtml(c.clientId)}" style="margin-left:8px;">Revoke</button>`
                     : "";
                 return `<li>
-                  <strong>${escapeHtml(c.label || c.clientName || c.clientId)}</strong>
-                  ${admin}
-                  <span class="muted"> — ${escapeHtml(c.browserName || "")} / ${escapeHtml(c.operatingSystem || "")}${c.revoked ? " · revoked" : ""}</span>
+                  <strong>${escapeHtml(isSystem ? "System" : c.label || c.clientName || c.clientId)}</strong>
+                  ${badge}
+                  <span class="muted"> — ${escapeHtml(isSystem ? "Website" : c.browserName || "")} / ${escapeHtml(isSystem ? "Server" : c.operatingSystem || "")}${c.revoked ? " · revoked" : ""}</span>
+                  ${revokeBtn}
                 </li>`;
               })
               .join("")}</ul>`
@@ -535,7 +542,31 @@ function renderUserDetailBody(uid, data) {
 
   body.querySelectorAll(".btn-explore-device").forEach((btn) => {
     btn.addEventListener("click", () => {
-      void openDeviceExplore(btn.getAttribute("data-uid"), btn.getAttribute("data-device"));
+      const owner = btn.getAttribute("data-uid") || uid;
+      const deviceId = btn.getAttribute("data-device");
+      if (deviceId) void openDeviceExplore(owner, deviceId);
+    });
+  });
+
+  body.querySelectorAll(".btn-admin-revoke-client").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const owner = btn.getAttribute("data-uid") || uid;
+      const clientId = btn.getAttribute("data-client-id") || "";
+      if (!clientId) return;
+      if (!window.confirm(`Revoke trusted browser ${clientId}? Active sessions for it will end.`)) {
+        return;
+      }
+      try {
+        btn.disabled = true;
+        await api(
+          `/api/admin/users/${encodeURIComponent(owner)}/trusted-clients/${encodeURIComponent(clientId)}/revoke`,
+          { method: "POST", body: "{}" }
+        );
+        await openUser(owner);
+      } catch (e) {
+        alert(formatApiError(e));
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -567,7 +598,13 @@ async function openDeviceExplore(ownerUid, deviceId) {
       `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}`
     );
     const devices = userDetailCache?.devices || [data.device];
-    exploreCtx = { ownerUid, deviceId, data, devices };
+    exploreCtx = {
+      ownerUid,
+      deviceId,
+      data,
+      devices,
+      ownerEmail: userDetailCache?.user?.email || ownerUid,
+    };
     fillDeviceSelect(devices, deviceId);
     setPhoneTab(activePhoneTab || "camera");
     renderAllPhonePanels();
@@ -709,6 +746,14 @@ function renderCameraPanel() {
             <button type="button" class="btn-end-live" data-live-cmd="END_SESSION">End session</button>
           </div>
         </div>
+        <div class="live-captures surface" style="margin-top:14px;">
+          <div class="live-captures-head" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <strong>Recorded videos</strong>
+            <button type="button" class="btn-secondary" id="btn-admin-media-refresh">Refresh</button>
+          </div>
+          <p class="muted" style="margin:6px 0 8px;font-size:0.85rem;">Same files the user records with Start video. Soft-deleted by the user stay here with a hint until you permanently delete.</p>
+          <div id="admin-remote-media-list"></div>
+        </div>
       </div>
     </article>
   `;
@@ -726,7 +771,85 @@ function renderCameraPanel() {
   document.getElementById("btn-admin-end-live")?.addEventListener("click", () => {
     void endAdminLive("client_ended");
   });
+  document.getElementById("btn-admin-media-refresh")?.addEventListener("click", () => {
+    if (!exploreCtx) return;
+    void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+  });
   wireLiveControls();
+  renderAdminRemoteMediaList();
+}
+
+function renderAdminRemoteMediaList() {
+  const listEl = document.getElementById("admin-remote-media-list");
+  if (!listEl || !exploreCtx) return;
+  const ownerEmail = String(exploreCtx.ownerEmail || exploreCtx.ownerUid || "user");
+  const items = [...(exploreCtx.data.remoteMedia || [])].sort(
+    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+  );
+  if (!items.length) {
+    listEl.innerHTML = `<p class="muted">No recorded videos yet for this device.</p>`;
+    return;
+  }
+  listEl.innerHTML = items
+    .slice(0, 40)
+    .map((m) => {
+      const url = String(m.downloadUrl || "");
+      const name = escapeHtml(m.fileName || m.mediaId || "file");
+      const kind = escapeHtml(m.kind || "file");
+      const when = escapeHtml(fmtTime(m.createdAt));
+      const hint = m.deletedByUser
+        ? `<span class="admin-badge warn" title="Removed from the user’s website">Deleted by user (${escapeHtml(ownerEmail)})</span>`
+        : "";
+      const play =
+        url && (m.kind === "video" || String(m.contentType || "").startsWith("video/"))
+          ? `<video class="live-capture-preview" src="${escapeHtml(url)}" controls playsinline preload="metadata" style="max-width:100%;max-height:220px;border-radius:8px;"></video>`
+          : url && (m.kind === "audio" || String(m.contentType || "").startsWith("audio/"))
+            ? `<audio src="${escapeHtml(url)}" controls preload="metadata" style="width:100%;"></audio>`
+            : url && (m.kind === "photo" || String(m.contentType || "").startsWith("image/"))
+              ? `<img src="${escapeHtml(url)}" alt="" style="max-width:100%;max-height:180px;border-radius:8px;" />`
+              : "";
+      const openBtn = url
+        ? `<a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open / Download</a>`
+        : "";
+      return `<article class="live-capture-row" style="margin-top:10px;padding:10px;border:1px solid #e2e8f0;border-radius:10px;">
+        ${play}
+        <div class="live-capture-meta" style="margin-top:8px;">
+          <strong>${kind}</strong> · ${name} ${hint}
+          <div class="muted">${when}</div>
+          <div class="admin-gallery-actions" style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
+            ${openBtn}
+            <button type="button" class="btn-danger btn-admin-media-hard-delete" data-media-id="${escapeHtml(m.mediaId)}">Delete permanently</button>
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+  listEl.querySelectorAll(".btn-admin-media-hard-delete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mediaId = btn.getAttribute("data-media-id") || "";
+      if (mediaId) void hardDeleteAdminMedia(mediaId);
+    });
+  });
+}
+
+async function hardDeleteAdminMedia(mediaId) {
+  if (!exploreCtx || !mediaId) return;
+  if (
+    !window.confirm(
+      "Permanently delete this recording? This cannot be undone (removes file for user and admin)."
+    )
+  ) {
+    return;
+  }
+  try {
+    await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/media/${encodeURIComponent(mediaId)}/delete`,
+      { method: "POST", body: "{}" }
+    );
+    await openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+  } catch (e) {
+    alert(formatApiError(e));
+  }
 }
 
 function wireLiveControls() {

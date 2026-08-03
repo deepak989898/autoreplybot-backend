@@ -174,6 +174,12 @@
   color: var(--danger);
 }
 
+.admin-badge.warn {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fdba74;
+}
+
 /* Full-page user / device views (no side drawer) */
 .admin-user-detail-body {
   margin-top: 8px;

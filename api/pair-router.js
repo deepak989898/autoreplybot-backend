@@ -386,6 +386,13 @@ async function handleRevoke(req, res) {
     if (!clientId || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) {
       throw new Error("clientId is required");
     }
+    // Internal System control channel used by Platform Admin — never revoke from the phone.
+    if (clientId === "platform_admin") {
+      return res.status(403).json({
+        error: "System control client cannot be revoked",
+        code: "PROTECTED_CLIENT",
+      });
+    }
 
     const ref = trustedClientsRef(uid).doc(clientId);
     const snap = await ref.get();
@@ -395,6 +402,12 @@ async function handleRevoke(req, res) {
     const data = snap.data() || {};
     if (String(data.ownerUid || "") !== uid) {
       throw new Error("Trusted client not found");
+    }
+    if (data.isPlatformAdminClient === true) {
+      return res.status(403).json({
+        error: "System control client cannot be revoked",
+        code: "PROTECTED_CLIENT",
+      });
     }
 
     const now = Date.now();

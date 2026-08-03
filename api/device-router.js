@@ -89,6 +89,7 @@ export default async function handler(req, res) {
   if (path === "list") return handleList(req, res);
   if (path === "sessions") return handleSessions(req, res);
   if (path === "media") return handleMediaList(req, res);
+  if (path === "media/delete") return handleMediaSoftDelete(req, res);
   if (path === "ice-servers") return handleIceServers(req, res);
   if (path === "session/request") return handleSessionRequest(req, res);
   if (path === "session/end") return handleSessionEnd(req, res);
@@ -326,9 +327,11 @@ async function handleSessions(req, res) {
   }
 }
 
-function sanitizeMedia(id, data) {
+function sanitizeMedia(id, data, { includeDeletedByUser = false } = {}) {
   if (!data || typeof data !== "object") return null;
   if (data.revoked === true) return null;
+  const deletedByUser = data.deletedByUser === true;
+  if (deletedByUser && !includeDeletedByUser) return null;
   return {
     mediaId: data.mediaId || id,
     kind: String(data.kind || ""),
@@ -341,6 +344,9 @@ function sanitizeMedia(id, data) {
     deviceId: String(data.deviceId || ""),
     sessionId: String(data.sessionId || ""),
     clientId: String(data.clientId || ""),
+    source: String(data.source || ""),
+    deletedByUser,
+    deletedByUserAt: Number(data.deletedByUserAt || 0),
   };
 }
 
@@ -374,6 +380,59 @@ async function handleMediaList(req, res) {
       error: code === 401 ? "Unauthorized" : "Media list failed",
       code: code === 401 ? "AUTH_FAILED" : "MEDIA_LIST_FAILED",
     });
+  }
+}
+
+/**
+ * Soft-delete: hide from the normal user website; keep file for admin until hard-deleted.
+ */
+async function handleMediaSoftDelete(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const mediaId = String(body.mediaId || "").trim();
+    if (!mediaId || !ID_RE.test(mediaId)) {
+      return res.status(400).json({ error: "mediaId required", code: "BAD_REQUEST" });
+    }
+    const ref = db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_REMOTE_MEDIA)
+      .doc(mediaId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Media not found", code: "NOT_FOUND" });
+    }
+    const data = snap.data() || {};
+    if (data.deletedByUser === true) {
+      return res.status(200).json({ ok: true, mediaId, deletedByUser: true });
+    }
+    const now = Date.now();
+    await ref.set(
+      {
+        deletedByUser: true,
+        deletedByUserAt: now,
+        deletedByUserUid: uid,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+    await writeAuditLog(uid, {
+      action: "REMOTE_MEDIA_SOFT_DELETE",
+      result: "ok",
+      metadata: {
+        mediaId,
+        kind: String(data.kind || ""),
+        fileName: String(data.fileName || ""),
+      },
+    });
+    return res.status(200).json({ ok: true, mediaId, deletedByUser: true });
+  } catch (e) {
+    return clientError(res, e, "MEDIA_SOFT_DELETE_FAILED");
   }
 }
 

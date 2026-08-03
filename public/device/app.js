@@ -1210,6 +1210,10 @@ function renderLiveVideoClips(deviceId) {
         ? `${(clip.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
         : "";
       const status = escapeHtml(clip.status || "Saved");
+      const mediaId = escapeHtml(clip.mediaId || "");
+      const deleteBtn = clip.mediaId
+        ? `<button type="button" class="btn-danger btn-live-media-delete" data-media-id="${mediaId}" data-device-id="${escapeHtml(deviceId)}">Delete</button>`
+        : "";
       return `<article class="live-capture-row">
         <video class="live-capture-preview" src="${url}" controls playsinline preload="metadata"></video>
         <div class="live-capture-meta">
@@ -1217,11 +1221,47 @@ function renderLiveVideoClips(deviceId) {
           <span class="muted">${when}${size ? ` · ${escapeHtml(size)}` : ""} · ${status}</span>
           <div class="live-capture-actions">
             <a class="btn-secondary" href="${url}" download="${name}" target="_blank" rel="noopener">Download</a>
+            ${deleteBtn}
           </div>
         </div>
       </article>`;
     })
     .join("");
+  el.querySelectorAll(".btn-live-media-delete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mid = btn.getAttribute("data-media-id") || "";
+      const did = btn.getAttribute("data-device-id") || deviceId;
+      if (mid) void softDeleteUserMedia(mid, did);
+    });
+  });
+}
+
+/**
+ * Soft-delete: hide from this user; admin can still play until they permanently delete.
+ * @param {string} mediaId
+ * @param {string} [deviceId]
+ */
+async function softDeleteUserMedia(mediaId, deviceId = "") {
+  if (!mediaId || !idToken) return;
+  if (!window.confirm("Remove this recording from your account? (Admin can still see it until they delete it.)")) {
+    return;
+  }
+  try {
+    await api("/api/device/media/delete", {
+      method: "POST",
+      body: JSON.stringify({ mediaId }),
+    });
+    if (deviceId) {
+      const list = (liveVideoClipsByDevice.get(deviceId) || []).filter(
+        (c) => c.mediaId !== mediaId && c.localId !== mediaId
+      );
+      liveVideoClipsByDevice.set(deviceId, list);
+      renderLiveVideoClips(deviceId);
+    }
+    await refreshMedia();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
 }
 
 async function hydrateLiveVideoClips(deviceId) {
@@ -2606,6 +2646,7 @@ function renderMedia(items) {
           <div class="media-card-actions">
             <button type="button" class="btn-secondary btn-open-media" data-media-id="${escapeHtml(m.mediaId)}">View / Play</button>
             <a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open</a>
+            <button type="button" class="btn-danger btn-delete-media" data-media-id="${escapeHtml(m.mediaId)}">Delete</button>
           </div>
         </div>
       </article>`;
@@ -2618,6 +2659,12 @@ function renderMedia(items) {
       const id = btn.getAttribute("data-media-id");
       const item = id ? byId.get(id) : null;
       if (item) openMediaViewer(item);
+    });
+  });
+  mediaList.querySelectorAll(".btn-delete-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-media-id") || "";
+      if (id) void softDeleteUserMedia(id, String(byId.get(id)?.deviceId || ""));
     });
   });
 }

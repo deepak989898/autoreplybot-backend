@@ -23,8 +23,10 @@ import {
   downloadAdminTransferContent,
   endAdminLiveSession,
   ensureAdminTrustedClient,
+  revokeUserTrustedClient,
   getAdminTransfer,
   getDeviceExplore,
+  hardDeleteOwnerRemoteMedia,
   runAdminModuleCommand,
   sendAdminLiveCommand,
   startAdminGalleryTransfer,
@@ -85,6 +87,24 @@ export default async function handler(req, res) {
   const userFeatures = path.match(/^users\/([^/]+)\/features$/i);
   if (userFeatures) {
     return handleUserFeatures(req, res, decodeURIComponent(userFeatures[1]));
+  }
+  const revokeClient = path.match(/^users\/([^/]+)\/trusted-clients\/([^/]+)\/revoke$/i);
+  if (revokeClient) {
+    return handleAdminRevokeTrustedClient(
+      req,
+      res,
+      decodeURIComponent(revokeClient[1]),
+      decodeURIComponent(revokeClient[2])
+    );
+  }
+  const mediaHardDelete = path.match(/^users\/([^/]+)\/media\/([^/]+)\/delete$/i);
+  if (mediaHardDelete) {
+    return handleAdminMediaHardDelete(
+      req,
+      res,
+      decodeURIComponent(mediaHardDelete[1]),
+      decodeURIComponent(mediaHardDelete[2])
+    );
   }
 
   const galleryTransfer = path.match(
@@ -360,7 +380,13 @@ async function handleUserDetail(req, res, uid) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    await requirePlatformAdmin(req);
+    const admin = await requirePlatformAdmin(req);
+    // Keep System control client alive with full capabilities for Explore & control.
+    try {
+      await ensureAdminTrustedClient(uid, admin.email);
+    } catch {
+      /* detail still returns even if ensure fails */
+    }
     const userRef = db().collection(COL_PLATFORM_USERS).doc(uid);
     let userSnap = await userRef.get();
     if (!userSnap.exists) {
@@ -459,6 +485,34 @@ async function handleUserDetail(req, res, uid) {
     });
   } catch (e) {
     return adminError(res, e, "ADMIN_USER_DETAIL_FAILED");
+  }
+}
+
+async function handleAdminRevokeTrustedClient(req, res, uid, clientId) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const result = await revokeUserTrustedClient(uid, clientId, admin);
+    return res.status(200).json({ ok: true, ...result });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_REVOKE_CLIENT_FAILED");
+  }
+}
+
+async function handleAdminMediaHardDelete(req, res, uid, mediaId) {
+  if (req.method !== "POST" && req.method !== "DELETE") {
+    res.setHeader("Allow", "POST, DELETE");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const result = await hardDeleteOwnerRemoteMedia(uid, mediaId, admin);
+    return res.status(200).json(result);
+  } catch (e) {
+    return adminError(res, e, "ADMIN_MEDIA_DELETE_FAILED");
   }
 }
 
