@@ -107,6 +107,7 @@ export default async function handler(req, res) {
   if (path === "notifications/sync") return handleNotificationsSync(req, res);
   if (path === "messages") return handleMessagesList(req, res);
   if (path === "messages/sync") return handleMessagesSync(req, res);
+  if (path === "messages/delete") return handleMessagesDelete(req, res);
   if (path === "call-logs") return handleCallLogsList(req, res);
   if (path === "call-logs/sync") return handleCallLogsSync(req, res);
   if (path === "call-logs/recording") return handleCallLogRecordingContent(req, res);
@@ -1503,6 +1504,7 @@ async function handleMessagesList(req, res) {
       const data = d.data() || {};
       return {
         itemId: d.id,
+        smsId: data.smsId != null ? Number(data.smsId) : null,
         address: String(data.address || ""),
         senderName: String(data.senderName || ""),
         body: String(data.body || ""),
@@ -1556,6 +1558,96 @@ async function handleMessagesSync(req, res) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return clientError(res, e, "MESSAGES_SYNC_FAILED");
+  }
+}
+
+async function handleMessagesDelete(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const rawIds = Array.isArray(body.itemIds) ? body.itemIds : [];
+    const itemIds = [
+      ...new Set(
+        rawIds
+          .map((id) => String(id || "").trim())
+          .filter((id) => id && ID_RE.test(id))
+      ),
+    ].slice(0, 100);
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    if (!itemIds.length) {
+      return res.status(400).json({ error: "itemIds required", code: "BAD_REQUEST" });
+    }
+    const deviceRef = db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId);
+    const deviceSnap = await deviceRef.get();
+    if (!deviceSnap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+
+    const now = Date.now();
+    const itemsPayload = [];
+    const batch = db().batch();
+    for (const itemId of itemIds) {
+      const itemRef = deviceRef.collection(R.COL_MESSAGE_ITEMS).doc(itemId);
+      const itemSnap = await itemRef.get();
+      const data = itemSnap.exists ? itemSnap.data() || {} : {};
+      const smsId = data.smsId != null ? Number(data.smsId) : 0;
+      itemsPayload.push({
+        itemId,
+        smsId: Number.isFinite(smsId) && smsId > 0 ? smsId : 0,
+        address: String(data.address || ""),
+        body: String(data.body || "").slice(0, 200),
+        date: Number(data.date || 0),
+      });
+      batch.set(
+        deviceRef.collection(R.COL_MESSAGE_DELETED).doc(itemId),
+        {
+          itemId,
+          smsId: Number.isFinite(smsId) && smsId > 0 ? smsId : 0,
+          address: String(data.address || ""),
+          date: Number(data.date || 0),
+          deletedAt: now,
+          deletedByClientId: clientId || "",
+        },
+        { merge: true }
+      );
+      batch.delete(itemRef);
+    }
+    await batch.commit();
+
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "MESSAGES_DELETE",
+      { items: itemsPayload },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_MESSAGES_DELETE,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId, count: itemsPayload.length },
+    });
+    return res.status(200).json({
+      ok: true,
+      deleted: itemIds.length,
+      command: cmd,
+    });
+  } catch (e) {
+    return clientError(res, e, "MESSAGES_DELETE_FAILED");
   }
 }
 

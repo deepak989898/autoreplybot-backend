@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css" />
+  <link rel="stylesheet" href="/device/styles.css?v=14" />
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -346,11 +346,16 @@
 
           <div id="phone-tab-messages" class="phone-tab-panel" data-phone-panel="messages" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">SMS from the phone (sender name, number, full text, date/time). Enable SMS on Permissions, allow this browser, then Sync. New SMS appear live.</p>
+              <p class="page-sub">SMS from the phone (sender name, number, full text, date/time). Enable SMS on Permissions, allow this browser, then Sync. New SMS appear live. Select messages to delete from website and phone.</p>
               <div class="page-actions">
+                <button id="btn-msg-delete" class="btn-danger" type="button" disabled>Delete selected</button>
                 <button id="btn-msg-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-msg-refresh" class="btn-primary" type="button">Refresh</button>
               </div>
+            </div>
+            <div class="msg-select-bar" id="messages-select-bar" hidden>
+              <label class="msg-select-all"><input type="checkbox" id="msg-select-all" /> Select all</label>
+              <span class="muted" id="msg-selected-count">0 selected</span>
             </div>
             <select id="messages-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="messages-list" class="msg-list muted">Select a device.</div>
@@ -782,6 +787,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=28"></script>
+  <script type="module" src="/device/app.js?v=29"></script>
 </body>
 </html>

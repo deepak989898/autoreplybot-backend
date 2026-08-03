@@ -4450,9 +4450,13 @@ async function refreshMessagesPanel() {
   const deviceId =
     selectedWorkspaceDeviceId || document.getElementById("messages-device-select")?.value;
   const list = document.getElementById("messages-list");
+  const selectBar = document.getElementById("messages-select-bar");
+  const btnDelete = document.getElementById("btn-msg-delete");
   if (!list) return;
   if (!deviceId) {
     list.textContent = "No devices.";
+    if (selectBar) selectBar.hidden = true;
+    if (btnDelete) btnDelete.disabled = true;
     return;
   }
   list.textContent = "Loading messages...";
@@ -4468,9 +4472,12 @@ async function refreshMessagesPanel() {
         "On the phone: Permissions → SMS / Messages → allow.\n" +
         "Trusted browsers → allow reading SMS / messages.\n" +
         "Then Sync from phone. New SMS appear automatically.";
+      if (selectBar) selectBar.hidden = true;
+      if (btnDelete) btnDelete.disabled = true;
       return;
     }
     list.classList.remove("muted");
+    if (selectBar) selectBar.hidden = false;
     const groups = groupItemsByDay(items, "date");
     list.innerHTML = `<div class="msg-day-list">${groups
       .map(([dayKey, dayItems], index) => {
@@ -4487,19 +4494,28 @@ async function refreshMessagesPanel() {
           <div class="msg-day-body"${hidden}>
             <div class="msg-grid">${dayItems
               .map((it) => {
+                const id = escapeHtml(it.itemId || "");
                 const name = escapeHtml(it.senderName || "");
                 const number = escapeHtml(it.address || "(unknown)");
                 const who = name ? `${name} · ${number}` : number;
                 const body = escapeHtml(it.body || "");
                 const when = escapeHtml(formatNotifDate(it.date));
                 const kind = escapeHtml(it.type || "inbox");
-                return `<article class="msg-card">
-          <div class="msg-card-head">
-            <strong class="msg-who">${who}</strong>
-            <time class="msg-time">${when}</time>
+                return `<article class="msg-card" data-item-id="${id}">
+          <label class="msg-card-select">
+            <input type="checkbox" class="msg-check" data-item-id="${id}" />
+          </label>
+          <div class="msg-card-main">
+            <div class="msg-card-head">
+              <strong class="msg-who">${who}</strong>
+              <time class="msg-time">${when}</time>
+            </div>
+            <p class="msg-body">${body || '<span class="muted">(empty)</span>'}</p>
+            <div class="msg-meta">
+              <span>${kind}</span>
+              <button type="button" class="btn-danger-soft btn-msg-delete-one" data-item-id="${id}">Delete</button>
+            </div>
           </div>
-          <p class="msg-body">${body || '<span class="muted">(empty)</span>'}</p>
-          <div class="msg-meta"><span>${kind}</span></div>
         </article>`;
               })
               .join("")}</div>
@@ -4528,8 +4544,87 @@ async function refreshMessagesPanel() {
         }
       });
     });
+
+    const selectAll = document.getElementById("msg-select-all");
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.onchange = () => {
+        list.querySelectorAll(".msg-check").forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        updateMessagesSelectionUi();
+      };
+    }
+    list.querySelectorAll(".msg-check").forEach((cb) => {
+      cb.addEventListener("change", () => updateMessagesSelectionUi());
+    });
+    list.querySelectorAll(".btn-msg-delete-one").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = btn.getAttribute("data-item-id") || "";
+        if (id) void deleteMessagesByIds([id]);
+      });
+    });
+    updateMessagesSelectionUi();
   } catch (e) {
     list.textContent = e instanceof Error ? e.message : String(e);
+    if (selectBar) selectBar.hidden = true;
+    if (btnDelete) btnDelete.disabled = true;
+  }
+}
+
+function updateMessagesSelectionUi() {
+  const list = document.getElementById("messages-list");
+  const btnDelete = document.getElementById("btn-msg-delete");
+  const countEl = document.getElementById("msg-selected-count");
+  const selectAll = document.getElementById("msg-select-all");
+  const checks = list ? [...list.querySelectorAll(".msg-check")] : [];
+  const selected = checks.filter((c) => c.checked);
+  if (countEl) countEl.textContent = `${selected.length} selected`;
+  if (btnDelete) btnDelete.disabled = selected.length === 0;
+  if (selectAll && checks.length) {
+    selectAll.checked = selected.length === checks.length;
+    selectAll.indeterminate = selected.length > 0 && selected.length < checks.length;
+  }
+}
+
+async function deleteMessagesByIds(itemIds) {
+  const ids = [...new Set((itemIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return;
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("messages-device-select")?.value;
+  if (!deviceId) {
+    alert("No device selected.");
+    return;
+  }
+  const label =
+    ids.length === 1
+      ? "Delete this message from the website and the phone?"
+      : `Delete ${ids.length} messages from the website and the phone?`;
+  if (!window.confirm(label)) return;
+  const btnDelete = document.getElementById("btn-msg-delete");
+  if (btnDelete) btnDelete.disabled = true;
+  try {
+    const clientId = requireClientId();
+    await api("/api/device/messages/delete", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, itemIds: ids }),
+    });
+    await refreshMessagesPanel();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/messagesList|CAPABILITY_DENIED|MESSAGES_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot delete SMS yet.\n\n" +
+          "1) Phone → Permissions → SMS / Messages → allow\n" +
+          "2) Trusted browsers → allow reading SMS / messages\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+    updateMessagesSelectionUi();
   }
 }
 
@@ -5425,6 +5520,15 @@ document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
       alert(msg);
     }
   }
+});
+document.getElementById("btn-msg-delete")?.addEventListener("click", () => {
+  const list = document.getElementById("messages-list");
+  const ids = list
+    ? [...list.querySelectorAll(".msg-check:checked")]
+        .map((cb) => cb.getAttribute("data-item-id") || "")
+        .filter(Boolean)
+    : [];
+  void deleteMessagesByIds(ids);
 });
 document.getElementById("btn-call-logs-refresh")?.addEventListener("click", () => refreshCallLogsPanel());
 document.getElementById("btn-call-logs-sync")?.addEventListener("click", async () => {
