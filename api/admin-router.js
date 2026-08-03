@@ -2,6 +2,7 @@ import {
   addAdminEmail,
   getPlatformStats,
   listAdminEmails,
+  isPlatformAdminEmail,
   refreshUserDeviceStats,
   removeAdminEmail,
   requirePlatformAdmin,
@@ -309,10 +310,13 @@ async function handleUsers(req, res) {
     await requirePlatformAdmin(req);
     const q = String(req.query?.q || "").trim().toLowerCase();
     const status = String(req.query?.status || "all").trim().toLowerCase();
+    const adminEmails = new Set(await listAdminEmails());
     const snap = await db().collection(COL_PLATFORM_USERS).get();
     let users = snap.docs
       .map((d) => sanitizePlatformUser(d.id, d.data()))
-      .filter(Boolean);
+      .filter(Boolean)
+      // Admins belong on the Admins tab — hide from normal Users list.
+      .filter((u) => !adminEmails.has(String(u.email || "").toLowerCase()));
     if (status === "blocked") users = users.filter((u) => u.blocked);
     else if (status === "active") users = users.filter((u) => !u.blocked);
     if (q) {
@@ -572,6 +576,14 @@ async function handleUserBlock(req, res, uid, op) {
     }
     if (uid === admin.uid) {
       return res.status(400).json({ error: "Cannot block your own admin account", code: "BAD_REQUEST" });
+    }
+    const existing = await db().collection(COL_PLATFORM_USERS).doc(uid).get();
+    const targetEmail = String(existing.data()?.email || "").toLowerCase();
+    if (targetEmail && (await isPlatformAdminEmail(targetEmail))) {
+      return res.status(400).json({
+        error: "Cannot block a platform admin account",
+        code: "BAD_REQUEST",
+      });
     }
     const body = parseBody(req.body);
     const reason = String(body.reason || "").trim();

@@ -281,7 +281,8 @@ async function refreshUserEntitlements() {
     if (document.getElementById("panel-phone") && !document.getElementById("panel-phone").hidden) {
       setPhoneTab(activePhoneTab);
     }
-  } catch {
+  } catch (e) {
+    if (e && e.code === "ACCOUNT_BLOCKED") return;
     /* keep previous entitlements */
   }
 }
@@ -652,6 +653,9 @@ async function api(path, options = {}) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (body.code === "ACCOUNT_BLOCKED") {
+      await forceLogoutBlocked(
+        body.error || "Your account has been disabled by an administrator."
+      );
       const err = new Error(
         body.error || "Your account has been disabled by an administrator."
       );
@@ -673,6 +677,33 @@ async function api(path, options = {}) {
     );
   }
   return body;
+}
+
+let accountBlockLogoutInFlight = false;
+
+async function forceLogoutBlocked(message) {
+  if (accountBlockLogoutInFlight) return;
+  accountBlockLogoutInFlight = true;
+  try {
+    const msg =
+      message ||
+      "Your account has been disabled by an administrator. Sign in again after you are unblocked.";
+    if (authStatus) authStatus.textContent = msg;
+    try {
+      window.alert(msg);
+    } catch {
+      /* ignore */
+    }
+    if (auth) {
+      try {
+        await signOut(auth);
+      } catch {
+        /* ignore */
+      }
+    }
+  } finally {
+    accountBlockLogoutInFlight = false;
+  }
 }
 
 function formatSeen(ms) {
@@ -2734,6 +2765,9 @@ async function createPairing() {
 function friendlyAuthError(e) {
   const code = e && typeof e.code === "string" ? e.code : "";
   const msg = e instanceof Error ? e.message : String(e || "Auth failed");
+  if (code === "auth/user-disabled") {
+    return "Your account has been disabled by an administrator. Contact support or wait until you are unblocked.";
+  }
   if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
     return "Wrong email or password";
   }
@@ -2950,13 +2984,15 @@ async function main() {
       return;
     }
     try {
-      idToken = await withTimeout(user.getIdToken(), 10000, "Auth token");
+      // Force-refresh so disabled/blocked claims apply quickly after an admin block.
+      idToken = await withTimeout(user.getIdToken(true), 10000, "Auth token");
       firebaseUid = user.uid;
       setLoggedInUi(user);
       // Show the app immediately — do not block the spinner on device APIs.
       setBootLoading(false);
       showPanel("phone");
-      await withTimeout(refreshDashboard(), 15000, "Dashboard").catch((e) => {
+      await withTimeout(refreshDashboard(), 15000, "Dashboard").catch(async (e) => {
+        if (e && e.code === "ACCOUNT_BLOCKED") return;
         console.warn("refreshDashboard", e);
         if (deviceList && !deviceList.querySelector(".device-card")) {
           deviceList.textContent =
@@ -2965,6 +3001,18 @@ async function main() {
         }
       });
     } catch (e) {
+      const code = e && typeof e.code === "string" ? e.code : "";
+      if (
+        code === "auth/user-disabled" ||
+        code === "auth/user-token-expired" ||
+        /disabled|USER_DISABLED/i.test(String(e?.message || ""))
+      ) {
+        await forceLogoutBlocked(
+          "Your account has been disabled by an administrator. Sign in again after you are unblocked."
+        );
+        setBootLoading(false);
+        return;
+      }
       setLoggedInUi(user);
       setBootLoading(false);
       if (authStatus) {
