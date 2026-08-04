@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=14" />
+  <link rel="stylesheet" href="/device/styles.css?v=15" />
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -241,6 +241,7 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror &amp; Remote Control"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording" title="Screen Recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps" title="Installed Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="app-usage" title="Recent Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Recent Apps</span><span class="tab-label-short">Usage</span></button>
           </div>
 
           <div id="phone-feature-locked" class="phone-tab-panel feature-locked-panel" hidden>
@@ -574,6 +575,17 @@
             <div id="apps-list" class="apps-list muted">Select a device.</div>
             <div id="app-detail" class="surface app-detail" hidden></div>
           </div>
+
+          <div id="phone-tab-app-usage" class="phone-tab-panel" data-phone-panel="app-usage" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Daily app usage history with time used (minutes / seconds). Tap a day to expand. Phone needs Usage Access + Recent Apps sharing, and this browser needs Recent Apps permission.</p>
+              <div class="page-actions">
+                <button id="btn-app-usage-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-app-usage-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <div id="app-usage-list" class="app-usage-list muted">Select a device.</div>
+          </div>
         </section>
 
         <section class="panel" id="panel-settings" data-panel="settings" hidden>
@@ -592,7 +604,7 @@
             </div>
           </div>
           <div class="surface" style="margin-top:12px;">
-            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, and App Control (default off).</p>
+            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, Recent Apps history, and App Control (default off).</p>
             <p class="muted">Camera, location, gallery, files, notifications, messages, call logs, and contacts keep their existing settings.</p>
           </div>
           <div id="settings-admin-card" class="surface" style="margin-top:12px;" hidden>
@@ -617,6 +629,7 @@
               <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
               <li>Screen mirror and recording always show Android’s official capture prompt.</li>
               <li>Installed Apps never uninstalls or installs silently.</li>
+              <li>Recent Apps needs Usage Access on the phone; history is grouped by day (tap to expand).</li>
               <li>App Control closes blocked apps via Accessibility; Camera Lock needs Device Admin on the phone.</li>
             </ol>
           </div>
@@ -787,6 +800,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=29"></script>
+  <script type="module" src="/device/app.js?v=30"></script>
 </body>
 </html>

@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=13" />
+  <link rel="stylesheet" href="/device/styles.css?v=15" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=14" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -190,6 +190,7 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="app-usage"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Recent Apps</span><span class="tab-label-short">Usage</span></button>
           </div>
 
           <div id="admin-panel-camera" class="phone-tab-panel" data-phone-panel="camera">
@@ -305,6 +306,15 @@
             </div>
             <div id="admin-apps-body" class="surface muted">Loading…</div>
           </div>
+          <div id="admin-panel-app-usage" class="phone-tab-panel" data-phone-panel="app-usage" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Recent app usage by day. Tap a day to expand. Duration shown in minutes and seconds (AM/PM last used).</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" data-admin-cmd="APP_USAGE_SYNC" data-admin-payload='{"days":7}'>Sync usage</button>
+              </div>
+            </div>
+            <div id="admin-app-usage-body" class="surface muted">Loading…</div>
+          </div>
           <p id="admin-action-status" class="muted" style="margin-top:12px;" aria-live="polite"></p>
         </div>
       </section>
@@ -369,7 +379,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=17"></script>
+  <script type="module" src="/device/admin/app.js?v=18"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {

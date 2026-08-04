@@ -334,6 +334,7 @@ const ADMIN_FEATURE_DEFS = [
   ["screen", "Screen Mirror"],
   ["recording", "Screen Recording"],
   ["apps", "Installed Apps"],
+  ["app-usage", "Recent Apps"],
 ];
 
 function renderUserDetailBody(uid, data) {
@@ -685,6 +686,7 @@ function renderAllPhonePanels() {
   renderScreenPanel();
   renderRecordingPanel();
   renderAppsPanel();
+  renderAppUsagePanel();
   wireAdminCommands();
 }
 
@@ -1846,6 +1848,95 @@ function renderRecordingPanel() {
   });
 }
 
+function fmtTimeAmPm(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "—";
+  }
+}
+
+function formatUsageDuration(ms) {
+  const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function usageDayLabel(dayKey) {
+  if (!dayKey || dayKey === "unknown") return "Unknown date";
+  const [y, m, d] = String(dayKey).split("-").map(Number);
+  if (!y || !m || !d) return String(dayKey);
+  const date = new Date(y, m - 1, d);
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startToday - startThat) / 86400000);
+  const pretty = date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  if (diffDays === 0) return `Today · ${pretty}`;
+  if (diffDays === 1) return `Yesterday · ${pretty}`;
+  return pretty;
+}
+
+function groupAdminAppUsage(items) {
+  const map = new Map();
+  for (const it of items || []) {
+    let key = String(it.date || "").trim();
+    if (!key && Number(it.dateMs || 0)) {
+      const d = new Date(Number(it.dateMs));
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    if (!key) key = "unknown";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(it);
+  }
+  const groups = [...map.entries()].sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+  for (const [, dayItems] of groups) {
+    dayItems.sort(
+      (a, b) => Number(b.totalDurationMs || 0) - Number(a.totalDurationMs || 0)
+    );
+  }
+  return groups;
+}
+
+function wireAdminUsageCollapse(root) {
+  root?.querySelectorAll(".usage-day-header").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".usage-day-group");
+      const body = group?.querySelector(".usage-day-body");
+      const chevron = btn.querySelector(".usage-day-chevron");
+      if (!group || !body) return;
+      const opening = body.hasAttribute("hidden");
+      if (opening) {
+        body.removeAttribute("hidden");
+        group.classList.add("is-open");
+        btn.setAttribute("aria-expanded", "true");
+        if (chevron) chevron.textContent = "▲";
+      } else {
+        body.setAttribute("hidden", "");
+        group.classList.remove("is-open");
+        btn.setAttribute("aria-expanded", "false");
+        if (chevron) chevron.textContent = "▼";
+      }
+    });
+  });
+}
+
 function renderAppsPanel() {
   const el = document.getElementById("admin-apps-body");
   if (!el || !exploreCtx) return;
@@ -1866,14 +1957,69 @@ function renderAppsPanel() {
     .join("")}</ul>`;
 }
 
+function renderAppUsagePanel() {
+  const el = document.getElementById("admin-app-usage-body");
+  if (!el || !exploreCtx) return;
+  const items = exploreCtx.data.appUsage || [];
+  if (!items.length) {
+    el.innerHTML = emptyHint(
+      "No usage history cached. Tap Sync usage (phone needs Usage Access + Recent Apps sharing)."
+    );
+    return;
+  }
+  const groups = groupAdminAppUsage(items);
+  el.innerHTML = `<div class="usage-day-list">${groups
+    .map(([dayKey, dayItems], index) => {
+      const open = index === 0 ? " is-open" : "";
+      const hidden = index === 0 ? "" : " hidden";
+      const chevron = index === 0 ? "▲" : "▼";
+      const totalMs = dayItems.reduce((sum, it) => sum + Number(it.totalDurationMs || 0), 0);
+      return `<section class="usage-day-group${open}" data-day="${escapeHtml(dayKey)}">
+        <button type="button" class="usage-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+          <span class="usage-day-title">${escapeHtml(usageDayLabel(dayKey))}</span>
+          <span class="usage-day-count">${dayItems.length} apps · ${escapeHtml(formatUsageDuration(totalMs))}</span>
+          <span class="usage-day-chevron" aria-hidden="true">${chevron}</span>
+        </button>
+        <div class="usage-day-body"${hidden}>
+          <div class="usage-app-grid">${dayItems
+            .map((it) => {
+              const name = escapeHtml(it.appName || it.packageName || "App");
+              const pkg = escapeHtml(it.packageName || "");
+              const dur = escapeHtml(formatUsageDuration(it.totalDurationMs));
+              const last = escapeHtml(fmtTimeAmPm(it.lastUsed));
+              return `<article class="usage-app-row">
+                <strong class="usage-app-name">${name}</strong>
+                <span class="usage-app-duration">${dur}</span>
+                <span class="usage-app-pkg muted">${pkg}</span>
+                <span class="usage-app-last muted">Last used ${last}</span>
+              </article>`;
+            })
+            .join("")}</div>
+        </div>
+      </section>`;
+    })
+    .join("")}</div>`;
+  wireAdminUsageCollapse(el);
+}
+
 function wireAdminCommands() {
   document.querySelectorAll("[data-admin-cmd]").forEach((btn) => {
     btn.onclick = () => {
       if (!exploreCtx) return;
+      let payload = {};
+      const raw = btn.getAttribute("data-admin-payload");
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = {};
+        }
+      }
       void runDeviceCommand(
         exploreCtx.ownerUid,
         exploreCtx.deviceId,
-        btn.getAttribute("data-admin-cmd")
+        btn.getAttribute("data-admin-cmd"),
+        payload
       );
     };
   });
@@ -1934,13 +2080,13 @@ async function runAdminScreenRecord(ownerUid, deviceId, action) {
   }
 }
 
-async function runDeviceCommand(ownerUid, deviceId, action) {
+async function runDeviceCommand(ownerUid, deviceId, action, payload = {}) {
   const status = document.getElementById("admin-action-status");
   try {
     if (status) status.textContent = `Sending ${action}…`;
     await api(
       `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/command`,
-      { method: "POST", body: JSON.stringify({ action, payload: {} }) }
+      { method: "POST", body: JSON.stringify({ action, payload: payload || {} }) }
     );
     if (status) {
       status.textContent = `${action} sent. Waiting for phone… refreshing in 3s.`;

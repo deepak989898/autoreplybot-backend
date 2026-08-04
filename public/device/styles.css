@@ -1821,6 +1821,7 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
 .phone-tab[data-phone-tab="screen"] { --tab-accent: #7c3aed; --tab-soft: #ede9fe; }
 .phone-tab[data-phone-tab="recording"] { --tab-accent: #dc2626; --tab-soft: #fee2e2; }
 .phone-tab[data-phone-tab="apps"] { --tab-accent: #db2777; --tab-soft: #fce7f3; }
+.phone-tab[data-phone-tab="app-usage"] { --tab-accent: #9333ea; --tab-soft: #f3e8ff; }
 
 .phone-tab:hover {
   background: var(--tab-soft);
@@ -2086,6 +2087,98 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
 
 .msg-day-body {
   padding: 12px;
+}
+
+.app-usage-list {
+  min-height: 120px;
+  margin-top: 12px;
+}
+
+.usage-day-list {
+  display: grid;
+  gap: 10px;
+}
+
+.usage-day-group {
+  border: 1px solid #e9d5ff;
+  border-radius: 14px;
+  background: #faf5ff;
+  overflow: hidden;
+}
+
+.usage-day-group.is-open {
+  background: #fff;
+  border-color: #c084fc;
+  box-shadow: 0 6px 18px rgba(147, 51, 234, 0.1);
+}
+
+.usage-day-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: linear-gradient(135deg, #7e22ce, #9333ea);
+  color: #fff;
+  padding: 12px 14px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.usage-day-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.usage-day-count {
+  font-size: 0.85rem;
+  opacity: 0.95;
+  white-space: nowrap;
+}
+
+.usage-day-chevron {
+  opacity: 0.9;
+}
+
+.usage-day-body {
+  padding: 12px;
+}
+
+.usage-app-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage-app-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.usage-app-name {
+  font-weight: 600;
+}
+
+.usage-app-pkg {
+  font-size: 0.8rem;
+  grid-column: 1 / -1;
+}
+
+.usage-app-duration {
+  font-weight: 600;
+  color: #7e22ce;
+  white-space: nowrap;
+}
+
+.usage-app-last {
+  font-size: 0.82rem;
+  grid-column: 1 / -1;
 }
 
 .msg-list {

@@ -118,6 +118,8 @@ export default async function handler(req, res) {
   if (path === "apps/detail") return handleAppDetail(req, res);
   if (path === "apps/blocks") return handleAppsBlocks(req, res);
   if (path === "apps/control") return handleAppsControl(req, res);
+  if (path === "app-usage") return handleAppUsageList(req, res);
+  if (path === "app-usage/sync") return handleAppUsageSync(req, res);
   if (path === "uninstall-policy") return handleUninstallPolicy(req, res);
   if (path === "uninstall-app") return handleUninstallApp(req, res);
   if (path === "launcher-visibility") return handleLauncherVisibility(req, res);
@@ -183,6 +185,7 @@ function sanitizeDevice(id, data) {
     screenMirrorEnabled: Boolean(data.screenMirrorEnabled),
     screenRecordEnabled: Boolean(data.screenRecordEnabled),
     installedAppsSharingEnabled: Boolean(data.installedAppsSharingEnabled),
+    appUsageSharingEnabled: Boolean(data.appUsageSharingEnabled),
     appControlEnabled: Boolean(data.appControlEnabled),
     // Default allow uninstall when the phone has not set a policy yet.
     allowUninstall: data.allowUninstall !== false && data.allowUninstall !== "false",
@@ -2068,6 +2071,87 @@ async function handleAppsSync(req, res) {
     return res.status(200).json({ ok: true, command: cmd });
   } catch (e) {
     return clientError(res, e, "APPS_SYNC_FAILED");
+  }
+}
+
+async function handleAppUsageList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    if (!deviceId) {
+      return res.status(400).json({ error: "deviceId required", code: "BAD_REQUEST" });
+    }
+    const limit = Math.min(800, Math.max(1, Number(req.query?.limit || 400)));
+    const col = db()
+      .collection(R.COL_USERS)
+      .doc(uid)
+      .collection(R.COL_DEVICES)
+      .doc(deviceId)
+      .collection(R.COL_APP_USAGE_DAILY);
+    let snap;
+    try {
+      snap = await col.orderBy("dateMs", "desc").limit(limit).get();
+    } catch {
+      snap = await col.limit(limit).get();
+    }
+    let items = snap.docs.map((d) => {
+      const data = d.data() || {};
+      return {
+        itemId: d.id,
+        packageName: String(data.packageName || ""),
+        appName: String(data.appName || ""),
+        date: String(data.date || ""),
+        dateMs: Number(data.dateMs || 0),
+        totalDurationMs: Number(data.totalDurationMs || 0),
+        lastUsed: Number(data.lastUsed || 0),
+        launchCount: Number(data.launchCount || 0),
+        syncedAt: Number(data.syncedAt || 0),
+      };
+    });
+    items.sort((a, b) => {
+      const dd = Number(b.dateMs || 0) - Number(a.dateMs || 0);
+      if (dd) return dd;
+      return Number(b.totalDurationMs || 0) - Number(a.totalDurationMs || 0);
+    });
+    return res.status(200).json({ ok: true, items, count: items.length });
+  } catch (e) {
+    return clientError(res, e, "APP_USAGE_LIST_FAILED");
+  }
+}
+
+async function handleAppUsageSync(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const deviceId = String(body.deviceId || "").trim();
+    const clientId = String(body.clientId || "").trim();
+    const days = Math.min(14, Math.max(1, Number(body.days || 7) || 7));
+    const cmd = await createModuleCommand(
+      uid,
+      deviceId,
+      clientId,
+      "APP_USAGE_SYNC",
+      { days },
+      body.idempotencyKey
+    );
+    await writeAuditLog(uid, {
+      action: R.AUDIT_APP_USAGE_SYNC,
+      deviceId,
+      clientId,
+      result: "ok",
+      metadata: { commandId: cmd.commandId, days },
+    });
+    return res.status(200).json({ ok: true, command: cmd });
+  } catch (e) {
+    return clientError(res, e, "APP_USAGE_SYNC_FAILED");
   }
 }
 

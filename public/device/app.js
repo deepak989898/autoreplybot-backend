@@ -254,6 +254,7 @@ const FEATURE_TAB_LABELS = {
   screen: "Screen Mirror",
   recording: "Screen Recording",
   apps: "Installed Apps",
+  "app-usage": "Recent Apps",
 };
 
 function isWebsiteFeatureAllowed(featureKey) {
@@ -338,6 +339,7 @@ function setPhoneTab(tabId) {
   if (activePhoneTab === "screen") updateScreenStatusUi();
   if (activePhoneTab === "recording") refreshRecordingsPanel().catch(() => {});
   if (activePhoneTab === "apps") refreshAppsPanel().catch(() => {});
+  if (activePhoneTab === "app-usage") refreshAppUsagePanel().catch(() => {});
 }
 
 function onWorkspaceDeviceChanged() {
@@ -6244,6 +6246,135 @@ function alertAppControlError(e) {
   }
 }
 
+function formatUsageDuration(ms) {
+  const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function groupAppUsageByDate(items) {
+  const map = new Map();
+  for (const it of items || []) {
+    const key =
+      String(it.date || "").trim() ||
+      notifDayKey(it.dateMs || it.lastUsed || 0) ||
+      "unknown";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(it);
+  }
+  const groups = [...map.entries()].sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+  for (const [, dayItems] of groups) {
+    dayItems.sort(
+      (a, b) => Number(b.totalDurationMs || 0) - Number(a.totalDurationMs || 0)
+    );
+  }
+  return groups;
+}
+
+function wireUsageDayCollapse(root) {
+  root?.querySelectorAll(".usage-day-header").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".usage-day-group");
+      const body = group?.querySelector(".usage-day-body");
+      const chevron = btn.querySelector(".usage-day-chevron");
+      if (!group || !body) return;
+      const opening = body.hasAttribute("hidden");
+      if (opening) {
+        body.removeAttribute("hidden");
+        group.classList.add("is-open");
+        btn.setAttribute("aria-expanded", "true");
+        if (chevron) chevron.textContent = "▲";
+      } else {
+        body.setAttribute("hidden", "");
+        group.classList.remove("is-open");
+        btn.setAttribute("aria-expanded", "false");
+        if (chevron) chevron.textContent = "▼";
+      }
+    });
+  });
+}
+
+function renderAppUsageDayHtml(groups) {
+  return `<div class="usage-day-list">${groups
+    .map(([dayKey, dayItems], index) => {
+      const open = index === 0 ? " is-open" : "";
+      const hidden = index === 0 ? "" : " hidden";
+      const chevron = index === 0 ? "▲" : "▼";
+      const totalMs = dayItems.reduce((sum, it) => sum + Number(it.totalDurationMs || 0), 0);
+      const count = dayItems.length;
+      return `<section class="usage-day-group${open}" data-day="${escapeHtml(dayKey)}">
+        <button type="button" class="usage-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+          <span class="usage-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+          <span class="usage-day-count">${count} apps · ${escapeHtml(formatUsageDuration(totalMs))}</span>
+          <span class="usage-day-chevron" aria-hidden="true">${chevron}</span>
+        </button>
+        <div class="usage-day-body"${hidden}>
+          <div class="usage-app-grid">${dayItems
+            .map((it) => {
+              const name = escapeHtml(it.appName || it.packageName || "App");
+              const pkg = escapeHtml(it.packageName || "");
+              const dur = escapeHtml(formatUsageDuration(it.totalDurationMs));
+              const last = escapeHtml(formatNotifDate(it.lastUsed));
+              return `<article class="usage-app-row">
+                <strong class="usage-app-name">${name}</strong>
+                <span class="usage-app-duration">${dur}</span>
+                <span class="usage-app-pkg muted">${pkg}</span>
+                <span class="usage-app-last muted">Last used ${last}</span>
+              </article>`;
+            })
+            .join("")}</div>
+        </div>
+      </section>`;
+    })
+    .join("")}</div>`;
+}
+
+async function refreshAppUsagePanel() {
+  const list = document.getElementById("app-usage-list");
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "Select a device.";
+    list.classList.add("muted");
+    return;
+  }
+  list.textContent = "Loading recent apps…";
+  list.classList.add("muted");
+  try {
+    const data = await api(
+      `/api/device/app-usage?deviceId=${encodeURIComponent(deviceId)}&limit=400`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.textContent =
+        "No usage history yet.\n\n" +
+        "1) Phone → Permissions → Recent Apps history → enable Usage Access\n" +
+        "2) Trusted Browsers → allow Recent Apps usage history\n" +
+        "3) Tap Sync from phone";
+      return;
+    }
+    list.classList.remove("muted");
+    const groups = groupAppUsageByDate(items);
+    list.innerHTML = renderAppUsageDayHtml(groups);
+    wireUsageDayCollapse(list);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    list.textContent = msg;
+    if (/appUsageHistory|CAPABILITY_DENIED|FEATURE_DENIED|USAGE_ACCESS/i.test(msg)) {
+      list.textContent =
+        "Recent Apps not available yet.\n\n" +
+        "Phone: Permissions → Recent Apps history + Usage Access\n" +
+        "Trusted Browsers: allow Recent Apps usage history\n" +
+        "Admin: enable Recent Apps feature for this account\n\n" +
+        msg;
+    }
+  }
+}
+
 async function refreshAppsPanel() {
   const list = document.getElementById("apps-list");
   const detail = document.getElementById("app-detail");
@@ -7209,6 +7340,29 @@ document.getElementById("apps-search")?.addEventListener("input", () => {
   window.__appsSearchT = setTimeout(() => refreshAppsPanel(), 300);
 });
 document.getElementById("apps-filter")?.addEventListener("change", () => refreshAppsPanel());
+
+document.getElementById("btn-app-usage-refresh")?.addEventListener("click", () => refreshAppUsagePanel());
+document.getElementById("btn-app-usage-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId = selectedWorkspaceDeviceId;
+    const clientId = requireClientId();
+    await api("/api/device/app-usage/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, days: 7 }),
+    });
+    setTimeout(() => refreshAppUsagePanel(), 4500);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/appUsageHistory|CAPABILITY_DENIED|APP_USAGE|USAGE_ACCESS|FEATURE_DENIED/i.test(msg)) {
+      alert(
+        "Recent Apps not allowed yet.\n\n" +
+          "1) Phone → Permissions → Recent Apps history → allow Usage Access\n" +
+          "2) Trusted Browsers → allow Recent Apps usage history\n\n" +
+          msg
+      );
+    } else alert(msg);
+  }
+});
 
 /* ——— Help / Support chat (website user ↔ Platform Admin) ——— */
 /** @type {object[]} */
