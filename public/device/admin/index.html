@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=15" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=14" />
+  <link rel="stylesheet" href="/device/styles.css?v=16" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=15" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -222,7 +222,7 @@
               <p class="page-sub">View / play / download images, video, and audio from the phone index (Platform Admin — user browsers stay paired).</p>
               <div class="page-actions">
                 <button type="button" class="btn-secondary" data-admin-cmd="GALLERY_INDEX">Request index</button>
-                <button type="button" class="btn-primary" id="btn-admin-gallery-refresh">Refresh</button>
+                <button type="button" class="btn-primary" data-admin-refresh>Refresh</button>
               </div>
             </div>
             <div class="gallery-filters" role="group" aria-label="Gallery filters" id="admin-gallery-filters">
@@ -236,49 +236,56 @@
           </div>
           <div id="admin-panel-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Mirrored notifications from the phone (title + message), same data the user website uses.</p>
+              <p class="page-sub">Mirrored notifications from the phone — same day groups and cards as the user website.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="NOTIFICATIONS_SYNC">Sync from phone</button>
-                <button type="button" class="btn-secondary" id="btn-admin-notif-refresh">Refresh</button>
+                <button type="button" class="btn-secondary" data-admin-refresh>Refresh</button>
               </div>
             </div>
-            <div id="admin-notifications-body" class="surface muted">Loading…</div>
+            <div id="admin-notifications-body" class="muted">Loading…</div>
           </div>
           <div id="admin-panel-messages" class="phone-tab-panel" data-phone-panel="messages" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">SMS / messages mirrored from the phone.</p>
+              <p class="page-sub">SMS / messages mirrored from the phone — grouped by day (newest first). Tap a day to expand.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="MESSAGES_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" data-admin-refresh>Refresh</button>
               </div>
             </div>
-            <div id="admin-messages-body" class="surface muted">Loading…</div>
+            <div id="admin-messages-body" class="muted">Loading…</div>
           </div>
           <div id="admin-panel-call-logs" class="phone-tab-panel" data-phone-panel="call-logs" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Call history cached from the phone.</p>
+              <p class="page-sub">Call history — same cards and day groups as the user panel (newest day first).</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="CALL_LOGS_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" data-admin-refresh>Refresh</button>
               </div>
             </div>
-            <div id="admin-call-logs-body" class="surface muted">Loading…</div>
+            <div id="admin-call-logs-body" class="muted">Loading…</div>
           </div>
           <div id="admin-panel-contacts" class="phone-tab-panel" data-phone-panel="contacts" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Contacts cached from the phone.</p>
+              <p class="page-sub">Contacts from the phone — same card layout as the user panel.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="CONTACTS_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" data-admin-refresh>Refresh</button>
               </div>
             </div>
-            <div id="admin-contacts-body" class="surface muted">Loading…</div>
+            <div class="screen-controls surface" style="margin-bottom:12px;">
+              <input id="admin-contacts-search" class="input" type="search" placeholder="Search name or number…" />
+            </div>
+            <div id="admin-contacts-body" class="muted">Loading…</div>
           </div>
           <div id="admin-panel-files" class="phone-tab-panel" data-phone-panel="files" hidden>
             <div class="tab-toolbar">
               <p class="page-sub">Shared folders granted on the phone.</p>
               <div class="page-actions">
                 <button type="button" class="btn-secondary" data-admin-cmd="FILE_LIST">Refresh folders</button>
+                <button type="button" class="btn-secondary" data-admin-refresh>Refresh</button>
               </div>
             </div>
-            <div id="admin-files-body" class="surface muted">Loading…</div>
+            <div id="admin-files-body" class="muted">Loading…</div>
           </div>
           <div id="admin-panel-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
             <div class="tab-toolbar">
@@ -299,21 +306,61 @@
           </div>
           <div id="admin-panel-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Installed apps list. Lock needs Accessibility on the phone.</p>
+              <p class="page-sub">Installed apps — same cards, search, filters, and lock controls as the user panel. Lock needs Accessibility on the phone.</p>
               <div class="page-actions">
-                <button type="button" class="btn-primary" data-admin-cmd="APPS_INDEX">Sync apps</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="APPS_INDEX">Sync from phone</button>
+                <button type="button" class="btn-primary" data-admin-refresh>Refresh</button>
+                <button type="button" class="btn-secondary" id="btn-admin-apps-export">Export list</button>
               </div>
             </div>
-            <div id="admin-apps-body" class="surface muted">Loading…</div>
+            <div class="screen-controls surface app-control-bar">
+              <label>Lock duration
+                <select id="admin-apps-block-duration" class="input">
+                  <option value="15">15 minutes</option>
+                  <option value="30" selected>30 minutes</option>
+                  <option value="60">1 hour</option>
+                  <option value="120">2 hours</option>
+                  <option value="360">6 hours</option>
+                  <option value="1440">24 hours</option>
+                  <option value="0">Until I unlock</option>
+                </select>
+              </label>
+              <button type="button" class="btn-secondary" id="btn-admin-blocks-refresh">Refresh locks</button>
+              <span class="app-control-sep muted">Camera hardware</span>
+              <button type="button" class="btn-secondary" id="btn-admin-camera-lock">Lock camera</button>
+              <button type="button" class="btn-secondary" id="btn-admin-camera-unlock">Unlock camera</button>
+            </div>
+            <div id="admin-apps-blocks" class="apps-blocks surface muted">No apps locked.</div>
+            <div class="screen-controls surface">
+              <input id="admin-apps-search" class="input" type="search" placeholder="Search WhatsApp, YouTube, Instagram…" />
+              <label>Filter
+                <select id="admin-apps-filter" class="input">
+                  <option value="user" selected>User apps</option>
+                  <option value="all">All apps</option>
+                  <option value="blocked">Locked now</option>
+                  <option value="system">System</option>
+                  <option value="games">Games</option>
+                  <option value="social">Social</option>
+                  <option value="finance">Finance</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="productivity">Productivity</option>
+                  <option value="tools">Tools</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </div>
+            <div id="admin-apps-body" class="apps-list muted">Loading…</div>
+            <div id="admin-app-detail" class="surface app-detail" hidden></div>
           </div>
           <div id="admin-panel-app-usage" class="phone-tab-panel" data-phone-panel="app-usage" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Recent app usage by day. Tap a day to expand. Duration shown in minutes and seconds (AM/PM last used).</p>
+              <p class="page-sub">Recent app usage by day — same collapse cards as the user panel. Duration in minutes/seconds; last used AM/PM.</p>
               <div class="page-actions">
-                <button type="button" class="btn-primary" data-admin-cmd="APP_USAGE_SYNC" data-admin-payload='{"days":7}'>Sync usage</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="APP_USAGE_SYNC" data-admin-payload='{"days":7}'>Sync from phone</button>
+                <button type="button" class="btn-primary" data-admin-refresh>Refresh</button>
               </div>
             </div>
-            <div id="admin-app-usage-body" class="surface muted">Loading…</div>
+            <div id="admin-app-usage-body" class="app-usage-list muted">Loading…</div>
           </div>
           <p id="admin-action-status" class="muted" style="margin-top:12px;" aria-live="polite"></p>
         </div>
@@ -379,7 +426,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=18"></script>
+  <script type="module" src="/device/admin/app.js?v=19"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {
