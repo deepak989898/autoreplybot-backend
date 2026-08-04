@@ -1,8 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
 import {
   getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -103,11 +101,6 @@ async function registerEmail() {
   await createUserWithEmailAndPassword(state.auth, email, password);
 }
 
-async function loginGoogle() {
-  const provider = new GoogleAuthProvider();
-  await signInWithPopup(state.auth, provider);
-}
-
 async function logout() {
   await signOut(state.auth);
 }
@@ -198,7 +191,7 @@ function facebookLogin(scopeString, opts = {}) {
 }
 
 async function loadPages() {
-  if (!state.idToken) throw new Error("Sign in first (email/password or Google)");
+  if (!state.idToken) throw new Error("Sign in first (email/password)");
   if (!state.userAccessToken) throw new Error("Connect Facebook first");
   const r = await api("/api/meta/pages", "POST", { userAccessToken: state.userAccessToken });
   state.pages = r.pages || [];
@@ -274,7 +267,7 @@ async function loadSchedule() {
 }
 
 async function saveSchedule() {
-  if (!state.idToken) throw new Error("Sign in first (email/password or Google)");
+  if (!state.idToken) throw new Error("Sign in first (email/password)");
   const payload = collectForm();
   if (payload.instagramAutoPostEnabled) {
     const igId = ((state.integration && state.integration.instagramUserId) || "").trim();
@@ -289,7 +282,7 @@ async function saveSchedule() {
 }
 
 async function postNow() {
-  if (!state.idToken) throw new Error("Sign in first (email/password or Google)");
+  if (!state.idToken) throw new Error("Sign in first (email/password)");
   const r = await api("/api/post-now", "POST", {});
   setText("schedule-status", r.ok ? "Posted now successfully" : `Post failed: ${r.detail || "unknown"}`);
 }
@@ -300,9 +293,6 @@ function wireUi() {
   );
   el("btn-register-email").addEventListener("click", () =>
     registerEmail().catch((e) => setText("auth-status", friendlyAuthError(e)))
-  );
-  el("btn-login").addEventListener("click", () =>
-    loginGoogle().catch((e) => setText("auth-status", friendlyAuthError(e)))
   );
   el("btn-logout").addEventListener("click", () => logout().catch((e) => setText("auth-status", e.message)));
   el("btn-fb-login").addEventListener("click", async () => {

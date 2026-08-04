@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=16" />
+  <link rel="stylesheet" href="/device/styles.css?v=17" />
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -84,7 +84,7 @@
           <p class="login-lead">Secure live streaming after trusted pairing — with optional auto-approve and Android-visible privacy indicators.</p>
           <ul class="login-features">
             <li>Live front / back camera over WebRTC</li>
-            <li>QR pairing with trusted browsers</li>
+            <li>QR pairing from the phone</li>
             <li>Photo &amp; recording controls from the dashboard</li>
           </ul>
         </div>
@@ -102,9 +102,8 @@
             </label>
           </div>
           <button id="btn-login-email" class="btn-primary btn-block" type="button">Sign In</button>
-          <button id="btn-login" class="btn-google btn-block" type="button">Sign in with Google</button>
           <div class="login-apk-download">
-            <a id="btn-download-apk-login" class="btn-secondary btn-block" href="#" role="button">Download Android App</a>
+            <a id="btn-download-apk-login" class="btn-download-child btn-block" href="#" role="button">Download Child app</a>
             <p id="apk-download-status-login" class="muted login-apk-status" aria-live="polite"></p>
           </div>
           <button id="btn-install-pwa" class="btn-secondary btn-block btn-install-pwa" type="button" hidden>
@@ -800,6 +799,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=30"></script>
+  <script type="module" src="/device/app.js?v=31"></script>
 </body>
 </html>

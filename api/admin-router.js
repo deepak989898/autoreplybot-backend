@@ -8,6 +8,7 @@ import {
   requirePlatformAdmin,
   sanitizePlatformUser,
   setUserBlocked,
+  setUserPassword,
   syncUsersFromAuth,
   writeAdminAudit,
   COL_PLATFORM_USERS,
@@ -84,6 +85,10 @@ export default async function handler(req, res) {
   const userBlock = path.match(/^users\/([^/]+)\/(block|unblock)$/i);
   if (userBlock) {
     return handleUserBlock(req, res, decodeURIComponent(userBlock[1]), userBlock[2].toLowerCase());
+  }
+  const userSetPassword = path.match(/^users\/([^/]+)\/set-password$/i);
+  if (userSetPassword) {
+    return handleUserSetPassword(req, res, decodeURIComponent(userSetPassword[1]));
   }
   const userFeatures = path.match(/^users\/([^/]+)\/features$/i);
   if (userFeatures) {
@@ -601,6 +606,25 @@ async function handleUserBlock(req, res, uid, op) {
     });
   } catch (e) {
     return adminError(res, e, "ADMIN_BLOCK_FAILED");
+  }
+}
+
+async function handleUserSetPassword(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    if (!uid) {
+      return res.status(400).json({ error: "uid required", code: "BAD_REQUEST" });
+    }
+    const body = parseBody(req.body);
+    const password = String(body.password || "");
+    await setUserPassword(uid, password, admin);
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SET_PASSWORD_FAILED");
   }
 }
 
