@@ -54,6 +54,7 @@
             </label>
             <div class="row-gap" style="margin-top:12px;flex-wrap:wrap;">
               <button id="btn-login-email" class="btn-primary" type="submit">Sign in</button>
+              <button id="btn-login-google" class="btn-secondary" type="button">Google</button>
             </div>
           </form>
           <p id="auth-loading-hint" class="muted" hidden style="margin-top:12px;">Please wait — checking admin access and loading dashboard…</p>
@@ -128,7 +129,6 @@
                 <thead>
                   <tr>
                     <th>Email</th>
-                    <th>Password</th>
                     <th>Devices</th>
                     <th>Online</th>
                     <th>Last seen</th>
@@ -137,7 +137,7 @@
                   </tr>
                 </thead>
                 <tbody id="users-tbody">
-                  <tr><td colspan="7" class="muted">Loading…</td></tr>
+                  <tr><td colspan="6" class="muted">Loading…</td></tr>
                 </tbody>
               </table>
             </div>
@@ -426,7 +426,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=20"></script>
+  <script type="module" src="/device/admin/app.js?v=19"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {

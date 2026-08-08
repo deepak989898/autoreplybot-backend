@@ -1,7 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
 import {
   getAuth,
+  GoogleAuthProvider,
   onAuthStateChanged,
+  signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -2796,7 +2798,7 @@ function authFormCredentials() {
 }
 
 function setAuthBusy(busy, label) {
-  const buttons = [btnLoginEmail, btnRegisterEmail].filter(Boolean);
+  const buttons = [btnLoginEmail, btnLogin, btnRegisterEmail].filter(Boolean);
   for (const btn of buttons) {
     btn.disabled = Boolean(busy);
     btn.classList.remove("is-loading");
@@ -2812,6 +2814,10 @@ function setAuthBusy(busy, label) {
       btnLoginEmail.classList.remove("is-loading");
       btnLoginEmail.textContent = btnLoginEmail.dataset.label || "Sign In";
     }
+  }
+  if (btnLogin && !busy) {
+    btnLogin.classList.remove("is-loading");
+    if (btnLogin.dataset.label) btnLogin.textContent = btnLogin.dataset.label;
   }
   if (busy && authStatus) {
     authStatus.textContent = label || "Signing in...";
@@ -2844,6 +2850,7 @@ async function main() {
   auth = getAuth(app);
   db = getFirestore(app);
   storage = getStorage(app);
+  const provider = new GoogleAuthProvider();
 
   async function runEmailSignIn() {
     try {
@@ -2883,6 +2890,27 @@ async function main() {
       }
     });
   }
+  btnLogin.addEventListener("click", async () => {
+    setAuthBusy(true, "Opening Google...");
+    if (btnLogin) {
+      btnLogin.dataset.label = btnLogin.dataset.label || "Sign in with Google";
+      btnLogin.textContent = "Opening Google...";
+      btnLogin.classList.add("is-loading");
+    }
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (e) {
+      authStatus.textContent = friendlyAuthError(e);
+    } finally {
+      if (viewLogin && !viewLogin.hidden) {
+        setAuthBusy(false);
+        if (btnLogin) {
+          btnLogin.classList.remove("is-loading");
+          btnLogin.textContent = btnLogin.dataset.label || "Sign in with Google";
+        }
+      }
+    }
+  });
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   document.getElementById("workspace-device-select")?.addEventListener("change", () => {

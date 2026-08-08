@@ -1,7 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
 import {
   getAuth,
+  GoogleAuthProvider,
   onAuthStateChanged,
+  signInWithPopup,
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
@@ -348,7 +350,7 @@ function renderUsers(users) {
   const tbody = document.getElementById("users-tbody");
   if (!tbody) return;
   if (!users.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="muted">No users yet. Click Sync users.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No users yet. Click Sync users.</td></tr>`;
     return;
   }
   tbody.innerHTML = users
@@ -362,7 +364,6 @@ function renderUsers(users) {
           <div>${email}</div>
           <div class="muted" style="font-size:0.8rem;">${escapeHtml(u.displayName || "")}</div>
         </td>
-        <td><span class="muted" title="Firebase hashes passwords — originals cannot be shown">Managed by Firebase</span></td>
         <td>${Number(u.deviceCount || 0)}</td>
         <td>${Number(u.onlineDeviceCount || 0)}</td>
         <td>${fmtTime(u.lastSeenAt)}</td>
@@ -561,20 +562,6 @@ function renderUserDetailBody(uid, data) {
 
   body.innerHTML = `
     <section class="surface admin-features-card">
-      <h2 class="settings-section-title" style="margin-top:0;">Account password</h2>
-      <p class="muted" style="margin-top:0;">
-        Passwords are stored hashed by Firebase and cannot be displayed. Set a temporary password here, then share it with the user (they can change it after sign-in).
-      </p>
-      <div class="admin-features-toolbar" style="align-items:end;">
-        <label>New password (min 6)
-          <input id="admin-set-password-input" class="input" type="text" autocomplete="new-password" minlength="6" placeholder="Temporary password" />
-        </label>
-        <button type="button" class="btn-primary" id="btn-admin-set-password">Set password</button>
-      </div>
-      <p id="admin-set-password-status" class="muted" style="margin:10px 0 0;" aria-live="polite"></p>
-    </section>
-
-    <section class="surface admin-features-card">
       <h2 class="settings-section-title" style="margin-top:0;">Website features access</h2>
       <p class="muted" style="margin-top:0;">
         Only checked features appear for this user on the normal website. Set how many days access lasts, then Save.
@@ -690,32 +677,6 @@ function renderUserDetailBody(uid, data) {
       b.checked = false;
     });
     syncSelectAll();
-  });
-
-  document.getElementById("btn-admin-set-password")?.addEventListener("click", async () => {
-    const status = document.getElementById("admin-set-password-status");
-    const input = document.getElementById("admin-set-password-input");
-    const password = String(input?.value || "");
-    if (password.length < 6) {
-      if (status) status.textContent = "Password must be at least 6 characters.";
-      return;
-    }
-    if (!confirm("Set a new password for this user? Share it securely with them.")) return;
-    try {
-      if (status) status.textContent = "Saving…";
-      await api(`/api/admin/users/${encodeURIComponent(uid)}/set-password`, {
-        method: "POST",
-        body: JSON.stringify({ password }),
-      });
-      if (input) input.value = "";
-      if (status) {
-        status.textContent =
-          "Password updated in Firebase. Share the temporary password with the user (it is not stored for display).";
-      }
-    } catch (e) {
-      if (status) status.textContent = formatApiError(e);
-      else alert(formatApiError(e));
-    }
   });
 
   document.getElementById("btn-save-features")?.addEventListener("click", async () => {
@@ -3004,8 +2965,10 @@ function setAuthError(message) {
 function setLoginBusy(on, message = "") {
   const hint = document.getElementById("auth-loading-hint");
   const emailBtn = document.getElementById("btn-login-email");
+  const googleBtn = document.getElementById("btn-login-google");
   document.body.classList.toggle("admin-login-busy", Boolean(on));
   if (emailBtn) emailBtn.disabled = Boolean(on);
+  if (googleBtn) googleBtn.disabled = Boolean(on);
   if (hint) {
     hint.hidden = !on;
     if (on && message) hint.textContent = message;
@@ -3271,6 +3234,27 @@ async function main() {
   loginForm?.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void loginWithEmailPassword();
+  });
+
+  document.getElementById("btn-login-google")?.addEventListener("click", async () => {
+    if (!auth) {
+      setAuthError("Sign-in is not ready yet. Wait a second and try again.");
+      return;
+    }
+    loginInProgress = true;
+    setAdminLoading(true, "Opening Google…");
+    setLoginBusy(true, "Opening Google…");
+    setAuthError("");
+    try {
+      const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+      await completeAdminLogin(cred.user);
+    } catch (e) {
+      loginInProgress = false;
+      setAdminLoading(false);
+      setLoginBusy(false);
+      const code = e?.code ? ` (${e.code})` : "";
+      setAuthError((e instanceof Error ? e.message : String(e)) + code);
+    }
   });
 
   if (authStatus) authStatus.textContent = "Ready — enter email and password, then Sign in.";
