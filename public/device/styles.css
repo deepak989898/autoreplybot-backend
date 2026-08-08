@@ -1154,50 +1154,6 @@ a.btn-download-child[aria-disabled="true"] {
   margin: 8px 0 0;
 }
 
-.pair-share-label {
-  margin: 14px 0 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.pair-share-row {
-  margin-top: 8px;
-}
-
-.btn-share {
-  border: 0;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  color: #fff;
-}
-
-.btn-share-wa {
-  background: #25d366;
-}
-
-.btn-share-wa:hover {
-  background: #1ebe57;
-}
-
-.btn-share-sms {
-  background: #2563eb;
-}
-
-.btn-share-sms:hover {
-  background: #1d4ed8;
-}
-
-.btn-share-all {
-  background: #6d28d9;
-}
-
-.btn-share-all:hover {
-  background: #5b21b6;
-}
-
 .pair-already {
   margin-bottom: 16px;
   background: #ecfdf5;

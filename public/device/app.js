@@ -65,13 +65,6 @@ const pairError = document.getElementById("pair-error");
 const pairAlready = document.getElementById("pair-already");
 const pairAlreadyDetail = document.getElementById("pair-already-detail");
 const pairCreateBlock = document.getElementById("pair-create-block");
-const btnShareWhatsapp = document.getElementById("btn-share-whatsapp");
-const btnShareSms = document.getElementById("btn-share-sms");
-const btnShareAll = document.getElementById("btn-share-all");
-const btnCopyPairLink = document.getElementById("btn-copy-pair-link");
-
-/** @type {{ code: string, deepLink: string, shareUrl: string } | null} */
-let lastPairShare = null;
 const btnShowNewPair = document.getElementById("btn-show-new-pair");
 const btnPairDisconnect = document.getElementById("btn-pair-disconnect");
 const homeStatus = document.getElementById("home-status");
@@ -2730,83 +2723,6 @@ function showPairError(message) {
   pairError.textContent = message || "";
 }
 
-/**
- * HTTPS link that opens the app via open-pair.html (works in WhatsApp / SMS).
- * @param {string} deepLink autoreplybot://pair?...
- */
-function buildPairShareUrl(deepLink) {
-  try {
-    const deep = new URL(deepLink);
-    const https = new URL("/device/open-pair.html", window.location.origin);
-    deep.searchParams.forEach((value, key) => https.searchParams.set(key, value));
-    return https.toString();
-  } catch {
-    return String(deepLink || "");
-  }
-}
-
-function pairShareMessage() {
-  if (!lastPairShare) return "";
-  const { code, shareUrl } = lastPairShare;
-  return (
-    `Pair this phone with AutoReplyBot.\n\n` +
-    `Code: ${code}\n\n` +
-    `Tap to open the app and pair (sign in if needed):\n${shareUrl}`
-  );
-}
-
-async function sharePairWhatsApp() {
-  if (!lastPairShare) return;
-  const text = pairShareMessage();
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
-}
-
-function sharePairSms() {
-  if (!lastPairShare) return;
-  const text = pairShareMessage();
-  // iOS uses &body=, Android often uses ?body=
-  const href = /iPhone|iPad|iPod/i.test(navigator.userAgent)
-    ? `sms:&body=${encodeURIComponent(text)}`
-    : `sms:?body=${encodeURIComponent(text)}`;
-  window.location.href = href;
-}
-
-async function sharePairAll() {
-  if (!lastPairShare) return;
-  const text = pairShareMessage();
-  if (navigator.share) {
-    try {
-      await navigator.share({
-        title: "AutoReplyBot pair link",
-        text,
-        url: lastPairShare.shareUrl,
-      });
-      return;
-    } catch (e) {
-      if (e && e.name === "AbortError") return;
-    }
-  }
-  sharePairWhatsApp();
-}
-
-async function copyPairLink() {
-  if (!lastPairShare) return;
-  const value = lastPairShare.shareUrl || lastPairShare.deepLink;
-  try {
-    await navigator.clipboard.writeText(value);
-    showPairError("");
-    if (pairExpires) {
-      const prev = pairExpires.textContent;
-      pairExpires.textContent = "Link copied.";
-      setTimeout(() => {
-        if (pairExpires) pairExpires.textContent = prev;
-      }, 1600);
-    }
-  } catch {
-    showPairError("Could not copy — select the link above instead.");
-  }
-}
-
 async function createPairing() {
   showPairError("");
   if (!idToken) {
@@ -2826,15 +2742,11 @@ async function createPairing() {
       }),
     });
     pairResult.hidden = false;
-    const code = data.code || "------";
-    const deepLink = data.qrPayload || data.token || "";
-    const shareUrl = buildPairShareUrl(deepLink);
-    lastPairShare = { code, deepLink, shareUrl };
-    pairCode.textContent = code;
+    pairCode.textContent = data.code || "------";
     pairExpires.textContent = data.expiresAt
-      ? `Expires at ${new Date(data.expiresAt).toLocaleString()} (valid 24 hours, single-use)`
-      : "Valid for 24 hours (single-use)";
-    pairPayload.textContent = shareUrl || deepLink;
+      ? `Expires at ${new Date(data.expiresAt).toLocaleString()} (single-use)`
+      : "";
+    pairPayload.textContent = data.qrPayload || data.token || "";
     if (data.qrPayload && pairQr) {
       await QRCode.toCanvas(pairQr, data.qrPayload, {
         width: 180,
@@ -2844,7 +2756,6 @@ async function createPairing() {
     }
   } catch (e) {
     pairResult.hidden = true;
-    lastPairShare = null;
     showPairError(e instanceof Error ? e.message : String(e));
   } finally {
     btnCreatePair.disabled = false;
@@ -2999,10 +2910,6 @@ async function main() {
     btnRefreshMedia.addEventListener("click", () => refreshMedia());
   }
   if (btnCreatePair) btnCreatePair.addEventListener("click", () => createPairing());
-  if (btnShareWhatsapp) btnShareWhatsapp.addEventListener("click", () => sharePairWhatsApp());
-  if (btnShareSms) btnShareSms.addEventListener("click", () => sharePairSms());
-  if (btnShareAll) btnShareAll.addEventListener("click", () => sharePairAll());
-  if (btnCopyPairLink) btnCopyPairLink.addEventListener("click", () => copyPairLink());
   if (btnPairDisconnect) {
     btnPairDisconnect.addEventListener("click", () => disconnectThisBrowser());
   }

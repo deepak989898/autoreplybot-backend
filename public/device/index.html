@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=18" />
+  <link rel="stylesheet" href="/device/styles.css?v=17" />
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -639,7 +639,7 @@
           <header class="page-head">
             <div>
               <h1>Pair Browser</h1>
-              <p class="page-sub">Scan the QR on Android (Pair Website → Scan QR), enter the 6-digit code, or share the link via WhatsApp / SMS.</p>
+              <p class="page-sub">Scan the QR on Android (Pair Website → Scan QR) or enter the 6-digit code.</p>
             </div>
           </header>
 
@@ -665,13 +665,6 @@
                   <p id="pair-code" class="pair-code" aria-live="polite">------</p>
                   <p id="pair-expires" class="muted"></p>
                   <code id="pair-payload" class="pair-payload"></code>
-                  <p class="pair-share-label muted">Share pairing link</p>
-                  <div class="row-gap pair-share-row" id="pair-share-row">
-                    <button type="button" id="btn-share-whatsapp" class="btn-share btn-share-wa">WhatsApp</button>
-                    <button type="button" id="btn-share-sms" class="btn-share btn-share-sms">SMS</button>
-                    <button type="button" id="btn-share-all" class="btn-share btn-share-all">Share…</button>
-                    <button type="button" id="btn-copy-pair-link" class="btn-secondary">Copy link</button>
-                  </div>
                 </div>
                 <button id="btn-create-pair" class="btn-primary" type="button">Generate New Code</button>
                 <button type="button" class="btn-secondary nav-jump" data-panel="phone">Go to My Phone</button>
@@ -806,6 +799,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=33"></script>
+  <script type="module" src="/device/app.js?v=31"></script>
 </body>
 </html>
