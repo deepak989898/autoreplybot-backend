@@ -97,170 +97,6 @@ function sortNewestFirst(items, ...fields) {
   return [...(items || [])].sort((a, b) => ts(b) - ts(a));
 }
 
-function formatNotifDate(ms) {
-  const n = Number(ms || 0);
-  if (!n) return "—";
-  try {
-    return new Date(n).toLocaleString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return String(n);
-  }
-}
-
-function notifDayKey(ms) {
-  const n = Number(ms || 0);
-  if (!n) return "unknown";
-  const d = new Date(n);
-  if (Number.isNaN(d.getTime())) return "unknown";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function notifDayLabel(dayKey) {
-  if (!dayKey || dayKey === "unknown") return "Unknown date";
-  const [y, m, d] = String(dayKey).split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  const today = new Date();
-  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diffDays = Math.round((startToday - startThat) / 86400000);
-  const pretty = date.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  if (diffDays === 0) return `Today · ${pretty}`;
-  if (diffDays === 1) return `Yesterday · ${pretty}`;
-  if (diffDays > 1) return `Previous · ${pretty}`;
-  return pretty;
-}
-
-function groupItemsByDay(items, getTimestamp) {
-  const groups = new Map();
-  const tsOf =
-    typeof getTimestamp === "function"
-      ? getTimestamp
-      : (it) => it?.[getTimestamp || "postedAt"];
-  for (const it of items || []) {
-    const key = notifDayKey(tsOf(it));
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(it);
-  }
-  return [...groups.entries()].sort((a, b) => {
-    if (a[0] === "unknown") return 1;
-    if (b[0] === "unknown") return -1;
-    return b[0].localeCompare(a[0]);
-  });
-}
-
-function wireCollapseHeaders(root, headerClass, groupClass, bodyClass, chevronClass) {
-  root?.querySelectorAll(`.${headerClass}`).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const group = btn.closest(`.${groupClass}`);
-      const body = group?.querySelector(`.${bodyClass}`);
-      const chevron = btn.querySelector(`.${chevronClass}`);
-      if (!group || !body) return;
-      const opening = body.hasAttribute("hidden");
-      if (opening) {
-        body.removeAttribute("hidden");
-        group.classList.add("is-open");
-        btn.setAttribute("aria-expanded", "true");
-        if (chevron) chevron.textContent = "▲";
-      } else {
-        body.setAttribute("hidden", "");
-        group.classList.remove("is-open");
-        btn.setAttribute("aria-expanded", "false");
-        if (chevron) chevron.textContent = "▼";
-      }
-    });
-  });
-}
-
-function callTypeLabel(type) {
-  const t = String(type || "").toLowerCase();
-  const map = {
-    incoming: "Incoming",
-    outgoing: "Outgoing",
-    missed: "Missed",
-    voicemail: "Voicemail",
-    rejected: "Rejected",
-    blocked: "Blocked",
-    answered_externally: "Answered elsewhere",
-  };
-  return map[t] || (t ? t.replace(/_/g, " ") : "Unknown");
-}
-
-function callTypeClass(type) {
-  const t = String(type || "").toLowerCase();
-  if (t === "incoming") return "call-type-incoming";
-  if (t === "outgoing") return "call-type-outgoing";
-  if (t === "missed") return "call-type-missed";
-  if (t === "voicemail") return "call-type-voicemail";
-  if (t === "rejected") return "call-type-rejected";
-  if (t === "blocked") return "call-type-blocked";
-  if (t === "answered_externally") return "call-type-external";
-  return "call-type-other";
-}
-
-function formatCallDateTime(ms) {
-  const n = Number(ms || 0);
-  if (!n) return "—";
-  try {
-    return new Date(n).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return String(n);
-  }
-}
-
-function formatCallDuration(sec) {
-  const s = Math.max(0, Number(sec || 0));
-  if (!s) return "0s";
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const r = s % 60;
-  if (h > 0) return `${h}h ${m}m ${r}s`;
-  if (m > 0) return `${m}m ${r}s`;
-  return `${r}s`;
-}
-
-function adminBlockDurationMs() {
-  const mins = Number(document.getElementById("admin-apps-block-duration")?.value ?? 30);
-  if (!Number.isFinite(mins) || mins < 0) return 30 * 60 * 1000;
-  if (mins === 0) return 0;
-  return Math.round(mins * 60 * 1000);
-}
-
-function adminActiveBlocks() {
-  const now = Date.now();
-  return (exploreCtx?.data?.appBlocks || []).filter((b) => {
-    if (String(b.status || "") !== "active") return false;
-    const exp = Number(b.expiresAt || 0);
-    return exp <= 0 || exp > now;
-  });
-}
-
-function adminIsPackageBlocked(pkg) {
-  return adminActiveBlocks().some(
-    (b) => b.packageName === pkg && String(b.mode || "app") !== "camera_hw"
-  );
-}
-
 function escapeHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -1238,6 +1074,13 @@ function renderGalleryPanel() {
       renderGalleryPanel();
     };
   });
+  document.getElementById("btn-admin-gallery-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
 
   let items = sortNewestFirst(exploreCtx.data.gallery || [], "dateAdded", "createdAt");
   if (adminGalleryFilter !== "all") {
@@ -1249,21 +1092,20 @@ function renderGalleryPanel() {
     );
     return;
   }
-  el.classList.remove("muted");
-  el.innerHTML = `<div class="media-grid">${items
-    .slice(0, 120)
+  el.innerHTML = `<div class="admin-item-grid">${items
+    .slice(0, 80)
     .map((g) => {
       const id = String(g.itemId || g.id || "");
       const name = g.displayName || g.name || id;
       const type = String(g.type || "file").toLowerCase();
       const actionLabel =
         type === "image" ? "View" : type === "audio" || type === "video" ? "Play / Download" : "Download";
-      return `<article class="media-card" data-item-id="${escapeHtml(id)}">
-        <strong class="media-name">${escapeHtml(name)}</strong>
-        <span class="muted media-type">${escapeHtml(type)}</span>
-        <span class="muted">${escapeHtml(formatCallDateTime(g.dateAdded || g.createdAt))}</span>
+      return `<article class="admin-item-card" data-item-id="${escapeHtml(id)}">
+        <strong>${escapeHtml(name)}</strong>
+        <span class="muted">${escapeHtml(type)}</span>
+        <span class="muted">${fmtTime(g.dateAdded || g.createdAt)}</span>
         <span class="muted">${g.sizeBytes != null ? `${Math.round(Number(g.sizeBytes) / 1024)} KB` : ""}</span>
-        <div class="media-actions">
+        <div class="admin-gallery-actions">
           <button type="button" class="btn-primary btn-admin-gallery-open"
             data-item-id="${escapeHtml(id)}"
             data-type="${escapeHtml(type)}"
@@ -1290,6 +1132,13 @@ function renderGalleryPanel() {
 function renderNotificationsPanel() {
   const el = document.getElementById("admin-notifications-body");
   if (!el || !exploreCtx) return;
+  document.getElementById("btn-admin-notif-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
   const items = sortNewestFirst(exploreCtx.data.notifications || [], "postedAt", "createdAt");
   if (!items.length) {
     el.innerHTML = emptyHint(
@@ -1297,41 +1146,22 @@ function renderNotificationsPanel() {
     );
     return;
   }
-  const groups = groupItemsByDay(items, (n) => n.postedAt || n.createdAt);
-  el.classList.remove("muted");
-  el.innerHTML = `<div class="notif-day-list">${groups
-    .map(([dayKey, dayItems], index) => {
-      const open = index === 0 ? " is-open" : "";
-      const hidden = index === 0 ? "" : " hidden";
-      const chevron = index === 0 ? "▲" : "▼";
-      return `<section class="notif-day-group${open}" data-day="${escapeHtml(dayKey)}">
-        <button type="button" class="notif-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
-          <span class="notif-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
-          <span class="notif-day-count">${dayItems.length}</span>
-          <span class="notif-day-chevron" aria-hidden="true">${chevron}</span>
-        </button>
-        <div class="notif-day-body"${hidden}>
-          <div class="notif-grid">${dayItems
-            .map((n) => {
-              const title = escapeHtml(n.title || "(No title)");
-              const message = escapeHtml(n.message || n.text || n.body || "");
-              const app = escapeHtml(n.appLabel || n.appName || n.packageName || "App");
-              const when = escapeHtml(formatNotifDate(n.postedAt || n.createdAt));
-              return `<article class="notif-card">
-                <div class="notif-card-head">
-                  <strong class="notif-title">${title}</strong>
-                  <time class="notif-time">${when}</time>
-                </div>
-                <p class="notif-message">${message || '<span class="muted">(No message text)</span>'}</p>
-                <div class="notif-meta"><span>${app}</span></div>
-              </article>`;
-            })
-            .join("")}</div>
+  el.innerHTML = `<div class="notif-grid">${items
+    .slice(0, 80)
+    .map((n) => {
+      const title = escapeHtml(n.title || "(No title)");
+      const message = escapeHtml(n.message || n.text || n.body || "");
+      const app = escapeHtml(n.appLabel || n.appName || n.packageName || "App");
+      return `<article class="notif-card">
+        <div class="notif-card-head">
+          <strong class="notif-title">${title}</strong>
+          <time class="notif-time muted">${escapeHtml(fmtTime(n.postedAt || n.createdAt))}</time>
         </div>
-      </section>`;
+        <p class="notif-message">${message || '<span class="muted">(No message text)</span>'}</p>
+        <div class="notif-meta muted">${app}</div>
+      </article>`;
     })
     .join("")}</div>`;
-  wireCollapseHeaders(el, "notif-day-header", "notif-day-group", "notif-day-body", "notif-day-chevron");
 }
 
 function renderAdminMediaBody(body, { objectUrl, mimeType, displayName, type }) {
@@ -1541,47 +1371,18 @@ function renderMessagesPanel() {
     el.innerHTML = emptyHint("No messages cached. Tap Sync from phone.");
     return;
   }
-  const groups = groupItemsByDay(items, (m) => m.date || m.createdAt);
-  el.classList.remove("muted");
-  el.innerHTML = `<div class="msg-day-list">${groups
-    .map(([dayKey, dayItems], index) => {
-      const open = index === 0 ? " is-open" : "";
-      const hidden = index === 0 ? "" : " hidden";
-      const chevron = index === 0 ? "▲" : "▼";
-      return `<section class="msg-day-group${open}" data-day="${escapeHtml(dayKey)}">
-        <button type="button" class="msg-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
-          <span class="msg-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
-          <span class="msg-day-count">${dayItems.length}</span>
-          <span class="msg-day-chevron" aria-hidden="true">${chevron}</span>
-        </button>
-        <div class="msg-day-body"${hidden}>
-          <div class="msg-grid">${dayItems
-            .map((m) => {
-              const name = String(m.senderName || m.contactName || "").trim();
-              const number = String(m.address || "").trim() || "(unknown)";
-              const who = name
-                ? `${escapeHtml(name)} · ${escapeHtml(number)}`
-                : escapeHtml(number);
-              const body = escapeHtml(m.body || m.text || "");
-              const when = escapeHtml(formatNotifDate(m.date || m.createdAt));
-              const kind = escapeHtml(m.type || m.direction || "inbox");
-              return `<article class="msg-card">
-                <div class="msg-card-main">
-                  <div class="msg-card-head">
-                    <strong class="msg-who">${who}</strong>
-                    <time class="msg-time">${when}</time>
-                  </div>
-                  <p class="msg-body">${body || '<span class="muted">(empty)</span>'}</p>
-                  <div class="msg-meta"><span>${kind}</span></div>
-                </div>
-              </article>`;
-            })
-            .join("")}</div>
-        </div>
-      </section>`;
-    })
-    .join("")}</div>`;
-  wireCollapseHeaders(el, "msg-day-header", "msg-day-group", "msg-day-body", "msg-day-chevron");
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 50)
+    .map(
+      (m) =>
+        `<li>
+          <strong>${escapeHtml(m.address || m.contactName || "Unknown")}</strong>
+          <span class="muted"> · ${escapeHtml(m.type || m.direction || "")}</span>
+          <div>${escapeHtml(m.body || m.text || "")}</div>
+          <div class="muted">${fmtTime(m.date || m.createdAt)}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
 }
 
 function renderCallLogsPanel() {
@@ -1592,96 +1393,37 @@ function renderCallLogsPanel() {
     el.innerHTML = emptyHint("No call logs cached. Tap Sync from phone.");
     return;
   }
-  const groups = groupItemsByDay(items, (c) => c.date || c.createdAt);
-  el.classList.remove("muted");
-  el.innerHTML = `<div class="call-day-list">${groups
-    .map(([dayKey, dayItems], index) => {
-      const open = index === 0 ? " is-open" : "";
-      const hidden = index === 0 ? "" : " hidden";
-      const chevron = index === 0 ? "▲" : "▼";
-      return `<section class="call-day-group${open}" data-day="${escapeHtml(dayKey)}">
-        <button type="button" class="call-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
-          <span class="call-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
-          <span class="call-day-count">${dayItems.length}</span>
-          <span class="call-day-chevron" aria-hidden="true">${chevron}</span>
-        </button>
-        <div class="call-day-body"${hidden}>
-          <div class="call-grid">${dayItems
-            .map((c) => {
-              const type = String(c.callType || c.type || "incoming").toLowerCase();
-              const typeLabel = escapeHtml(callTypeLabel(type));
-              const typeCls = callTypeClass(type);
-              const name = String(c.contactName || c.cachedName || "").trim();
-              const number = String(c.number || "").trim() || "(unknown)";
-              const who = name
-                ? `${escapeHtml(name)} · ${escapeHtml(number)}`
-                : escapeHtml(number);
-              const when = escapeHtml(formatCallDateTime(c.date || c.createdAt));
-              const dur = escapeHtml(
-                formatCallDuration(c.durationSec != null ? c.durationSec : c.duration)
-              );
-              const geo = String(c.geo || "").trim();
-              return `<article class="call-card">
-                <div class="call-card-head">
-                  <strong class="call-who">${who}</strong>
-                  <span class="call-type ${typeCls}">${typeLabel}</span>
-                </div>
-                <div class="call-meta">
-                  <time class="call-time">${when}</time>
-                  <span class="call-duration">Duration ${dur}</span>
-                  ${geo ? `<span class="call-geo">${escapeHtml(geo)}</span>` : ""}
-                </div>
-              </article>`;
-            })
-            .join("")}</div>
-        </div>
-      </section>`;
-    })
-    .join("")}</div>`;
-  wireCollapseHeaders(el, "call-day-header", "call-day-group", "call-day-body", "call-day-chevron");
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 50)
+    .map(
+      (c) =>
+        `<li>
+          <strong>${escapeHtml(c.number || c.cachedName || "Unknown")}</strong>
+          <span class="muted"> · ${escapeHtml(c.type || "")} · ${escapeHtml(String(c.duration ?? ""))}s</span>
+          <div class="muted">${fmtTime(c.date || c.createdAt)}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
 }
 
 function renderContactsPanel() {
   const el = document.getElementById("admin-contacts-body");
   if (!el || !exploreCtx) return;
-  const q = String(document.getElementById("admin-contacts-search")?.value || "")
-    .trim()
-    .toLowerCase();
-  let items = [...(exploreCtx.data.contacts || [])];
-  items.sort((a, b) =>
-    String(a.displayName || a.name || "").localeCompare(String(b.displayName || b.name || ""), undefined, {
-      sensitivity: "base",
-    })
-  );
-  if (q) {
-    items = items.filter((c) => {
-      const name = String(c.displayName || c.name || "").toLowerCase();
-      const phone = String(c.phone || c.number || (c.phones || [])[0] || "").toLowerCase();
-      return name.includes(q) || phone.includes(q);
-    });
-  }
+  const items = exploreCtx.data.contacts || [];
   if (!items.length) {
-    el.innerHTML = emptyHint(
-      q ? "No contacts match this search." : "No contacts cached. Tap Sync from phone."
-    );
+    el.innerHTML = emptyHint("No contacts cached. Tap Sync from phone.");
     return;
   }
-  el.classList.remove("muted");
-  el.innerHTML = `<div class="contacts-grid">${items
-    .slice(0, 500)
-    .map((c) => {
-      const name = escapeHtml(String(c.displayName || c.name || "").trim() || "(No name)");
-      const number = escapeHtml(
-        String(c.number || c.phone || (c.phones || [])[0] || "").trim() || "—"
-      );
-      const phoneType = escapeHtml(String(c.phoneType || "other"));
-      return `<article class="contact-card surface">
-        <strong>${name}</strong>
-        <div class="muted">${number}</div>
-        <div class="muted">${phoneType}</div>
-      </article>`;
-    })
-    .join("")}</div>`;
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 80)
+    .map(
+      (c) =>
+        `<li>
+          <strong>${escapeHtml(c.displayName || c.name || "Contact")}</strong>
+          <span class="muted"> · ${escapeHtml(c.phone || c.number || (c.phones || [])[0] || "")}</span>
+        </li>`
+    )
+    .join("")}</ul>`;
 }
 
 function renderFilesPanel() {
@@ -1694,16 +1436,15 @@ function renderFilesPanel() {
     );
     return;
   }
-  el.classList.remove("muted");
-  el.innerHTML = `<div class="files-grid">${grants
+  el.innerHTML = `<ul class="admin-readable-list">${grants
     .map(
       (g) =>
-        `<article class="file-row surface">
+        `<li>
           <strong>${escapeHtml(g.displayName || g.name || g.path || g.id)}</strong>
           <div class="muted">${escapeHtml(g.uri || g.path || "")}</div>
-        </article>`
+        </li>`
     )
-    .join("")}</div>`;
+    .join("")}</ul>`;
 }
 
 function setAdminRcStatus(text) {
@@ -2107,6 +1848,21 @@ function renderRecordingPanel() {
   });
 }
 
+function fmtTimeAmPm(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "—";
+  }
+}
+
 function formatUsageDuration(ms) {
   const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
   const h = Math.floor(totalSec / 3600);
@@ -2115,6 +1871,26 @@ function formatUsageDuration(ms) {
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+function usageDayLabel(dayKey) {
+  if (!dayKey || dayKey === "unknown") return "Unknown date";
+  const [y, m, d] = String(dayKey).split("-").map(Number);
+  if (!y || !m || !d) return String(dayKey);
+  const date = new Date(y, m - 1, d);
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startToday - startThat) / 86400000);
+  const pretty = date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  if (diffDays === 0) return `Today · ${pretty}`;
+  if (diffDays === 1) return `Yesterday · ${pretty}`;
+  return pretty;
 }
 
 function groupAdminAppUsage(items) {
@@ -2138,167 +1914,47 @@ function groupAdminAppUsage(items) {
   return groups;
 }
 
-function renderAdminAppsBlocks() {
-  const el = document.getElementById("admin-apps-blocks");
-  if (!el) return;
-  const blocks = adminActiveBlocks();
-  if (!blocks.length) {
-    el.classList.add("muted");
-    el.textContent = "No apps locked.";
-    return;
-  }
-  el.classList.remove("muted");
-  el.innerHTML = blocks
-    .map((b) => {
-      const name = escapeHtml(b.appName || b.packageName || "App");
-      const pkg = escapeHtml(b.packageName || "");
-      const until =
-        Number(b.expiresAt || 0) > 0
-          ? `until ${escapeHtml(formatCallDateTime(b.expiresAt))}`
-          : "until unlocked";
-      const isCam = String(b.mode || "") === "camera_hw";
-      return `<div class="apps-block-row">
-        <strong>${isCam ? "Camera hardware" : name}</strong>
-        <span class="muted">${isCam ? "" : pkg} · ${until}</span>
-        ${
-          isCam
-            ? ""
-            : `<button type="button" class="btn-secondary btn-admin-app-unlock" data-package="${pkg}" data-name="${name}">Unlock</button>`
-        }
-      </div>`;
-    })
-    .join("");
-  el.querySelectorAll(".btn-admin-app-unlock").forEach((btn) => {
+function wireAdminUsageCollapse(root) {
+  root?.querySelectorAll(".usage-day-header").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!exploreCtx) return;
-      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "APP_UNBLOCK", {
-        packageName: btn.getAttribute("data-package") || "",
-        appName: btn.getAttribute("data-name") || "",
-        mode: "app",
-      });
+      const group = btn.closest(".usage-day-group");
+      const body = group?.querySelector(".usage-day-body");
+      const chevron = btn.querySelector(".usage-day-chevron");
+      if (!group || !body) return;
+      const opening = body.hasAttribute("hidden");
+      if (opening) {
+        body.removeAttribute("hidden");
+        group.classList.add("is-open");
+        btn.setAttribute("aria-expanded", "true");
+        if (chevron) chevron.textContent = "▲";
+      } else {
+        body.setAttribute("hidden", "");
+        group.classList.remove("is-open");
+        btn.setAttribute("aria-expanded", "false");
+        if (chevron) chevron.textContent = "▼";
+      }
     });
   });
 }
 
 function renderAppsPanel() {
   const el = document.getElementById("admin-apps-body");
-  const detail = document.getElementById("admin-app-detail");
   if (!el || !exploreCtx) return;
-  if (detail) detail.hidden = true;
-  renderAdminAppsBlocks();
-
-  const q = String(document.getElementById("admin-apps-search")?.value || "")
-    .trim()
-    .toLowerCase();
-  const filter = String(document.getElementById("admin-apps-filter")?.value || "user");
-  let items = [...(exploreCtx.data.apps || [])];
-  items.sort((a, b) =>
-    String(a.appName || a.packageName || "").localeCompare(
-      String(b.appName || b.packageName || ""),
-      undefined,
-      { sensitivity: "base" }
-    )
-  );
-  if (q) {
-    items = items.filter(
-      (a) =>
-        String(a.appName || "")
-          .toLowerCase()
-          .includes(q) ||
-        String(a.packageName || "")
-          .toLowerCase()
-          .includes(q)
-    );
-  }
-  if (filter === "system") items = items.filter((a) => a.isSystem);
-  else if (filter === "user") items = items.filter((a) => !a.isSystem);
-  else if (filter === "disabled") items = items.filter((a) => a.enabled === false);
-  else if (filter === "blocked") {
-    const blocked = new Set(
-      adminActiveBlocks()
-        .filter((b) => String(b.mode || "app") !== "camera_hw")
-        .map((b) => b.packageName)
-    );
-    items = items.filter((a) => blocked.has(a.packageName));
-  } else if (
-    ["games", "social", "finance", "shopping", "productivity", "tools"].includes(filter)
-  ) {
-    items = items.filter((a) => String(a.category || "") === filter);
-  }
-
+  const items = exploreCtx.data.apps || [];
   if (!items.length) {
-    el.classList.add("muted");
-    el.textContent =
-      filter === "blocked"
-        ? "No locked apps right now."
-        : filter === "user"
-          ? "No user apps found. Tap Sync from phone, or switch Filter to All apps."
-          : "No apps indexed yet. Tap Sync from phone.";
+    el.innerHTML = emptyHint("No apps cached. Tap Sync apps.");
     return;
   }
-  el.classList.remove("muted");
-  el.innerHTML = items
-    .slice(0, 400)
-    .map((a) => {
-      const blocked = adminIsPackageBlocked(a.packageName);
-      const name = escapeHtml(a.appName || a.packageName || "App");
-      const pkg = escapeHtml(a.packageName || "");
-      return `<article class="app-row surface${blocked ? " is-blocked" : ""}" data-package="${pkg}">
-        <div class="app-row-main">
-          <strong>${name}${blocked ? '<span class="app-badge-blocked">Locked</span>' : ""}</strong>
-          <span class="muted">${pkg}</span>
-          <span class="muted">v${escapeHtml(a.versionName || "?")} · ${
-            a.isSystem ? "System" : "User"
-          } · ${escapeHtml(a.category || "")}</span>
-        </div>
-        <div class="app-row-actions">
-          <button type="button" class="btn-secondary btn-admin-app-details" data-package="${pkg}">Details</button>
-          ${
-            blocked
-              ? `<button type="button" class="btn-primary btn-admin-app-unlock" data-package="${pkg}" data-name="${name}">Unlock</button>`
-              : `<button type="button" class="btn-danger-soft btn-admin-app-lock" data-package="${pkg}" data-name="${name}">Lock</button>`
-          }
-        </div>
-      </article>`;
-    })
-    .join("");
-
-  el.querySelectorAll(".btn-admin-app-details").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const pkg = btn.getAttribute("data-package") || "";
-      const app = (exploreCtx.data.apps || []).find((a) => a.packageName === pkg);
-      if (!detail || !app) return;
-      detail.hidden = false;
-      detail.innerHTML = `<h3>${escapeHtml(app.appName || pkg)}</h3>
-        <div class="muted"><code>${escapeHtml(pkg)}</code></div>
-        <div class="admin-kv"><span class="muted">Version</span><strong>${escapeHtml(app.versionName || "?")}</strong></div>
-        <div class="admin-kv"><span class="muted">System</span><strong>${app.isSystem ? "Yes" : "No"}</strong></div>
-        <div class="admin-kv"><span class="muted">Category</span><strong>${escapeHtml(app.category || "—")}</strong></div>
-        <div class="admin-kv"><span class="muted">Enabled</span><strong>${app.enabled === false ? "No" : "Yes"}</strong></div>
-        <div class="admin-kv"><span class="muted">Install source</span><strong>${escapeHtml(app.installSource || "—")}</strong></div>`;
-    });
-  });
-  el.querySelectorAll(".btn-admin-app-lock").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!exploreCtx) return;
-      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "APP_BLOCK", {
-        packageName: btn.getAttribute("data-package") || "",
-        appName: btn.getAttribute("data-name") || "",
-        mode: "app",
-        durationMs: adminBlockDurationMs(),
-      });
-    });
-  });
-  el.querySelectorAll(".btn-admin-app-unlock").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!exploreCtx) return;
-      void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "APP_UNBLOCK", {
-        packageName: btn.getAttribute("data-package") || "",
-        appName: btn.getAttribute("data-name") || "",
-        mode: "app",
-      });
-    });
-  });
+  el.innerHTML = `<ul class="admin-readable-list">${items
+    .slice(0, 100)
+    .map(
+      (a) =>
+        `<li>
+          <strong>${escapeHtml(a.appName || a.label || a.packageName)}</strong>
+          <div class="muted"><code>${escapeHtml(a.packageName || "")}</code> · v${escapeHtml(a.versionName || "?")}</div>
+        </li>`
+    )
+    .join("")}</ul>`;
 }
 
 function renderAppUsagePanel() {
@@ -2306,14 +1962,12 @@ function renderAppUsagePanel() {
   if (!el || !exploreCtx) return;
   const items = exploreCtx.data.appUsage || [];
   if (!items.length) {
-    el.classList.add("muted");
     el.innerHTML = emptyHint(
-      "No usage history cached. Tap Sync from phone (phone needs Usage Access + Recent Apps sharing)."
+      "No usage history cached. Tap Sync usage (phone needs Usage Access + Recent Apps sharing)."
     );
     return;
   }
   const groups = groupAdminAppUsage(items);
-  el.classList.remove("muted");
   el.innerHTML = `<div class="usage-day-list">${groups
     .map(([dayKey, dayItems], index) => {
       const open = index === 0 ? " is-open" : "";
@@ -2322,7 +1976,7 @@ function renderAppUsagePanel() {
       const totalMs = dayItems.reduce((sum, it) => sum + Number(it.totalDurationMs || 0), 0);
       return `<section class="usage-day-group${open}" data-day="${escapeHtml(dayKey)}">
         <button type="button" class="usage-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
-          <span class="usage-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+          <span class="usage-day-title">${escapeHtml(usageDayLabel(dayKey))}</span>
           <span class="usage-day-count">${dayItems.length} apps · ${escapeHtml(formatUsageDuration(totalMs))}</span>
           <span class="usage-day-chevron" aria-hidden="true">${chevron}</span>
         </button>
@@ -2332,7 +1986,7 @@ function renderAppUsagePanel() {
               const name = escapeHtml(it.appName || it.packageName || "App");
               const pkg = escapeHtml(it.packageName || "");
               const dur = escapeHtml(formatUsageDuration(it.totalDurationMs));
-              const last = escapeHtml(formatNotifDate(it.lastUsed));
+              const last = escapeHtml(fmtTimeAmPm(it.lastUsed));
               return `<article class="usage-app-row">
                 <strong class="usage-app-name">${name}</strong>
                 <span class="usage-app-duration">${dur}</span>
@@ -2345,7 +1999,7 @@ function renderAppUsagePanel() {
       </section>`;
     })
     .join("")}</div>`;
-  wireCollapseHeaders(el, "usage-day-header", "usage-day-group", "usage-day-body", "usage-day-chevron");
+  wireAdminUsageCollapse(el);
 }
 
 function wireAdminCommands() {
@@ -2368,57 +2022,6 @@ function wireAdminCommands() {
         payload
       );
     };
-  });
-  document.querySelectorAll("[data-admin-refresh]").forEach((btn) => {
-    btn.onclick = () => {
-      if (!exploreCtx) return;
-      void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
-    };
-  });
-  const contactsSearch = document.getElementById("admin-contacts-search");
-  if (contactsSearch) {
-    contactsSearch.oninput = () => {
-      clearTimeout(contactsSearch._t);
-      contactsSearch._t = setTimeout(() => renderContactsPanel(), 250);
-    };
-  }
-  const appsSearch = document.getElementById("admin-apps-search");
-  if (appsSearch) {
-    appsSearch.oninput = () => {
-      clearTimeout(appsSearch._t);
-      appsSearch._t = setTimeout(() => renderAppsPanel(), 250);
-    };
-  }
-  const appsFilter = document.getElementById("admin-apps-filter");
-  if (appsFilter) appsFilter.onchange = () => renderAppsPanel();
-  document.getElementById("btn-admin-blocks-refresh")?.addEventListener("click", () => {
-    if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
-  });
-  document.getElementById("btn-admin-camera-lock")?.addEventListener("click", () => {
-    if (!exploreCtx) return;
-    void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "APP_BLOCK", {
-      packageName: "__camera_hardware__",
-      appName: "Camera hardware",
-      mode: "camera_hw",
-      durationMs: adminBlockDurationMs(),
-    });
-  });
-  document.getElementById("btn-admin-camera-unlock")?.addEventListener("click", () => {
-    if (!exploreCtx) return;
-    void runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "APP_UNBLOCK", {
-      packageName: "__camera_hardware__",
-      mode: "camera_hw",
-    });
-  });
-  document.getElementById("btn-admin-apps-export")?.addEventListener("click", () => {
-    if (!exploreCtx) return;
-    const blob = new Blob([JSON.stringify(exploreCtx.data.apps || [], null, 2)], {
-      type: "application/json",
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `apps-${exploreCtx.deviceId}.json`;
-    a.click();
   });
   const recStart = document.getElementById("btn-admin-rec-start");
   const recStop = document.getElementById("btn-admin-rec-stop");

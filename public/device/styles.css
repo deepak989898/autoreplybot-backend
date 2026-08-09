@@ -2464,28 +2464,6 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   gap: 10px;
 }
 
-.file-row {
-  border: 1px solid var(--line, #e5e7eb);
-  border-radius: 12px;
-  padding: 12px 14px;
-  display: grid;
-  gap: 4px;
-  text-align: left;
-}
-
-.apps-block-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line, #e5e7eb);
-}
-
-.apps-block-row:last-child {
-  border-bottom: 0;
-}
-
 .file-card {
   border: 1px solid var(--line);
   border-radius: 12px;
