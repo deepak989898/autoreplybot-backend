@@ -5738,7 +5738,7 @@ async function startScreenMirror() {
   screenLiveByDevice.set(deviceId, live);
   setScreenStatus(
     created.autoApproved
-      ? "Auto-approved — tap phone notification / system capture prompt"
+      ? "Accept screen capture on phone (auto-approved when Accessibility is on)"
       : "Waiting for Permission"
   );
   const reqRef = doc(db, "users", firebaseUid, "sessionRequests", requestId);
@@ -5781,6 +5781,10 @@ async function beginScreenWebRtc(live) {
   const pc = new RTCPeerConnection({ iceServers });
   live.pc = pc;
   const videoEl = document.getElementById("screen-video");
+  pc.addTransceiver("video", { direction: "recvonly" });
+  if (Boolean(document.getElementById("screen-audio")?.checked)) {
+    pc.addTransceiver("audio", { direction: "recvonly" });
+  }
   pc.ontrack = (ev) => {
     if (!videoEl || !ev.track) return;
     let stream = videoEl.srcObject;
@@ -5788,14 +5792,22 @@ async function beginScreenWebRtc(live) {
       stream = new MediaStream();
       videoEl.srcObject = stream;
     }
-    stream.addTrack(ev.track);
+    const hasTrack = stream.getTracks().some((t) => t.id === ev.track.id);
+    if (!hasTrack) stream.addTrack(ev.track);
+    ev.track.onunmute = () => {
+      videoEl.play().catch(() => {});
+      setScreenStatus("Mirroring");
+    };
     videoEl.play().catch(() => {});
     setScreenStatus("Mirroring");
     startScreenStats(pc);
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed") setScreenStatus("Disconnected");
-    if (pc.connectionState === "connected") setScreenStatus("Mirroring");
+    if (pc.connectionState === "connected") {
+      const hasMedia = pc.getReceivers().some((r) => r.track && r.track.readyState === "live");
+      setScreenStatus(hasMedia ? "Mirroring" : "Connected — waiting for screen frames");
+    }
   };
   pc.onicecandidate = async (ev) => {
     if (!ev.candidate || !live.sessionId) return;
