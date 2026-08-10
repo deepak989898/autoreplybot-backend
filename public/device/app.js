@@ -2,10 +2,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebas
 import {
   getAuth,
   GoogleAuthProvider,
+  EmailAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  reauthenticateWithCredential,
+  updatePassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
 import {
@@ -96,7 +99,6 @@ const PANEL_TITLES = {
   phone: "My Phone",
   pair: "Pair Browser",
   multiview: "Multi Device View",
-  social: "Facebook & Instagram",
   settings: "Settings",
   sessions: "Sessions",
   media: "Media",
@@ -157,11 +159,11 @@ function showPanel(panelId) {
   }
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
-  if (id === "social") ensureSocialFrame();
   if (id === "multiview") refreshMultiViewPanel().catch(() => {});
   if (id === "settings") {
     prepareApkDownloadLink().catch(() => {});
     refreshAdminSettingsLink().catch(() => {});
+    refreshPasswordChangeUi(auth?.currentUser || null);
   }
 }
 
@@ -354,13 +356,74 @@ function onWorkspaceDeviceChanged() {
   setPhoneTab(activePhoneTab);
 }
 
-function ensureSocialFrame() {
-  const frame = document.getElementById("social-frame");
-  if (!frame) return;
-  const target = frame.getAttribute("data-src") || "/?embed=1";
-  const current = frame.getAttribute("src") || "";
-  if (!current || current === "about:blank" || current === "about:blank#") {
-    frame.setAttribute("src", target);
+function userHasPasswordProvider(user) {
+  return Boolean(user?.providerData?.some((p) => p.providerId === "password"));
+}
+
+function refreshPasswordChangeUi(user) {
+  const form = document.getElementById("form-change-password");
+  const googleNote = document.getElementById("password-change-google-note");
+  const hint = document.getElementById("password-change-hint");
+  const sidebarBtn = document.getElementById("btn-sidebar-change-password");
+  const canChange = userHasPasswordProvider(user);
+  if (form) form.hidden = !canChange;
+  if (hint) hint.hidden = !canChange;
+  if (googleNote) googleNote.hidden = canChange;
+  if (sidebarBtn) sidebarBtn.hidden = !canChange;
+  if (!canChange) {
+    setPasswordChangeStatus("");
+  }
+}
+
+function setPasswordChangeStatus(message) {
+  const el = document.getElementById("password-change-status");
+  if (el) el.textContent = message || "";
+}
+
+async function submitPasswordChange(ev) {
+  ev?.preventDefault();
+  const user = auth?.currentUser;
+  const currentInput = document.getElementById("password-current");
+  const newInput = document.getElementById("password-new");
+  const confirmInput = document.getElementById("password-confirm");
+  const submitBtn = document.getElementById("btn-change-password-submit");
+  if (!user || !userHasPasswordProvider(user)) {
+    setPasswordChangeStatus("Password change is only available for email/password accounts.");
+    return;
+  }
+  const currentPassword = String(currentInput?.value || "");
+  const newPassword = String(newInput?.value || "");
+  const confirmPassword = String(confirmInput?.value || "");
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    setPasswordChangeStatus("Enter current password, new password, and confirmation.");
+    return;
+  }
+  if (newPassword.length < 6) {
+    setPasswordChangeStatus("New password must be at least 6 characters.");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    setPasswordChangeStatus("New password and confirmation do not match.");
+    return;
+  }
+  if (!user.email) {
+    setPasswordChangeStatus("No email on this account.");
+    return;
+  }
+  if (submitBtn) submitBtn.disabled = true;
+  setPasswordChangeStatus("Updating password…");
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+    if (currentInput) currentInput.value = "";
+    if (newInput) newInput.value = "";
+    if (confirmInput) confirmInput.value = "";
+    setPasswordChangeStatus("Password updated. Use the new password on the website and Android app.");
+  } catch (e) {
+    setPasswordChangeStatus(friendlyAuthError(e));
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
   }
 }
 
@@ -433,6 +496,7 @@ function setLoggedInUi(user) {
   if (fabOn) fabOn.hidden = false;
   startSupportUnreadPolling();
   void refreshUserEntitlements();
+  refreshPasswordChangeUi(user);
 }
 
 function setLoggedOutUi() {
@@ -2960,6 +3024,13 @@ async function main() {
     }
   });
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
+  document.getElementById("btn-sidebar-change-password")?.addEventListener("click", () => {
+    showPanel("settings");
+    document.getElementById("password-current")?.focus();
+  });
+  document.getElementById("form-change-password")?.addEventListener("submit", (ev) => {
+    void submitPasswordChange(ev);
+  });
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   document.getElementById("workspace-device-select")?.addEventListener("change", () => {
     onWorkspaceDeviceChanged();

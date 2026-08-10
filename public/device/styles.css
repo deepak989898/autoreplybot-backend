@@ -614,6 +614,30 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   color: var(--text);
 }
 
+.btn-sidebar-secondary {
+  width: 100%;
+  margin-bottom: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-password-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.settings-password-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+}
+
 .app-main {
   padding: 28px 28px 48px;
   max-width: 1180px;
