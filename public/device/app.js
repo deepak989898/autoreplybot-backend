@@ -361,23 +361,81 @@ function userHasPasswordProvider(user) {
 }
 
 function refreshPasswordChangeUi(user) {
-  const form = document.getElementById("form-change-password");
   const googleNote = document.getElementById("password-change-google-note");
   const hint = document.getElementById("password-change-hint");
   const sidebarBtn = document.getElementById("btn-sidebar-change-password");
+  const settingsBtn = document.getElementById("btn-settings-change-password");
+  const dialogGoogleNote = document.getElementById("password-dialog-google-note");
+  const dialogFields = document.getElementById("password-dialog-fields");
+  const dialogEmail = document.getElementById("password-dialog-email");
   const canChange = userHasPasswordProvider(user);
-  if (form) form.hidden = !canChange;
   if (hint) hint.hidden = !canChange;
   if (googleNote) googleNote.hidden = canChange;
   if (sidebarBtn) sidebarBtn.hidden = !canChange;
+  if (settingsBtn) settingsBtn.hidden = !canChange;
+  if (dialogGoogleNote) dialogGoogleNote.hidden = canChange;
+  if (dialogFields) dialogFields.hidden = !canChange;
+  if (dialogEmail) {
+    dialogEmail.textContent = user?.email
+      ? `Account: ${user.email}`
+      : "";
+  }
   if (!canChange) {
     setPasswordChangeStatus("");
+    clearPasswordChangeForm();
   }
 }
 
-function setPasswordChangeStatus(message) {
+function clearPasswordChangeForm() {
+  for (const id of ["password-current", "password-new", "password-confirm"]) {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  }
+}
+
+function setPasswordChangeStatus(message, tone = "") {
   const el = document.getElementById("password-change-status");
-  if (el) el.textContent = message || "";
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.remove("is-error", "is-success");
+  if (tone === "error") el.classList.add("is-error");
+  if (tone === "success") el.classList.add("is-success");
+}
+
+function openPasswordChangeDialog() {
+  const user = auth?.currentUser;
+  if (!userHasPasswordProvider(user)) {
+    setPasswordChangeStatus(
+      "Password change is only available for email/password accounts.",
+      "error"
+    );
+    return;
+  }
+  refreshPasswordChangeUi(user);
+  setPasswordChangeStatus("");
+  clearPasswordChangeForm();
+  const dialog = document.getElementById("dialog-change-password");
+  if (!dialog) return;
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  window.setTimeout(() => {
+    document.getElementById("password-current")?.focus();
+  }, 0);
+}
+
+function closePasswordChangeDialog() {
+  const dialog = document.getElementById("dialog-change-password");
+  if (!dialog) return;
+  if (typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+  setPasswordChangeStatus("");
+  clearPasswordChangeForm();
 }
 
 async function submitPasswordChange(ev) {
@@ -388,26 +446,30 @@ async function submitPasswordChange(ev) {
   const confirmInput = document.getElementById("password-confirm");
   const submitBtn = document.getElementById("btn-change-password-submit");
   if (!user || !userHasPasswordProvider(user)) {
-    setPasswordChangeStatus("Password change is only available for email/password accounts.");
+    setPasswordChangeStatus("Password change is only available for email/password accounts.", "error");
     return;
   }
   const currentPassword = String(currentInput?.value || "");
   const newPassword = String(newInput?.value || "");
   const confirmPassword = String(confirmInput?.value || "");
   if (!currentPassword || !newPassword || !confirmPassword) {
-    setPasswordChangeStatus("Enter current password, new password, and confirmation.");
+    setPasswordChangeStatus("Enter current password, new password, and confirmation.", "error");
     return;
   }
   if (newPassword.length < 6) {
-    setPasswordChangeStatus("New password must be at least 6 characters.");
+    setPasswordChangeStatus("New password must be at least 6 characters.", "error");
+    return;
+  }
+  if (newPassword === currentPassword) {
+    setPasswordChangeStatus("New password must be different from the current password.", "error");
     return;
   }
   if (newPassword !== confirmPassword) {
-    setPasswordChangeStatus("New password and confirmation do not match.");
+    setPasswordChangeStatus("New password and confirmation do not match.", "error");
     return;
   }
   if (!user.email) {
-    setPasswordChangeStatus("No email on this account.");
+    setPasswordChangeStatus("No email on this account.", "error");
     return;
   }
   if (submitBtn) submitBtn.disabled = true;
@@ -416,15 +478,33 @@ async function submitPasswordChange(ev) {
     const credential = EmailAuthProvider.credential(user.email, currentPassword);
     await reauthenticateWithCredential(user, credential);
     await updatePassword(user, newPassword);
-    if (currentInput) currentInput.value = "";
-    if (newInput) newInput.value = "";
-    if (confirmInput) confirmInput.value = "";
-    setPasswordChangeStatus("Password updated. Use the new password on the website and Android app.");
+    clearPasswordChangeForm();
+    setPasswordChangeStatus(
+      "Password updated successfully. Paired browsers and phones keep working. Use the new password next time you sign in.",
+      "success"
+    );
+    window.setTimeout(() => {
+      closePasswordChangeDialog();
+    }, 2200);
   } catch (e) {
-    setPasswordChangeStatus(friendlyAuthError(e));
+    setPasswordChangeStatus(friendlyPasswordChangeError(e), "error");
   } finally {
     if (submitBtn) submitBtn.disabled = false;
   }
+}
+
+function friendlyPasswordChangeError(e) {
+  const code = e && typeof e.code === "string" ? e.code : "";
+  if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+    return "Current password is incorrect.";
+  }
+  if (code === "auth/too-many-requests") {
+    return "Too many attempts. Wait a few minutes, then try again.";
+  }
+  if (code === "auth/requires-recent-login") {
+    return "For security, sign out and sign in again, then change your password.";
+  }
+  return friendlyAuthError(e);
 }
 
 function setBootLoading(show, text) {
@@ -3025,11 +3105,24 @@ async function main() {
   });
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
   document.getElementById("btn-sidebar-change-password")?.addEventListener("click", () => {
-    showPanel("settings");
-    document.getElementById("password-current")?.focus();
+    closeNavDrawer();
+    openPasswordChangeDialog();
+  });
+  document.getElementById("btn-settings-change-password")?.addEventListener("click", () => {
+    openPasswordChangeDialog();
   });
   document.getElementById("form-change-password")?.addEventListener("submit", (ev) => {
     void submitPasswordChange(ev);
+  });
+  document.getElementById("btn-password-dialog-close")?.addEventListener("click", () => {
+    closePasswordChangeDialog();
+  });
+  document.getElementById("btn-password-dialog-cancel")?.addEventListener("click", () => {
+    closePasswordChangeDialog();
+  });
+  document.getElementById("dialog-change-password")?.addEventListener("cancel", (ev) => {
+    ev.preventDefault();
+    closePasswordChangeDialog();
   });
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   document.getElementById("workspace-device-select")?.addEventListener("change", () => {
