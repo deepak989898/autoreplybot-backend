@@ -19,6 +19,12 @@ import {
   parseBody,
   writeAuditLog,
 } from "../lib/pairing.js";
+import {
+  isDeviceCameraReady,
+  isDeviceMicReady,
+  isDeviceRecentlyOnline,
+  isRemoteControlReady,
+} from "../lib/device-readiness.js";
 import * as R from "../lib/remote-constants.js";
 import {
   createModuleCommand,
@@ -152,6 +158,8 @@ export default async function handler(req, res) {
 
 function sanitizeDevice(id, data) {
   if (!data || typeof data !== "object") return null;
+  const cameraReady = isDeviceCameraReady(data);
+  const micReady = isDeviceMicReady(data);
   return {
     deviceId: data.deviceId || id,
     deviceName: String(data.deviceName || ""),
@@ -161,19 +169,21 @@ function sanitizeDevice(id, data) {
     appVersion: String(data.appVersion || ""),
     createdAt: Number(data.createdAt || 0),
     lastSeenAt: Number(data.lastSeenAt || 0),
-    online: Boolean(data.online),
+    online: isDeviceRecentlyOnline(data),
     batteryLevel: Number(data.batteryLevel || 0),
     isCharging: Boolean(data.isCharging),
     networkType: String(data.networkType || ""),
-    cameraAvailable: Boolean(data.cameraAvailable),
-    microphoneAvailable: Boolean(data.microphoneAvailable),
+    cameraAvailable: cameraReady,
+    microphoneAvailable: micReady,
     flashlightAvailable: Boolean(data.flashlightAvailable),
     revoked: Boolean(data.revoked),
-    remoteControlEnabled: Boolean(data.remoteControlEnabled),
+    remoteControlEnabled: isRemoteControlReady(data),
     persistentRegistration: data.persistentRegistration !== false,
-    cameraPermission: String(data.cameraPermission || (data.cameraAvailable ? "granted" : "unknown")),
+    cameraPermission: String(
+      data.cameraPermission || (cameraReady ? "granted" : "unknown")
+    ),
     microphonePermission: String(
-      data.microphonePermission || (data.microphoneAvailable ? "granted" : "unknown")
+      data.microphonePermission || (micReady ? "granted" : "unknown")
     ),
     notificationPermission: String(data.notificationPermission || "unknown"),
     locationPermission: String(data.locationPermission || "unknown"),
@@ -501,7 +511,7 @@ async function handleSessionRequest(req, res) {
     if (device.revoked === true) {
       return res.status(400).json({ error: "Device revoked", code: "DEVICE_REVOKED" });
     }
-    if (device.remoteControlEnabled === false) {
+    if (!isRemoteControlReady(device)) {
       return res.status(400).json({
         error: "Remote control disabled on device",
         code: "REMOTE_DISABLED",
@@ -619,14 +629,14 @@ async function handleSessionRequest(req, res) {
       });
     }
     const sessionKind = wantScreen && !wantCamera ? "screen" : "camera";
-    if (wantCamera && device.cameraAvailable === false) {
+    if (wantCamera && !isDeviceCameraReady(device)) {
       return res.status(400).json({
         error: "Camera permission must be restored in Android settings.",
         code: "CAMERA_PERMISSION",
         androidState: R.ANDROID_STATE_PERMISSION_REQUIRED,
       });
     }
-    if (wantMic && device.microphoneAvailable === false) {
+    if (wantMic && !isDeviceMicReady(device)) {
       return res.status(400).json({
         error: "Microphone permission must be restored in Android settings.",
         code: "MIC_PERMISSION",
@@ -832,12 +842,7 @@ async function handleSessionRequest(req, res) {
       message: "Waiting for Approve on the phone.",
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const code = msg.includes("Authorization") ? 401 : 500;
-    return res.status(code).json({
-      error: code === 401 ? "Unauthorized" : "Session request failed",
-      code: code === 401 ? "AUTH_FAILED" : "SESSION_REQUEST_FAILED",
-    });
+    return clientError(res, e, "SESSION_REQUEST_FAILED");
   }
 }
 

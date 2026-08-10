@@ -547,8 +547,9 @@ async function handleClients(req, res) {
     const snap = await trustedClientsRef(uid).get();
     const clients = [];
     snap.forEach((doc) => {
+      if (doc.id === "platform_admin") return;
       const item = sanitizeTrustedClient(doc.id, doc.data());
-      if (item) clients.push(item);
+      if (item && !item.isPlatformAdminClient) clients.push(item);
     });
     clients.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     return res.status(200).json({ ok: true, clients });

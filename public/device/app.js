@@ -723,7 +723,9 @@ function escapeHtml(value) {
 }
 
 function preferredClientId(clients) {
-  const active = (clients || []).filter((c) => !c.revoked);
+  const active = (clients || []).filter(
+    (c) => !c.revoked && c.clientId !== "platform_admin" && !c.isPlatformAdminClient
+  );
   const fp = browserFingerprint || localStorage.getItem(FINGERPRINT_KEY) || "";
   if (fp) {
     const byFp = active.find((c) => c.browserFingerprintHash === fp);
@@ -733,8 +735,10 @@ function preferredClientId(clients) {
     }
   }
   const stored = localStorage.getItem(CLIENT_ID_KEY) || "";
-  if (stored && active.some((c) => c.clientId === stored)) return stored;
-  return "";
+  if (stored && stored !== "platform_admin" && active.some((c) => c.clientId === stored)) {
+    return stored;
+  }
+  return active[0]?.clientId || "";
 }
 
 function preferredClient(clients) {
@@ -1656,9 +1660,17 @@ async function startConnect(deviceId, clientId) {
   if (device && device.online === false) {
     setDeviceError(
       deviceId,
-      "Device is offline. It will remain saved and reconnect automatically."
+      "Device is offline. Open the app on the phone, turn Remote Control on, then Refresh."
     );
     setConnectionLabel(deviceId, CONN.FAILED, "offline");
+    return;
+  }
+  if (device && device.remoteControlEnabled === false) {
+    setDeviceError(
+      deviceId,
+      "Remote control is off on this phone. Open AutoReplyBot → turn Remote Control on, then Refresh."
+    );
+    setConnectionLabel(deviceId, CONN.FAILED, "remote off");
     return;
   }
   if (!clientId) {
@@ -1797,7 +1809,26 @@ async function startConnect(deviceId, clientId) {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setDeviceError(deviceId, msg);
+    if (/REMOTE_DISABLED|remote control disabled/i.test(msg)) {
+      setDeviceError(
+        deviceId,
+        "Remote control is off on this phone. Open the app → enable Remote Control → Refresh, then Connect again."
+      );
+    } else if (/CAMERA_PERMISSION|camera permission/i.test(msg)) {
+      setDeviceError(
+        deviceId,
+        "Camera permission is off on the phone. Settings → Apps → AutoReplyBot → Camera → Allow, then Refresh."
+      );
+    } else if (/MIC_PERMISSION|microphone permission/i.test(msg)) {
+      setDeviceError(
+        deviceId,
+        "Microphone permission is off on the phone. Settings → Apps → AutoReplyBot → Microphone → Allow, then Refresh."
+      );
+    } else if (/FEATURE_DENIED/i.test(msg)) {
+      setDeviceError(deviceId, msg);
+    } else {
+      setDeviceError(deviceId, msg);
+    }
     setConnectionLabel(deviceId, CONN.FAILED, "request");
     cleanupLive(deviceId, false);
   }
