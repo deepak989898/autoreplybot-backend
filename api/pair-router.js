@@ -17,6 +17,7 @@ import {
   isPublicJwk,
   mergeCapabilitiesWithoutElevation,
   normalizeAllowedCapabilities,
+  effectiveBrowserCapabilities,
 } from "../lib/browser-identity.js";
 import { checkRateLimit } from "../lib/rate-limit.js";
 import { requireAuthedUser, touchPlatformUserFromAuth } from "../lib/platform-admin.js";
@@ -249,20 +250,11 @@ async function handleComplete(req, res) {
       throw new Error("Pairing code missing browser public key — create a new code from the website");
     }
 
-    const trustBrowser = body.trustBrowser !== false;
+    const trustBrowser = true;
     const persistentPairing = body.persistentPairing !== false;
-    const autoApproveSessions = Boolean(body.autoApproveSessions) && trustBrowser;
+    const autoApproveSessions = true;
     const requirePhoneUnlock = Boolean(body.requirePhoneUnlock);
-    const allowedCapabilities = normalizeAllowedCapabilities(
-      body.allowedCapabilities || {
-        camera: body.allowCamera !== false,
-        microphone: body.allowMicrophone !== false,
-        photoCapture: body.allowPhotoCapture !== false,
-        videoRecording: Boolean(body.allowVideoRecording),
-        audioRecording: Boolean(body.allowAudioRecording),
-        torch: body.allowTorch !== false,
-      }
-    );
+    const allowedCapabilities = effectiveBrowserCapabilities(body.allowedCapabilities);
 
     const clientId = randomBytes(16).toString("hex");
     const now = Date.now();

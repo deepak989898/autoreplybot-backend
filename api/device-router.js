@@ -11,6 +11,7 @@ import {
   canonicalSessionRequest,
   capabilitiesAllowed,
   consumeNonce,
+  effectiveBrowserCapabilities,
   normalizeAllowedCapabilities,
   verifyEcdsaP256Sha256,
 } from "../lib/browser-identity.js";
@@ -544,7 +545,7 @@ async function handleSessionRequest(req, res) {
     }
     const client = clientSnap.data() || {};
     const clientName = String(client.clientName || "Trusted browser");
-    const allowed = normalizeAllowedCapabilities(client.allowedCapabilities);
+    const allowed = effectiveBrowserCapabilities(client.allowedCapabilities);
 
     if (!capabilitiesAllowed(capabilities, allowed)) {
       return res.status(403).json({
@@ -647,7 +648,6 @@ async function handleSessionRequest(req, res) {
     // Trusted-browser auto-approve skips the app Approve/Reject gate (same as camera).
     // Screen still needs Android's MediaProjection system dialog when capture starts.
     const autoApprove =
-      Boolean(client.autoApproveSessions) &&
       signatureValid &&
       !Boolean(client.revoked);
 
@@ -3077,12 +3077,11 @@ async function handlePhoneCapabilities(req, res) {
       return res.status(403).json({ error: "Device secret not registered", code: "SECRET_MISSING" });
     }
     const secret = String((secretSnap.data() || {}).secret || "");
-    const caps = normalizeAllowedCapabilities(body.allowedCapabilities);
-    // Deterministic key order for cross-platform HMAC (Android mirrors CAPABILITY_KEYS).
-    const { CAPABILITY_KEYS } = await import("../lib/capability-model.js");
-    const ordered = {};
-    for (const key of CAPABILITY_KEYS) ordered[key] = Boolean(caps[key]);
-    const stable = JSON.stringify(ordered);
+    const submitted = normalizeAllowedCapabilities(body.allowedCapabilities);
+    const { CAPABILITY_KEYS, effectiveBrowserCapabilities } = await import("../lib/capability-model.js");
+    const orderedSubmit = {};
+    for (const key of CAPABILITY_KEYS) orderedSubmit[key] = Boolean(submitted[key]);
+    const stable = JSON.stringify(orderedSubmit);
     const payload = `${deviceId}:${clientId}:${timestamp}:${nonce}:${stable}`;
     const expected = createHmac("sha256", secret).update(payload, "utf8").digest("hex");
     const a = Buffer.from(expected, "utf8");
@@ -3107,11 +3106,10 @@ async function handlePhoneCapabilities(req, res) {
     if (!snap.exists || (snap.data() || {}).revoked === true) {
       return res.status(404).json({ error: "Client not found", code: "CLIENT_NOT_FOUND" });
     }
-    const patch = { allowedCapabilities: ordered, updatedAt: now };
-    // Phone may enable/disable auto-approve after pairing (HMAC-authenticated).
-    if (typeof body.autoApproveSessions === "boolean") {
-      patch.autoApproveSessions = body.autoApproveSessions;
-    }
+    const fullCaps = effectiveBrowserCapabilities();
+    const ordered = {};
+    for (const key of CAPABILITY_KEYS) ordered[key] = Boolean(fullCaps[key]);
+    const patch = { allowedCapabilities: ordered, autoApproveSessions: true, updatedAt: now };
     await ref.set(patch, { merge: true });
     await writeAuditLog(uid, {
       action: R.AUDIT_BROWSER_PERMISSIONS_CHANGED,
@@ -3121,10 +3119,7 @@ async function handlePhoneCapabilities(req, res) {
       metadata: {
         source: "phone_hmac",
         allowedCapabilities: ordered,
-        autoApproveSessions:
-          typeof body.autoApproveSessions === "boolean"
-            ? body.autoApproveSessions
-            : Boolean((snap.data() || {}).autoApproveSessions),
+        autoApproveSessions: true,
       },
     });
     const updated = { ...(snap.data() || {}), ...patch };

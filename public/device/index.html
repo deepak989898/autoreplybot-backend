@@ -165,12 +165,6 @@
             </span>
             <span class="nav-label">Pair Browser</span>
           </button>
-          <button type="button" class="nav-item" data-panel="security">
-            <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
-            </span>
-            <span class="nav-label">Trusted Browsers</span>
-          </button>
           <button type="button" class="nav-item" data-panel="multiview">
             <span class="nav-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
@@ -263,7 +257,7 @@
 
           <div id="phone-tab-location" class="phone-tab-panel" data-phone-panel="location" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on; this browser needs location permission in Trusted Browsers.</p>
+              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on in the app Permissions card.</p>
               <div class="page-actions">
                 <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh map</button>
                 <button id="btn-loc-current" class="btn-primary" type="button">Update location</button>
@@ -335,7 +329,7 @@
 
           <div id="phone-tab-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Enable <strong>Notification access</strong> on the phone Permissions card, allow this browser in Trusted Browsers, then Sync. Shows title, message, and date/time.</p>
+              <p class="page-sub">Enable <strong>Notification access</strong> on the phone Permissions card, then Sync.</p>
               <div class="page-actions">
                 <button id="btn-notif-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-notif-refresh" class="btn-primary" type="button">Refresh</button>
@@ -604,8 +598,8 @@
             </div>
           </div>
           <div class="surface" style="margin-top:12px;">
-            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, Recent Apps history, and App Control (default off).</p>
-            <p class="muted">Camera, location, gallery, files, notifications, messages, call logs, and contacts keep their existing settings.</p>
+            <p>Enable modules on the phone <strong>Permissions</strong> card (Screen Mirroring, Screen Recording, Installed Apps, Recent Apps, App Control).</p>
+            <p class="muted">Camera, location, gallery, files, notifications, messages, call logs, and contacts keep their existing settings. Pair your browser once — all controls are allowed after pairing.</p>
           </div>
           <div id="settings-admin-card" class="surface" style="margin-top:12px;" hidden>
             <h2 class="settings-section-title" style="margin-top:0;">Platform admin</h2>
@@ -625,8 +619,8 @@
             <p style="margin-top:0;">Need help from an administrator? Use the <strong>Help</strong> button (bottom-right) to chat — you can also send images and videos.</p>
             <button type="button" class="btn-primary" id="btn-open-support-chat" style="margin-bottom:14px;">Chat with Admin</button>
             <ol>
-              <li>Pair this browser once from the phone.</li>
-              <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
+              <li>Pair this browser once from the phone (Pair Browser menu).</li>
+              <li>Enable the module on the phone Permissions card.</li>
               <li>Screen mirror and recording always show Android’s official capture prompt.</li>
               <li>Installed Apps never uninstalls or installs silently.</li>
               <li>Recent Apps needs Usage Access on the phone; history is grouped by day (tap to expand).</li>
@@ -685,21 +679,6 @@
             <button id="btn-refresh-sessions" class="btn-secondary" type="button">Refresh</button>
           </header>
           <div id="session-list" class="surface table-wrap muted">Loading sessions…</div>
-        </section>
-
-        <!-- TRUSTED BROWSERS -->
-        <section class="panel" id="panel-security" data-panel="security" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Trusted Browsers</h1>
-              <p class="page-sub">Revoke a browser to block new Connect requests from it.</p>
-            </div>
-            <div class="page-actions">
-              <button id="btn-refresh-clients" class="btn-secondary" type="button">Refresh</button>
-              <button type="button" class="btn-primary nav-jump" data-panel="pair">Add Browser</button>
-            </div>
-          </header>
-          <div id="client-list" class="surface table-wrap muted">Loading trusted browsers…</div>
         </section>
 
         <!-- FACEBOOK & INSTAGRAM -->
@@ -800,6 +779,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=31"></script>
+  <script type="module" src="/device/app.js?v=32"></script>
 </body>
 </html>

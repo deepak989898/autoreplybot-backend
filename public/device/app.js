@@ -95,7 +95,6 @@ let messagesLiveTimer = null;
 const PANEL_TITLES = {
   phone: "My Phone",
   pair: "Pair Browser",
-  security: "Trusted Browsers",
   multiview: "Multi Device View",
   social: "Facebook & Instagram",
   settings: "Settings",
@@ -157,7 +156,6 @@ function showPanel(panelId) {
     setPhoneTab(activePhoneTab);
   }
   if (id === "sessions") refreshSessions().catch(() => {});
-  if (id === "security") refreshClients().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "social") ensureSocialFrame();
   if (id === "multiview") refreshMultiViewPanel().catch(() => {});
@@ -2133,6 +2131,7 @@ function cleanupLive(deviceId, endOnServer) {
 }
 
 function renderClients(clients) {
+  if (!clientList) return;
   if (!clients.length) {
     clientList.innerHTML = `<p class="muted">No trusted browsers yet. Use Pair New Browser to add one.</p>`;
     clientList.classList.add("muted");
@@ -2365,6 +2364,24 @@ async function refreshDevices() {
 }
 
 async function refreshClients() {
+  if (!clientList) {
+    if (!idToken) {
+      cachedClients = [];
+      updatePairingUi(false);
+      return;
+    }
+    try {
+      await ensureBrowserIdentity();
+      const data = await api("/api/pair/clients");
+      cachedClients = data.clients || [];
+      const clientId = preferredClientId(cachedClients);
+      updatePairingUi(Boolean(clientId));
+    } catch {
+      cachedClients = [];
+      updatePairingUi(false);
+    }
+    return;
+  }
   if (!idToken) {
     clientList.textContent = "Sign in to load trusted browsers.";
     clientList.classList.add("muted");
@@ -3189,7 +3206,7 @@ function fillDeviceSelect(selectEl) {
 
 function requireClientId() {
   const clientId = preferredClientId(cachedClients);
-  if (!clientId) throw new Error("Pair this browser first (Trusted Browsers / Pair).");
+  if (!clientId) throw new Error("Pair this browser first (Pair Browser menu).");
   return clientId;
 }
 
@@ -3415,7 +3432,7 @@ async function refreshLocationPanel(opts = {}) {
         if (!loc) {
           if (/locationCurrent|CAPABILITY_DENIED|lacks capability/i.test(msg)) {
             body.innerHTML =
-              `<p class="error">Allow location for this browser on the phone: Trusted Browsers → Permissions → current &amp; live location.</p>`;
+              `<p class="error">Allow location for this browser on the phone: phone Permissions card → Permissions → current &amp; live location.</p>`;
           } else if (/PERMISSION_DENIED|permission not granted/i.test(msg)) {
             body.innerHTML =
               `<p class="error">Grant Location permission on the phone (Remote Camera &amp; Voice → Permissions).</p>`;
@@ -5422,7 +5439,7 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
           "1) Remote Camera & Voice → Permissions\n" +
           "2) Tap Notification access → enable AutoReplyBot in system settings\n" +
           "3) Return to the app (sharing turns on automatically)\n" +
-          "4) Website → Trusted Browsers → Permissions → allow mirrored notifications\n" +
+          "4) Website → phone Permissions card → Permissions → allow mirrored notifications\n" +
           "5) Sync from phone again\n\n" +
           "Error: " + msg
       );
@@ -6257,7 +6274,7 @@ function alertAppControlError(e) {
   if (/appControl|CAPABILITY_DENIED/i.test(msg)) {
     alert(
       "App Control not allowed for this browser.\n\n" +
-        "Phone → Trusted Browsers → allow App Control.\n\n" +
+        "Phone → phone Permissions card → allow App Control.\n\n" +
         msg
     );
   } else if (/ACCESSIBILITY_REQUIRED/i.test(msg)) {
@@ -6384,7 +6401,7 @@ async function refreshAppUsagePanel() {
       list.textContent =
         "No usage history yet.\n\n" +
         "1) Phone → Permissions → Recent Apps history → enable Usage Access\n" +
-        "2) Trusted Browsers → allow Recent Apps usage history\n" +
+        "2) phone Permissions card → allow Recent Apps usage history\n" +
         "3) Tap Sync from phone";
       return;
     }
@@ -6399,7 +6416,7 @@ async function refreshAppUsagePanel() {
       list.textContent =
         "Recent Apps not available yet.\n\n" +
         "Phone: Permissions → Recent Apps history + Usage Access\n" +
-        "Trusted Browsers: allow Recent Apps usage history\n" +
+        "phone Permissions card: allow Recent Apps usage history\n" +
         "Admin: enable Recent Apps feature for this account\n\n" +
         msg;
     }
@@ -6605,7 +6622,7 @@ document.getElementById("btn-screen-start")?.addEventListener("click", async () 
     if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
       alert(
         "Screen mirroring not allowed for this browser.\n\n" +
-          "Phone → Trusted Browsers → Permissions → allow Screen Mirroring.\n\n" +
+          "Phone → phone Permissions card → Permissions → allow Screen Mirroring.\n\n" +
           msg
       );
     } else alert(msg);
@@ -6644,7 +6661,7 @@ document.getElementById("btn-screen-lock")?.addEventListener("click", async () =
       );
     } else if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
       alert(
-        "Not allowed for this browser.\n\nPhone → Trusted Browsers → allow Screen Mirroring.\n\n" +
+        "Not allowed for this browser.\n\nPhone → phone Permissions card → allow Screen Mirroring.\n\n" +
           msg
       );
     } else {
@@ -6664,7 +6681,7 @@ document.getElementById("btn-screen-unlock")?.addEventListener("click", async ()
     setScreenStatus("Idle");
     if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
       alert(
-        "Not allowed for this browser.\n\nPhone → Trusted Browsers → allow Screen Mirroring.\n\n" +
+        "Not allowed for this browser.\n\nPhone → phone Permissions card → allow Screen Mirroring.\n\n" +
           msg
       );
     } else {
@@ -6918,13 +6935,13 @@ async function startRemoteControlSession() {
           "1) Phone → Management → Remote Control Setup\n" +
           "2) Enable the Accessibility service in Android Settings\n" +
           "3) Turn Remote Control ON in the app\n" +
-          "4) Trusted Browsers → allow Remote Accessibility + Direct Touch\n\n" +
+          "4) phone Permissions card → allow Remote Accessibility + Direct Touch\n\n" +
           msg
       );
     } else if (/CAPABILITY_DENIED|remoteAccessibility/i.test(msg)) {
       alert(
         "This browser is not allowed to use Remote Control.\n\n" +
-          "Phone → Trusted Browsers → enable Remote Accessibility Control.\n\n" +
+          "Phone → phone Permissions card → enable Remote Accessibility Control.\n\n" +
           msg
       );
     } else if (/TIMEOUT|timed out/i.test(msg) || e.code === "TIMEOUT") {
@@ -6932,7 +6949,7 @@ async function startRemoteControlSession() {
         "Remote control timed out.\n\n" +
           "• Keep the AutoReplyBot app open (not force-stopped)\n" +
           "• Phone → enable Accessibility service + Remote Control ON\n" +
-          "• Trusted Browsers → enable Remote Accessibility\n" +
+          "• phone Permissions card → enable Remote Accessibility\n" +
           "• Install the latest APK if the phone build is old\n" +
           "• Then uncheck/check Remote Control again\n\n" +
           msg
@@ -7224,7 +7241,7 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
     const msg = e instanceof Error ? e.message : String(e);
     applyRecUiFromStatus("Failed", 0);
     if (/screenRecord|CAPABILITY_DENIED/i.test(msg)) {
-      alert("Enable Screen Recording for this browser on the phone Trusted Browsers list.\n\n" + msg);
+      alert("Enable Screen Recording for this browser on the phone phone Permissions card list.\n\n" + msg);
     } else alert(msg);
   }
 });
@@ -7345,7 +7362,7 @@ document.getElementById("btn-apps-sync")?.addEventListener("click", async () => 
       alert(
         "Installed apps not allowed yet.\n\n" +
           "1) Phone → Permissions → Installed apps sharing ON\n" +
-          "2) Trusted Browsers → allow Installed Apps\n\n" +
+          "2) phone Permissions card → allow Installed Apps\n\n" +
           msg
       );
     } else alert(msg);
@@ -7388,7 +7405,7 @@ document.getElementById("btn-app-usage-sync")?.addEventListener("click", async (
       alert(
         "Recent Apps not allowed yet.\n\n" +
           "1) Phone → Permissions → Recent Apps history → allow Usage Access\n" +
-          "2) Trusted Browsers → allow Recent Apps usage history\n\n" +
+          "2) phone Permissions card → allow Recent Apps usage history\n\n" +
           msg
       );
     } else alert(msg);
