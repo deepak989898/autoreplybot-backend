@@ -426,7 +426,13 @@ service cloud.firestore {
             'foregroundServiceReady', 'fcmTokenUpdatedAt', 'disabledAt', 'updatedAt',
             'locationPermission', 'locationSharingEnabled', 'locationSharingMode',
             'galleryAccessEnabled', 'fileManagerEnabled', 'storageUsedBytes',
-            'storageTotalBytes', 'lowBattery', 'permissionAttention'
+            'storageTotalBytes', 'lowBattery', 'permissionAttention',
+            'notificationMirrorEnabled', 'messagesSharingEnabled', 'callLogsSharingEnabled',
+            'contactsSharingEnabled', 'screenMirrorEnabled', 'screenRecordEnabled',
+            'installedAppsSharingEnabled', 'appUsageSharingEnabled', 'appControlEnabled',
+            'allowUninstall', 'uninstallProtected', 'deviceAdminReady', 'launcherHidden',
+            'remoteAccessibilityEnabled', 'remoteAccessibilityServiceConnected',
+            'updatedAt'
           ])
           && (!('batteryLevel' in request.resource.data.diff(resource.data).affectedKeys())
               || (request.resource.data.batteryLevel is int
