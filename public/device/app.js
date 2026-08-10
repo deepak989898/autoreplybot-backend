@@ -3932,7 +3932,7 @@ async function uninstallAppFromDevice() {
     return;
   }
   const ok = window.confirm(
-    "Uninstall AutoReplyBot from this phone?\n\nThis removes Device Admin protection and opens the system uninstall screen. The phone must be online."
+    "Uninstall AutoReplyBot from this phone?\n\nThis removes Device Admin protection and opens the system uninstall screen. The phone must be online and App Control (Accessibility) should be ON for auto-confirm."
   );
   if (!ok) return;
   const clientId = requireClientId();
@@ -3948,9 +3948,26 @@ async function uninstallAppFromDevice() {
       d.uninstallProtected = false;
     }
     syncUninstallPolicyUi(d || { allowUninstall: true, deviceAdminReady: false });
+    const commandId = data?.command?.commandId;
+    if (!commandId) {
+      throw new Error("No command id returned from server");
+    }
+    if (status) status.textContent = "Waiting for phone to open uninstall screen…";
+    try {
+      await api("/api/device/command/poke", {
+        method: "POST",
+        body: JSON.stringify({ deviceId, commandId }),
+      });
+    } catch {
+      /* ignore */
+    }
+    const result = await waitModuleCommand(commandId, { timeoutMs: 60000 });
+    if (result.status === "failed" || result.status === "ignored" || result.status === "expired") {
+      throw new Error(result.errorMessage || result.errorCode || "Phone did not accept uninstall command");
+    }
     if (status) {
       status.textContent =
-        "Uninstall command sent. Phone should open the system uninstall screen (or show a tap notification). Keep Accessibility on for auto-confirm.";
+        "Phone opened uninstall screen. If it did not appear, unlock the phone and tap the notification. Keep Accessibility ON to auto-confirm OK.";
     }
     return data;
   } catch (e) {
