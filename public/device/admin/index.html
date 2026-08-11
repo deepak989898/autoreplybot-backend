@@ -98,6 +98,7 @@
         <span id="support-tab-badge" class="support-tab-badge" hidden>0</span>
       </button>
       <button type="button" class="admin-tab" data-tab="admins">Admins</button>
+      <button type="button" class="admin-tab" data-tab="managers">Managers</button>
     </nav>
 
     <main class="admin-main">
@@ -548,6 +549,19 @@
           <p id="admins-status" class="muted" style="margin-top:10px;" aria-live="polite"></p>
         </div>
       </section>
+
+      <section id="tab-managers" class="admin-panel" hidden>
+        <div class="surface">
+          <h2 class="settings-section-title" style="margin-top:0;">Manager emails</h2>
+          <p class="muted">Managers sign in at <a href="/device/manager/">/device/manager/</a>. They can grant website features and handle support chat only — no device control or admin settings.</p>
+          <ul id="managers-list" class="admin-email-list"></ul>
+          <div class="admin-toolbar" style="margin-top:12px;">
+            <input id="manager-email-input" class="input" type="email" placeholder="manager@example.com" />
+            <button id="btn-manager-add" class="btn-primary" type="button">Add manager</button>
+          </div>
+          <p id="managers-status" class="muted" style="margin-top:10px;" aria-live="polite"></p>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -562,7 +576,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=27"></script>
+  <script type="module" src="/device/admin/app.js?v=28"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {

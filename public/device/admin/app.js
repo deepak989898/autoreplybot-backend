@@ -200,6 +200,7 @@ function setTab(tab) {
   }
   if (tab === "support") void loadSupportInbox();
   if (tab === "admins") void loadAdmins();
+  if (tab === "managers") void loadManagers();
 }
 
 async function loadDashboard() {
@@ -299,6 +300,46 @@ async function loadAdmins() {
       });
     });
     if (status) status.textContent = `${emails.length} admin(s)`;
+  } catch (e) {
+    if (status) status.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function loadManagers() {
+  const list = document.getElementById("managers-list");
+  const status = document.getElementById("managers-status");
+  try {
+    if (status) status.textContent = "Loading…";
+    const data = await api("/api/admin/managers");
+    const emails = data.emails || [];
+    if (!list) return;
+    list.innerHTML = emails.length
+      ? emails
+          .map(
+            (email) => `<li>
+          <span>${escapeHtml(email)}</span>
+          <button type="button" class="btn-danger-soft btn-manager-remove" data-email="${escapeHtml(email)}">Remove</button>
+        </li>`
+          )
+          .join("")
+      : `<li class="muted">No managers yet. Add an email below.</li>`;
+    list.querySelectorAll(".btn-manager-remove").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const email = btn.getAttribute("data-email");
+        if (!email) return;
+        if (!confirm(`Remove manager ${email}?`)) return;
+        try {
+          await api("/api/admin/managers", {
+            method: "DELETE",
+            body: JSON.stringify({ email }),
+          });
+          await loadManagers();
+        } catch (e) {
+          alert(e instanceof Error ? e.message : String(e));
+        }
+      });
+    });
+    if (status) status.textContent = `${emails.length} manager(s)`;
   } catch (e) {
     if (status) status.textContent = e instanceof Error ? e.message : String(e);
   }
@@ -4946,6 +4987,19 @@ async function main() {
       await api("/api/admin/admins", { method: "POST", body: JSON.stringify({ email }) });
       if (input) input.value = "";
       await loadAdmins();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  });
+
+  document.getElementById("btn-manager-add")?.addEventListener("click", async () => {
+    const input = document.getElementById("manager-email-input");
+    const email = String(input?.value || "").trim();
+    if (!email) return;
+    try {
+      await api("/api/admin/managers", { method: "POST", body: JSON.stringify({ email }) });
+      if (input) input.value = "";
+      await loadManagers();
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
     }

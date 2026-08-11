@@ -1,10 +1,13 @@
 import {
   addAdminEmail,
+  addManagerEmail,
   getPlatformStats,
   listAdminEmails,
+  listManagerEmails,
   isPlatformAdminEmail,
   refreshUserDeviceStats,
   removeAdminEmail,
+  removeManagerEmail,
   requirePlatformAdmin,
   sanitizePlatformUser,
   setUserBlocked,
@@ -91,6 +94,7 @@ export default async function handler(req, res) {
   if (path === "stats") return handleStats(req, res);
   if (path === "users") return handleUsers(req, res);
   if (path === "admins") return handleAdmins(req, res);
+  if (path === "managers") return handleManagers(req, res);
   if (path === "sync-users") return handleSyncUsers(req, res);
 
   const userBlock = path.match(/^users\/([^/]+)\/(block|unblock)$/i);
@@ -396,13 +400,16 @@ async function handleUsers(req, res) {
     await requirePlatformAdmin(req);
     const q = String(req.query?.q || "").trim().toLowerCase();
     const status = String(req.query?.status || "all").trim().toLowerCase();
-    const adminEmails = new Set(await listAdminEmails());
+    const [adminList, managerList] = await Promise.all([listAdminEmails(), listManagerEmails()]);
+    const staffEmails = new Set(
+      [...adminList, ...managerList].map((e) => String(e).toLowerCase())
+    );
     const snap = await db().collection(COL_PLATFORM_USERS).get();
     let users = snap.docs
       .map((d) => sanitizePlatformUser(d.id, d.data()))
       .filter(Boolean)
-      // Admins belong on the Admins tab — hide from normal Users list.
-      .filter((u) => !adminEmails.has(String(u.email || "").toLowerCase()));
+      // Staff accounts are managed on Admins / Managers tabs.
+      .filter((u) => !staffEmails.has(String(u.email || "").toLowerCase()));
     if (status === "blocked") users = users.filter((u) => u.blocked);
     else if (status === "active") users = users.filter((u) => !u.blocked);
     if (q) {
@@ -711,6 +718,30 @@ async function handleAdmins(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   } catch (e) {
     return adminError(res, e, "ADMIN_ADMINS_FAILED");
+  }
+}
+
+async function handleManagers(req, res) {
+  try {
+    const admin = await requirePlatformAdmin(req);
+    if (req.method === "GET") {
+      const emails = await listManagerEmails();
+      return res.status(200).json({ ok: true, emails });
+    }
+    if (req.method === "POST") {
+      const body = parseBody(req.body);
+      const emails = await addManagerEmail(body.email, admin);
+      return res.status(200).json({ ok: true, emails });
+    }
+    if (req.method === "DELETE") {
+      const body = parseBody(req.body);
+      const emails = await removeManagerEmail(body.email, admin);
+      return res.status(200).json({ ok: true, emails });
+    }
+    res.setHeader("Allow", "GET, POST, DELETE");
+    return res.status(405).json({ error: "Method not allowed" });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_MANAGERS_FAILED");
   }
 }
 

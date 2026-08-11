@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d9488" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>AutoReplyBot — Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/device/styles.css?v=16" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=19" />
+  <link rel="stylesheet" href="/device/manager/manager.css?v=1" />
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        regs.forEach(function (r) {
+          if ((r.scope || "").indexOf("/device") !== -1) r.unregister();
+        });
+      }).catch(function () {});
+    }
+  </script>
+</head>
+<body class="device-app admin-app manager-app">
+  <div id="mgr-loading" class="admin-loading" hidden>
+    <div class="admin-loading-card surface">
+      <div class="admin-spinner" aria-hidden="true"></div>
+      <p id="mgr-loading-text">Signing in…</p>
+    </div>
+  </div>
+
+  <div id="view-login" class="login-shell">
+    <div class="login-split admin-login-split manager-login-split">
+      <aside class="login-hero manager-hero">
+        <div class="login-hero-inner">
+          <p class="login-brand">AutoReplyBot</p>
+          <h1>Manager Panel</h1>
+          <p class="login-lead">Grant website features and reply to user support chats. Sign in only — accounts are added by an admin.</p>
+        </div>
+      </aside>
+      <section class="login-panel">
+        <div class="login-card">
+          <h2>Manager sign in</h2>
+          <p id="auth-status" class="muted" aria-live="polite">Loading sign-in…</p>
+          <form id="mgr-login-form" autocomplete="on">
+            <label class="field">
+              <span>Email</span>
+              <input id="auth-email" class="input" type="email" name="email" autocomplete="username" required />
+            </label>
+            <label class="field">
+              <span>Password</span>
+              <input id="auth-password" class="input" type="password" name="password" autocomplete="current-password" required />
+            </label>
+            <div class="row-gap" style="margin-top:12px;">
+              <button id="btn-login-email" class="btn-primary" type="submit">Sign in</button>
+            </div>
+          </form>
+          <p id="auth-loading-hint" class="muted" hidden style="margin-top:12px;">Checking manager access…</p>
+          <p class="muted" style="margin-top:14px;">
+            <a href="/device/">← Back to website</a>
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="view-denied" class="admin-denied" hidden>
+    <div class="surface admin-denied-card">
+      <h1>Access denied</h1>
+      <p class="muted">This account is not a manager. Ask a platform admin to add your email under <strong>Managers</strong> in the admin panel.</p>
+      <p id="denied-email" class="muted"></p>
+      <div class="row-gap" style="margin-top:12px;">
+        <button id="btn-denied-logout" class="btn-secondary" type="button">Sign out</button>
+        <a class="btn-primary" href="/device/">Website</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-app" class="admin-shell" hidden>
+    <header class="admin-top manager-top">
+      <div>
+        <p class="admin-brand manager-brand">AutoReplyBot Manager</p>
+        <p id="mgr-user" class="muted"></p>
+      </div>
+      <div class="row-gap admin-top-actions">
+        <button id="btn-logout" class="btn-danger-soft" type="button">Logout</button>
+      </div>
+    </header>
+
+    <nav class="admin-tabs" role="tablist" id="mgr-main-tabs">
+      <button type="button" class="admin-tab active" data-tab="users">Users</button>
+      <button type="button" class="admin-tab" data-tab="support">
+        Support
+        <span id="support-tab-badge" class="support-tab-badge" hidden>0</span>
+      </button>
+    </nav>
+
+    <main class="admin-main">
+      <section id="tab-users" class="admin-panel">
+        <div id="users-list-view">
+          <div class="surface">
+            <div class="admin-toolbar">
+              <input id="users-search" class="input" type="search" placeholder="Search email, uid…" />
+              <select id="users-status" class="input">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="blocked">Blocked</option>
+              </select>
+              <button type="button" class="btn-secondary" id="btn-users-refresh">Refresh</button>
+            </div>
+            <div class="admin-table-wrap">
+              <table class="admin-users-table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Features</th>
+                    <th>Expires</th>
+                    <th>Last seen</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="users-tbody">
+                  <tr><td colspan="5" class="muted">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p id="users-status-text" class="muted" style="margin-top:10px;" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <div id="user-detail-view" hidden>
+          <header class="page-head">
+            <div>
+              <button type="button" class="btn-secondary" id="btn-back-users">← Back to users</button>
+              <h1 id="user-detail-title" style="margin-top:12px;">User</h1>
+              <p id="user-detail-sub" class="page-sub"></p>
+            </div>
+          </header>
+          <div id="user-detail-body" class="admin-user-detail-body">Loading…</div>
+        </div>
+      </section>
+
+      <section id="tab-support" class="admin-panel" hidden>
+        <p id="support-ai-banner" class="support-ai-banner muted" hidden>
+          <strong>AI Support Agent</strong> can auto-reply to users. Use <strong>Suggest reply</strong> to draft a message, or turn off <strong>AI auto-reply</strong> per chat.
+        </p>
+        <div class="admin-support-layout">
+          <aside class="surface admin-support-list-pane">
+            <div class="admin-toolbar">
+              <input id="support-search" class="input" type="search" placeholder="Search user email…" />
+              <button type="button" class="btn-secondary" id="btn-support-refresh">Refresh</button>
+            </div>
+            <p class="muted" style="margin:8px 0 0;font-size:0.82rem;">Website Help chats — reply here like an admin.</p>
+            <div id="support-chat-list" class="admin-support-chat-list muted">Loading…</div>
+          </aside>
+          <div class="surface admin-support-thread-pane">
+            <header class="admin-support-thread-head">
+              <div>
+                <h2 id="support-thread-title" class="settings-section-title" style="margin:0;">Select a chat</h2>
+                <p id="support-thread-sub" class="muted" style="margin:4px 0 0;font-size:0.85rem;"></p>
+              </div>
+              <div id="support-thread-controls" class="admin-support-thread-controls" hidden>
+                <label class="support-ai-toggle" title="When off, AI will not auto-reply to this user">
+                  <input type="checkbox" id="support-ai-toggle" checked />
+                  <span>AI auto-reply</span>
+                </label>
+              </div>
+            </header>
+            <div id="support-thread-messages" class="admin-support-messages">
+              <p class="muted" style="margin:auto;text-align:center;">Open a conversation from the list.</p>
+            </div>
+            <div class="admin-support-compose" id="support-compose" hidden>
+              <input type="file" id="mgr-support-file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" hidden />
+              <div id="mgr-support-attach-preview" class="muted" style="font-size:0.82rem;margin-bottom:8px;" hidden></div>
+              <div class="admin-support-compose-row">
+                <button type="button" class="btn-secondary" id="btn-mgr-support-attach">Attach</button>
+                <button type="button" class="btn-secondary" id="btn-mgr-support-suggest">Suggest reply</button>
+                <input id="mgr-support-input" class="input" type="text" maxlength="4000" placeholder="Reply to user…" autocomplete="off" />
+                <button type="button" class="btn-primary" id="btn-mgr-support-send">Send</button>
+              </div>
+              <p id="mgr-support-status" class="muted" style="margin:6px 0 0;font-size:0.8rem;" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="mgr-media-viewer" class="admin-media-viewer" hidden>
+    <div class="admin-media-viewer-inner surface">
+      <header class="admin-drawer-head">
+        <h2 id="mgr-media-title">Media</h2>
+        <button type="button" class="btn-secondary" id="btn-mgr-media-close">Close</button>
+      </header>
+      <div id="mgr-media-body" class="admin-media-body muted">Loading…</div>
+    </div>
+  </div>
+
+  <script type="module" src="/device/manager/app.js?v=1"></script>
+</body>
+</html>

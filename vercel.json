@@ -43,6 +43,12 @@
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
       ]
+    },
+    {
+      "source": "/device/manager/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
     }
   ],
   "redirects": [
@@ -60,6 +66,10 @@
     {
       "source": "/api/admin/:path*",
       "destination": "/api/admin-router?slug=:path*"
+    },
+    {
+      "source": "/api/manager/:path*",
+      "destination": "/api/manager-router?slug=:path*"
     },
     {
       "source": "/api/device/session/:op",
