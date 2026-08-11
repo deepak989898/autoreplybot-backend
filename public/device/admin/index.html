@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css?v=15" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=15" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=16" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -266,13 +266,13 @@
           </div>
           <div id="admin-panel-call-logs" class="phone-tab-panel" data-phone-panel="call-logs" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Call history cached from the phone.</p>
+              <p class="page-sub">Call history from the phone. For recordings: on the phone enable Call logs + Phone + Mic + Music/audio, then remake the call. Sync picks up Phone recordings.</p>
               <div class="page-actions">
-                <button type="button" class="btn-primary" data-admin-cmd="CALL_LOGS_SYNC">Sync from phone</button>
-                <button type="button" class="btn-secondary" id="btn-admin-call-logs-refresh">Refresh</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="CALL_LOGS_SYNC">Sync from phone</button>
+                <button type="button" class="btn-primary" id="btn-admin-call-logs-refresh">Refresh</button>
               </div>
             </div>
-            <div id="admin-call-logs-body" class="surface muted">Loading…</div>
+            <div id="admin-call-logs-body" class="call-list muted">Loading…</div>
           </div>
           <div id="admin-panel-contacts" class="phone-tab-panel" data-phone-panel="contacts" hidden>
             <div class="tab-toolbar">
@@ -550,7 +550,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=21"></script>
+  <script type="module" src="/device/admin/app.js?v=24"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {

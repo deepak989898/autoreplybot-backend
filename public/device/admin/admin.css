@@ -673,19 +673,94 @@
 .silent-timeline {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+
+.silent-day-group {
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.silent-day-header,
+.silent-session-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  background: #f5f3ff;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.silent-day-header:hover,
+.silent-session-header:hover {
+  background: #ede9fe;
+}
+
+.silent-day-group.is-open > .silent-day-header {
+  border-bottom: 1px solid #e9d5ff;
+}
+
+.silent-day-title {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+
+.silent-day-meta,
+.silent-session-meta {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.silent-collapse-chevron {
+  color: #7c3aed;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.silent-day-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .silent-session-group {
-  padding: 12px;
-  border-left: 4px solid #8b5cf6;
+  border: 1px solid #e9d5ff;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #faf5ff;
 }
 
-.silent-session-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 10px;
+.silent-session-header {
+  background: #faf5ff;
+  flex-wrap: wrap;
+}
+
+.silent-session-group.is-open > .silent-session-header {
+  border-bottom: 1px solid #e9d5ff;
+}
+
+.silent-session-time {
+  flex: 1;
+  min-width: 120px;
+}
+
+.silent-session-body {
+  padding: 10px 12px 12px;
+  background: #fff;
+}
+
+.silent-session-sub {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
 }
 
 .silent-segments {
@@ -699,4 +774,19 @@
   border: 1px solid #e9d5ff;
   border-radius: 10px;
   background: #fff;
+}
+
+.silent-segment-row .live-capture-preview {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 8px;
+  margin-top: 8px;
+  display: block;
+}
+
+.silent-segment-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }

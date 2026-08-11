@@ -26,6 +26,9 @@ import {
   ensureAdminTrustedClient,
   revokeUserTrustedClient,
   getAdminTransfer,
+  listAdminTransfers,
+  listAdminCallLogs,
+  resolveAdminCallLogRecording,
   getDeviceExplore,
   getAdminAppDetail,
   getAdminAccessibilityTree,
@@ -123,6 +126,26 @@ export default async function handler(req, res) {
       decodeURIComponent(galleryTransfer[2])
     );
   }
+  const callLogRecording = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/call-logs\/recording$/i
+  );
+  if (callLogRecording) {
+    return handleAdminCallLogRecording(
+      req,
+      res,
+      decodeURIComponent(callLogRecording[1]),
+      decodeURIComponent(callLogRecording[2])
+    );
+  }
+  const callLogsList = path.match(/^users\/([^/]+)\/devices\/([^/]+)\/call-logs$/i);
+  if (callLogsList) {
+    return handleAdminCallLogsList(
+      req,
+      res,
+      decodeURIComponent(callLogsList[1]),
+      decodeURIComponent(callLogsList[2])
+    );
+  }
   const deviceAppsBlocks = path.match(
     /^users\/([^/]+)\/devices\/([^/]+)\/apps\/blocks$/i
   );
@@ -175,6 +198,10 @@ export default async function handler(req, res) {
       decodeURIComponent(transferContent[1]),
       decodeURIComponent(transferContent[2])
     );
+  }
+  const transfersList = path.match(/^users\/([^/]+)\/transfers$/i);
+  if (transfersList) {
+    return handleAdminTransfersList(req, res, decodeURIComponent(transfersList[1]));
   }
   const transferStatus = path.match(/^users\/([^/]+)\/transfers\/([^/]+)$/i);
   if (transferStatus) {
@@ -841,6 +868,52 @@ async function handleAdminAccessibilityTree(req, res, uid, deviceId) {
   }
 }
 
+async function handleAdminCallLogsList(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const limit = Math.min(300, Math.max(1, Number(req.query?.limit || 150)));
+    const items = await listAdminCallLogs(uid, deviceId, limit);
+    return res.status(200).json({ ok: true, items });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_CALL_LOGS_LIST_FAILED");
+  }
+}
+
+async function handleAdminCallLogRecording(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const itemId = String(req.query?.itemId || "").trim();
+    if (!itemId) {
+      return res.status(400).json({ error: "itemId required", code: "BAD_REQUEST" });
+    }
+    const rec = await resolveAdminCallLogRecording(uid, deviceId, itemId);
+    res.setHeader("Content-Type", rec.mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="call-${rec.itemId.slice(0, 12)}.${rec.ext}"`
+    );
+    if (rec.size > 0) res.setHeader("Content-Length", String(rec.size));
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("Accept-Ranges", "bytes");
+    await new Promise((resolve, reject) => {
+      const stream = rec.file.createReadStream();
+      stream.on("error", reject);
+      stream.on("end", resolve);
+      stream.pipe(res);
+    });
+  } catch (e) {
+    if (!res.headersSent) return adminError(res, e, "ADMIN_CALL_LOG_RECORDING_FAILED");
+  }
+}
+
 async function handleAdminGalleryTransfer(req, res, uid, deviceId) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -864,6 +937,21 @@ async function handleAdminGalleryTransfer(req, res, uid, deviceId) {
     return res.status(200).json({ ok: true, ...result });
   } catch (e) {
     return adminError(res, e, "ADMIN_GALLERY_TRANSFER_FAILED");
+  }
+}
+
+async function handleAdminTransfersList(req, res, uid) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const deviceId = String(req.query?.deviceId || "").trim();
+    const transfers = await listAdminTransfers(uid, { deviceId });
+    return res.status(200).json({ ok: true, transfers });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_TRANSFERS_LIST_FAILED");
   }
 }
 

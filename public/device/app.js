@@ -327,6 +327,9 @@ function setPhoneTab(tabId) {
     // ensure device card visible for selection; restore live UI if still connected
     if (cachedDevices.length) renderDevices(cachedDevices, cachedClients);
     else restoreActiveLiveSessionsUi();
+    if (selectedWorkspaceDeviceId) {
+      void hydrateLiveVideoClips(selectedWorkspaceDeviceId);
+    }
   }
   if (activePhoneTab === "location") openLocationTab().catch(() => {});
   if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
@@ -1014,13 +1017,14 @@ function renderDevices(devices, clients) {
               <button type="button" data-toggle="audio-rec" aria-pressed="false" title="Saves an audio file on the phone; may pause live mic">Record audio file</button>
               <button type="button" class="btn-end-live" data-cmd="END_SESSION">End session</button>
             </div>
-            <div class="live-captures surface" data-captures-for="${id}">
-              <div class="live-captures-head">
-                <strong>Saved photos &amp; videos</strong>
-                <span class="muted">Captured from your phone · view / download below</span>
-              </div>
-              <div class="live-captures-list" data-captures-list-for="${id}"></div>
+          </div>
+          <div class="live-captures surface" data-captures-for="${id}">
+            <div class="live-captures-head">
+              <strong>Saved photos &amp; videos</strong>
+              <button type="button" class="btn-secondary btn-captures-refresh" data-device-id="${id}">Refresh</button>
             </div>
+            <p class="muted live-captures-hint">Captured from your phone · view / download below (stays here after you disconnect).</p>
+            <div class="live-captures-list" data-captures-list-for="${id}"></div>
           </div>
         </div>
       </article>`;
@@ -1084,6 +1088,17 @@ function renderDevices(devices, clients) {
       });
     });
     renderLiveVideoClips(deviceId);
+  });
+
+  focused.forEach((d) => {
+    void hydrateLiveVideoClips(d.deviceId);
+  });
+
+  deviceList.querySelectorAll(".btn-captures-refresh").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const deviceId = btn.getAttribute("data-device-id");
+      if (deviceId) void hydrateLiveVideoClips(deviceId);
+    });
   });
 
   // Tab switches / refreshDevices rebuild this DOM — reattach any still-live sessions.
