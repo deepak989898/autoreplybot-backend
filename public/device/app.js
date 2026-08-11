@@ -869,7 +869,11 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function preferredClientId(clients) {
+/**
+ * Client id for *this* browser install only (fingerprint / local storage).
+ * Does not fall back to another user's paired browser on the same account.
+ */
+function thisBrowserClientId(clients) {
   const active = (clients || []).filter(
     (c) => !c.revoked && c.clientId !== "platform_admin" && !c.isPlatformAdminClient
   );
@@ -885,7 +889,16 @@ function preferredClientId(clients) {
   if (stored && stored !== "platform_admin" && active.some((c) => c.clientId === stored)) {
     return stored;
   }
-  return active[0]?.clientId || "";
+  return "";
+}
+
+function isThisBrowserPaired(clients) {
+  return Boolean(thisBrowserClientId(clients));
+}
+
+/** @deprecated Use thisBrowserClientId — kept as alias for call sites. */
+function preferredClientId(clients) {
+  return thisBrowserClientId(clients);
 }
 
 function preferredClient(clients) {
@@ -2615,8 +2628,8 @@ async function refreshClients() {
       await ensureBrowserIdentity();
       const data = await api("/api/pair/clients");
       cachedClients = data.clients || [];
-      const clientId = preferredClientId(cachedClients);
-      updatePairingUi(Boolean(clientId));
+      const clientId = thisBrowserClientId(cachedClients);
+      updatePairingUi(isThisBrowserPaired(cachedClients));
     } catch {
       cachedClients = [];
       updatePairingUi(false);
@@ -2636,8 +2649,8 @@ async function refreshClients() {
     const data = await api("/api/pair/clients");
     cachedClients = data.clients || [];
     renderClients(cachedClients);
-    const clientId = preferredClientId(cachedClients);
-    updatePairingUi(Boolean(clientId));
+    const clientId = thisBrowserClientId(cachedClients);
+    updatePairingUi(isThisBrowserPaired(cachedClients));
   } catch (e) {
     clientList.textContent = e instanceof Error ? e.message : String(e);
     clientList.classList.add("muted");
@@ -2647,15 +2660,24 @@ async function refreshClients() {
 
 function updatePairingUi(isPaired) {
   browserPaired = Boolean(isPaired);
+  const otherBrowsers = (cachedClients || []).filter(
+    (c) => !c.revoked && c.clientId !== "platform_admin" && !c.isPlatformAdminClient
+  ).length;
   const hasLive = [...liveByDevice.values()].some(
     (l) => l && (l.pc || l.sessionId || l.requestId)
   );
   if (homeStatus) {
-    homeStatus.textContent = browserPaired
-      ? hasLive
+    if (browserPaired) {
+      homeStatus.textContent = hasLive
         ? "This browser is paired and has a live session. Use Disconnect on Pair New Browser to end it."
-        : "This browser is paired. Open My Phone and tap Connect when you want a live session."
-      : "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
+        : "This browser is paired. Open My Phone and tap Connect when you want a live session.";
+    } else if (otherBrowsers > 0) {
+      homeStatus.textContent =
+        "This browser is not paired yet. Your account has other paired browsers (e.g. desktop), but each browser/PWA must pair once with a QR scan on the phone.";
+    } else {
+      homeStatus.textContent =
+        "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
+    }
   }
   if (btnHomePair) btnHomePair.hidden = browserPaired;
   if (btnHomePhones) btnHomePhones.hidden = !browserPaired;
@@ -3014,6 +3036,38 @@ function showPairError(message) {
   pairError.textContent = message || "";
 }
 
+let pairPollTimer = null;
+
+function stopPairPoll() {
+  if (pairPollTimer) {
+    clearInterval(pairPollTimer);
+    pairPollTimer = null;
+  }
+}
+
+function startPairPoll(maxMs = 120000) {
+  stopPairPoll();
+  const started = Date.now();
+  pairPollTimer = setInterval(async () => {
+    try {
+      await ensureBrowserIdentity();
+      const data = await api("/api/pair/clients");
+      cachedClients = data.clients || [];
+      if (isThisBrowserPaired(cachedClients)) {
+        stopPairPoll();
+        updatePairingUi(true);
+        if (clientList) renderClients(cachedClients);
+        if (pairResult) pairResult.hidden = true;
+        showPairError("");
+        return;
+      }
+      if (Date.now() - started > maxMs) stopPairPoll();
+    } catch {
+      /* keep polling until timeout */
+    }
+  }, 2000);
+}
+
 async function createPairing() {
   showPairError("");
   if (!idToken) {
@@ -3045,6 +3099,7 @@ async function createPairing() {
         errorCorrectionLevel: "M",
       });
     }
+    startPairPoll();
   } catch (e) {
     pairResult.hidden = true;
     showPairError(e instanceof Error ? e.message : String(e));
