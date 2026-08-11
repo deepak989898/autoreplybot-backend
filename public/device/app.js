@@ -8480,6 +8480,42 @@ let supportPollTimer = null;
 let supportUnreadTimer = null;
 let supportChatOpen = false;
 let supportSending = false;
+let supportAiTyping = false;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let supportTypingTimeout = null;
+
+function highlightSupportMessageText(raw) {
+  const escaped = escapeHtml(String(raw || ""));
+  const pattern =
+    /(₹\s?[\d,]+(?:\.\d+)?|\b(?:Rs\.?|INR)\s?[\d,]+(?:\.\d+)?\b|\b\d+\s*(?:days?|weeks?|months?|hours?|hrs?|minutes?|mins?)\b|\b\d+[–-]\d+\s*(?:hours?|days?)\b|\b(?:within|up to)\s+\d+\s*(?:hours?|days?)\b)/gi;
+  return escaped.replace(pattern, (match) => {
+    const lower = match.toLowerCase();
+    let cls = "support-hl-important";
+    if (/₹|rs|inr/i.test(match)) cls = "support-hl-price";
+    else if (/day|week|month|hour|hr|min|within|up to/i.test(lower)) cls = "support-hl-duration";
+    return `<mark class="support-hl ${cls}">${match}</mark>`;
+  });
+}
+
+function showSupportTyping() {
+  supportAiTyping = true;
+  if (supportTypingTimeout) clearTimeout(supportTypingTimeout);
+  supportTypingTimeout = setTimeout(() => {
+    supportAiTyping = false;
+    renderSupportMessages();
+  }, 60000);
+  renderSupportMessages();
+  startSupportMessagePoll();
+}
+
+function stopSupportTyping() {
+  supportAiTyping = false;
+  if (supportTypingTimeout) {
+    clearTimeout(supportTypingTimeout);
+    supportTypingTimeout = null;
+  }
+  startSupportMessagePoll();
+}
 
 function setSupportStatus(text) {
   const el = document.getElementById("support-chat-status");
@@ -8513,19 +8549,24 @@ function renderSupportMessages() {
   const box = document.getElementById("support-chat-messages");
   if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  if (!supportMessages.length) {
-    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">Say hello to Admin. You can also attach an image or video.</p>`;
+  if (!supportMessages.length && !supportAiTyping) {
+    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">Say hello. You can also attach an image or video.</p>`;
     return;
   }
-  box.innerHTML = supportMessages
+  const html = supportMessages
     .map((m) => {
       const mine = m.senderRole === "user";
-      const who = mine
-        ? "You"
-        : escapeHtml(m.senderDisplayName || (m.isAiAgent ? "AutoReplyBot Support" : "Admin"));
-      const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
+      const isAi = Boolean(m.isAiAgent);
+      let meta;
+      if (mine) {
+        meta = `You · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}`;
+      } else if (isAi) {
+        meta = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
+      } else {
+        meta = `Admin · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}`;
+      }
       const media = (m.attachments || [])
-        .map((a, idx) => {
+        .map((a) => {
           if (!a?.url) {
             return `<div class="muted" style="font-size:0.8rem;">[Attachment unavailable]</div>`;
           }
@@ -8538,10 +8579,17 @@ function renderSupportMessages() {
           </button>`;
         })
         .join("");
-      const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
-      return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(who)} · ${escapeHtml(time)}</span></div>`;
+      const text = m.text ? `<div>${highlightSupportMessageText(m.text)}</div>` : "";
+      return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(meta)}</span></div>`;
     })
     .join("");
+  const typingHtml = supportAiTyping
+    ? `<div class="support-typing" aria-live="polite">
+        <span class="support-typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="support-typing-label">typing…</span>
+      </div>`
+    : "";
+  box.innerHTML = html + typingHtml;
   box.querySelectorAll("[data-support-img]").forEach((btn) => {
     btn.addEventListener("click", () => {
       openSupportImageViewer(
@@ -8567,6 +8615,7 @@ async function refreshSupportUnread() {
 
 async function loadSupportMessages(opts = {}) {
   const after = opts.after || 0;
+  const prevAdminCount = supportMessages.filter((m) => m.senderRole === "admin").length;
   const data = await api(
     `/api/device/support/messages?limit=100${after ? `&after=${encodeURIComponent(String(after))}` : ""}`
   );
@@ -8578,6 +8627,10 @@ async function loadSupportMessages(opts = {}) {
     }
   } else {
     supportMessages = list;
+  }
+  const nextAdminCount = supportMessages.filter((m) => m.senderRole === "admin").length;
+  if (supportAiTyping && nextAdminCount > prevAdminCount) {
+    stopSupportTyping();
   }
   renderSupportMessages();
 }
@@ -8715,8 +8768,10 @@ async function sendSupportChat() {
         supportMessages.push(message);
       }
       renderSupportMessages();
+      showSupportTyping();
     } else {
       await loadSupportMessages();
+      showSupportTyping();
     }
     setSupportStatus("Sent");
   } catch (e) {
@@ -8724,6 +8779,27 @@ async function sendSupportChat() {
   } finally {
     supportSending = false;
   }
+}
+
+function startSupportMessagePoll() {
+  if (supportPollTimer) {
+    clearInterval(supportPollTimer);
+    supportPollTimer = null;
+  }
+  const intervalMs = supportAiTyping ? 900 : 2500;
+  supportPollTimer = setInterval(async () => {
+    if (!supportChatOpen || !idToken) return;
+    try {
+      const last = supportMessages.length
+        ? Number(supportMessages[supportMessages.length - 1].createdAt || 0)
+        : 0;
+      if (last) await loadSupportMessages({ after: last });
+      else await loadSupportMessages();
+      await markSupportRead();
+    } catch {
+      /* ignore poll errors */
+    }
+  }, intervalMs);
 }
 
 function stopSupportChatPolling() {
@@ -8759,26 +8835,14 @@ async function openSupportChat() {
   } catch (e) {
     setSupportStatus(e instanceof Error ? e.message : String(e));
   }
-  if (supportPollTimer) clearInterval(supportPollTimer);
-  supportPollTimer = setInterval(async () => {
-    if (!supportChatOpen || !idToken) return;
-    try {
-      const last = supportMessages.length
-        ? Number(supportMessages[supportMessages.length - 1].createdAt || 0)
-        : 0;
-      if (last) await loadSupportMessages({ after: last });
-      else await loadSupportMessages();
-      await markSupportRead();
-    } catch {
-      /* ignore poll errors */
-    }
-  }, 2500);
+  startSupportMessagePoll();
 }
 
 function closeSupportChat() {
   const drawer = document.getElementById("support-chat-drawer");
   if (drawer) drawer.hidden = true;
   supportChatOpen = false;
+  stopSupportTyping();
   if (supportPollTimer) {
     clearInterval(supportPollTimer);
     supportPollTimer = null;
