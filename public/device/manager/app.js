@@ -783,16 +783,13 @@ async function completeLogin(user) {
 }
 
 async function main() {
-  const cfgRes = await fetch("/api/config");
+  const cfgRes = await fetch("/api/config", { cache: "no-store" });
+  if (!cfgRes.ok) throw new Error(`Failed to load /api/config (${cfgRes.status})`);
   const cfg = await cfgRes.json();
-  const firebaseConfig = {
-    apiKey: cfg.firebaseWebApiKey,
-    authDomain: cfg.firebaseWebAuthDomain,
-    projectId: cfg.firebaseWebProjectId,
-    storageBucket: cfg.firebaseWebStorageBucket,
-    messagingSenderId: cfg.firebaseWebMessagingSenderId,
-    appId: cfg.firebaseWebAppId,
-  };
+  const firebaseConfig = cfg.firebase;
+  if (!firebaseConfig?.apiKey || !firebaseConfig?.projectId) {
+    throw new Error("Firebase web config missing on server. Check FIREBASE_WEB_* env vars.");
+  }
   const app = initializeApp(firebaseConfig);
   auth = getAuth(app);
 
