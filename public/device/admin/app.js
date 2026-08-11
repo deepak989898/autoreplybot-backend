@@ -226,15 +226,15 @@ function renderUsers(users) {
         : `<span class="admin-badge ok">Active</span>`;
       const email = escapeHtml(u.email || u.uid);
       return `<tr>
-        <td>
+        <td data-label="Email">
           <div>${email}</div>
           <div class="muted" style="font-size:0.8rem;">${escapeHtml(u.displayName || "")}</div>
         </td>
-        <td>${Number(u.deviceCount || 0)}</td>
-        <td>${Number(u.onlineDeviceCount || 0)}</td>
-        <td>${fmtTime(u.lastSeenAt)}</td>
-        <td>${badge}</td>
-        <td><button type="button" class="btn-secondary btn-user-open" data-uid="${escapeHtml(u.uid)}">Open</button></td>
+        <td data-label="Devices">${Number(u.deviceCount || 0)}</td>
+        <td data-label="Online">${Number(u.onlineDeviceCount || 0)}</td>
+        <td data-label="Last seen">${fmtTime(u.lastSeenAt)}</td>
+        <td data-label="Status">${badge}</td>
+        <td data-label=""><button type="button" class="btn-secondary btn-user-open" data-uid="${escapeHtml(u.uid)}">Open</button></td>
       </tr>`;
     })
     .join("");

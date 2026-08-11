@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=15" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=16" />
+  <link rel="stylesheet" href="/device/styles.css?v=16" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=17" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -124,8 +124,8 @@
               </select>
               <button id="btn-users-refresh" class="btn-secondary" type="button">Refresh</button>
             </div>
-            <div class="table-wrap">
-              <table class="admin-table">
+            <div class="table-wrap admin-table-wrap">
+              <table class="admin-table admin-users-table">
                 <thead>
                   <tr>
                     <th>Email</th>
@@ -550,7 +550,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=24"></script>
+  <script type="module" src="/device/admin/app.js?v=25"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {
