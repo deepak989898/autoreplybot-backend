@@ -379,7 +379,7 @@
 
           <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Use <strong>Play</strong> / <strong>Download</strong> on media.</p>
+              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Tap <strong>Download</strong> to fetch with progress, then <strong>View</strong> / <strong>Play</strong> in the panel below.</p>
               <div class="page-actions">
                 <button id="btn-files-up" class="btn-secondary" type="button" hidden>Up</button>
                 <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
@@ -387,11 +387,15 @@
               </div>
             </div>
             <p id="files-breadcrumb" class="files-breadcrumb muted">Root</p>
+            <p id="files-sync-status" class="files-sync-status muted" hidden></p>
             <select id="files-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="files-panel-body" class="surface muted">Select a device.</div>
-            <div id="files-audio-player" class="files-audio-player" hidden>
-              <p id="files-audio-label" class="muted"></p>
-              <audio id="files-audio" controls preload="none" style="width:100%"></audio>
+            <div id="files-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="files-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-files-inline-close">Close preview</button>
+              </div>
+              <div id="files-inline-body" class="files-inline-body"></div>
             </div>
           </div>
 
@@ -479,7 +483,7 @@
 
           <div id="phone-tab-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone.</p>
+              <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone. Cast permission is <strong>auto-approved</strong> when Remote Accessibility is enabled on the phone.</p>
               <div class="page-actions rec-actions">
                 <button id="btn-rec-start" class="btn-primary" type="button">Record Screen</button>
                 <button id="btn-rec-pause" class="btn-secondary" type="button">Pause</button>
@@ -509,6 +513,13 @@
             </div>
             <div id="rec-transfer" class="surface muted" hidden>Upload progress will appear here.</div>
             <div id="recordings-list" class="rec-list muted">Select a device and refresh.</div>
+            <div id="rec-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="rec-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-rec-inline-close">Close preview</button>
+              </div>
+              <div id="rec-inline-body" class="files-inline-body"></div>
+            </div>
           </div>
 
           <div id="phone-tab-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>

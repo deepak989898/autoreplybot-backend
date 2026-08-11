@@ -2581,6 +2581,76 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   border-radius: 12px;
 }
 
+.files-sync-status {
+  margin: -4px 0 10px;
+  font-size: 0.88rem;
+}
+
+.files-inline-viewer {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.files-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.files-inline-body img,
+.files-inline-body video,
+.files-inline-body audio {
+  width: 100%;
+  max-height: min(62vh, 520px);
+  border-radius: 10px;
+  background: #0b1020;
+  object-fit: contain;
+}
+
+.file-card.file-card-downloading {
+  border-color: #2b6cff;
+  box-shadow: 0 0 0 2px rgba(43, 108, 255, 0.12);
+}
+
+.file-card.file-card-ready {
+  border-color: #16a34a;
+}
+
+.file-card.file-card-error {
+  border-color: #dc2626;
+}
+
+.btn-file-progress {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-file-progress::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--file-progress, 0%);
+  background: rgba(43, 108, 255, 0.18);
+  pointer-events: none;
+}
+
+.btn-file-ready {
+  background: #ecfdf5;
+  border-color: #16a34a;
+  color: #166534;
+}
+
+.btn-file-error {
+  background: #fef2f2;
+  border-color: #dc2626;
+  color: #991b1b;
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
