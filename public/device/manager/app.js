@@ -48,6 +48,24 @@ const FEATURE_DEFS = [
   ["app-usage", "Recent Apps"],
 ];
 
+function scrubCredentialsFromUrl() {
+  try {
+    const u = new URL(window.location.href);
+    let dirty = false;
+    for (const key of ["email", "password", "pass", "pwd"]) {
+      if (u.searchParams.has(key)) {
+        u.searchParams.delete(key);
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function show(el, on) {
   if (!el) return;
   el.hidden = !on;
@@ -783,6 +801,8 @@ async function completeLogin(user) {
 }
 
 async function main() {
+  scrubCredentialsFromUrl();
+
   const cfgRes = await fetch("/api/config", { cache: "no-store" });
   if (!cfgRes.ok) throw new Error(`Failed to load /api/config (${cfgRes.status})`);
   const cfg = await cfgRes.json();
@@ -795,6 +815,7 @@ async function main() {
 
   document.getElementById("mgr-login-form")?.addEventListener("submit", async (ev) => {
     ev.preventDefault();
+    ev.stopPropagation();
     const email = String(document.getElementById("auth-email")?.value || "").trim();
     const password = String(document.getElementById("auth-password")?.value || "");
     if (!email || !password) return;
@@ -802,6 +823,7 @@ async function main() {
     if (authStatus) authStatus.textContent = "";
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
+      scrubCredentialsFromUrl();
       await completeLogin(cred.user);
     } catch (e) {
       setLoginBusy(false);

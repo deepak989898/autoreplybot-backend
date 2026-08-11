@@ -13,6 +13,22 @@
   <link rel="stylesheet" href="/device/admin/admin.css?v=19" />
   <link rel="stylesheet" href="/device/manager/manager.css?v=1" />
   <script>
+    // Never keep credentials in the address bar (bookmark/history leak).
+    (function () {
+      try {
+        var u = new URL(window.location.href);
+        var dirty = false;
+        ["email", "password", "pass", "pwd"].forEach(function (k) {
+          if (u.searchParams.has(k)) {
+            u.searchParams.delete(k);
+            dirty = true;
+          }
+        });
+        if (dirty) {
+          history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+        }
+      } catch (e) {}
+    })();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.getRegistrations().then(function (regs) {
         regs.forEach(function (r) {
@@ -43,7 +59,7 @@
         <div class="login-card">
           <h2>Manager sign in</h2>
           <p id="auth-status" class="muted" aria-live="polite">Loading sign-in…</p>
-          <form id="mgr-login-form" autocomplete="on">
+          <form id="mgr-login-form" method="post" action="/device/manager/" autocomplete="on" novalidate>
             <label class="field">
               <span>Email</span>
               <input id="auth-email" class="input" type="email" name="email" autocomplete="username" required />
@@ -197,6 +213,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/manager/app.js?v=2"></script>
+  <script type="module" src="/device/manager/app.js?v=3"></script>
 </body>
 </html>
