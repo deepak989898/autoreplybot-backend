@@ -45,6 +45,7 @@ import {
   sendMessage,
   uploadSupportMediaDirect,
 } from "../lib/support-chat.js";
+import { maybeAutoReplySupport, isSupportAiConfigured } from "../lib/support-ai-agent.js";
 import {
   assertWebsiteFeature,
   entitlementsPublicView,
@@ -3134,6 +3135,13 @@ async function handlePhoneCapabilities(req, res) {
 
 /* ——— Website Help / Support chat (user ↔ Platform Admin only) ——— */
 
+function scheduleSupportAiReply(uid, messageId) {
+  if (!messageId) return;
+  void maybeAutoReplySupport(uid, String(messageId)).catch((e) => {
+    console.warn("support AI auto-reply failed", uid, e?.message || e);
+  });
+}
+
 async function handleSupportThread(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -3178,6 +3186,7 @@ async function handleSupportMessages(req, res) {
         senderEmail: req._platformEmail || "",
         text: body.text || "",
       });
+      scheduleSupportAiReply(uid, message.messageId);
       return res.status(200).json({ ok: true, message });
     } catch (e) {
       return clientError(res, e, "SUPPORT_SEND_FAILED");
@@ -3225,6 +3234,7 @@ async function handleSupportUpload(req, res) {
       senderUid: uid,
       senderEmail: req._platformEmail || "",
     });
+    scheduleSupportAiReply(uid, message.messageId);
     return res.status(200).json({ ok: true, message });
   } catch (e) {
     return clientError(res, e, "SUPPORT_UPLOAD_FAILED");
@@ -3251,6 +3261,7 @@ async function handleSupportMediaMessage(req, res) {
       senderUid: uid,
       senderEmail: req._platformEmail || "",
     });
+    scheduleSupportAiReply(uid, message.messageId);
     return res.status(200).json({ ok: true, message });
   } catch (e) {
     return clientError(res, e, "SUPPORT_MEDIA_FAILED");

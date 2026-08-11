@@ -45,6 +45,13 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/device/",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/pair/:action",
@@ -61,10 +68,6 @@
     {
       "source": "/api/device/:path*",
       "destination": "/api/device-router?slug=:path*"
-    },
-    {
-      "source": "/",
-      "destination": "/public/index.html"
     },
     {
       "source": "/((?!api/).*)",

@@ -56,8 +56,13 @@ import {
   listThreadsForAdmin,
   markRead,
   sendMessage,
+  setThreadAiAgent,
   uploadSupportMediaDirect,
 } from "../lib/support-chat.js";
+import {
+  generateSupportReplySuggestion,
+  isSupportAiConfigured,
+} from "../lib/support-ai-agent.js";
 
 /**
  * Admin panel APIs (+ device explore/control):
@@ -309,6 +314,14 @@ export default async function handler(req, res) {
   const supportChatRead = path.match(/^support\/chats\/([^/]+)\/read$/i);
   if (supportChatRead) {
     return handleAdminSupportRead(req, res, decodeURIComponent(supportChatRead[1]));
+  }
+  const supportChatAi = path.match(/^support\/chats\/([^/]+)\/ai$/i);
+  if (supportChatAi) {
+    return handleAdminSupportAi(req, res, decodeURIComponent(supportChatAi[1]));
+  }
+  const supportChatSuggest = path.match(/^support\/chats\/([^/]+)\/suggest-reply$/i);
+  if (supportChatSuggest) {
+    return handleAdminSupportSuggest(req, res, decodeURIComponent(supportChatSuggest[1]));
   }
   const supportChatUploadDirect = path.match(/^support\/chats\/([^/]+)\/upload$/i);
   if (supportChatUploadDirect) {
@@ -1085,7 +1098,11 @@ async function handleAdminSupportChats(req, res) {
       q: req.query?.q,
       limit: Number(req.query?.limit || 100) || 100,
     });
-    return res.status(200).json({ ok: true, chats });
+    return res.status(200).json({
+      ok: true,
+      chats,
+      aiAgentEnabled: isSupportAiConfigured(),
+    });
   } catch (e) {
     return adminError(res, e, "ADMIN_SUPPORT_LIST_FAILED");
   }
@@ -1208,5 +1225,39 @@ async function handleAdminSupportRead(req, res, uid) {
     return res.status(200).json({ ok: true, thread: thread || (await getThread(uid)) });
   } catch (e) {
     return adminError(res, e, "ADMIN_SUPPORT_READ_FAILED");
+  }
+}
+
+async function handleAdminSupportAi(req, res, uid) {
+  if (req.method !== "POST" && req.method !== "PATCH") {
+    res.setHeader("Allow", "POST, PATCH");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const body = parseBody(req.body);
+    const thread = await setThreadAiAgent(uid, Boolean(body.enabled));
+    return res.status(200).json({ ok: true, thread });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_AI_TOGGLE_FAILED");
+  }
+}
+
+async function handleAdminSupportSuggest(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const suggestion = await generateSupportReplySuggestion(uid);
+    if (!suggestion) {
+      const err = new Error("Could not generate a suggestion");
+      err.code = "AI_EMPTY_REPLY";
+      throw err;
+    }
+    return res.status(200).json({ ok: true, suggestion });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_SUPPORT_SUGGEST_FAILED");
   }
 }

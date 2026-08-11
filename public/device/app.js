@@ -8520,7 +8520,9 @@ function renderSupportMessages() {
   box.innerHTML = supportMessages
     .map((m) => {
       const mine = m.senderRole === "user";
-      const who = mine ? "You" : "Admin";
+      const who = mine
+        ? "You"
+        : escapeHtml(m.senderDisplayName || (m.isAiAgent ? "AutoReplyBot Support" : "Admin"));
       const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
       const media = (m.attachments || [])
         .map((a, idx) => {

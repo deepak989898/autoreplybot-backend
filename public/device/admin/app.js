@@ -87,6 +87,11 @@ let adminScreenMirrorWired = false;
 let adminAppsPanelWired = false;
 /** @type {object[]} */
 let supportChatsCache = [];
+/** @type {boolean} */
+let supportAiAgentEnabled = false;
+/** Per-thread AI auto-reply (from Firestore thread doc). */
+let activeSupportAiEnabled = true;
+let supportAiToggleBusy = false;
 /** @type {string} */
 let activeSupportUid = "";
 /** @type {object[]} */
@@ -4220,6 +4225,36 @@ function updateSupportTabBadge(total) {
   badge.textContent = n > 99 ? "99+" : String(n);
 }
 
+function updateSupportAiBanner() {
+  const el = document.getElementById("support-ai-banner");
+  if (!el) return;
+  show(el, supportAiAgentEnabled);
+}
+
+function updateSupportThreadControls() {
+  const wrap = document.getElementById("support-thread-controls");
+  const toggle = document.getElementById("support-ai-toggle");
+  const suggestBtn = document.getElementById("btn-admin-support-suggest");
+  const showControls = Boolean(activeSupportUid) && supportAiAgentEnabled;
+  show(wrap, showControls);
+  if (toggle) {
+    toggle.checked = activeSupportAiEnabled;
+    toggle.disabled = supportAiToggleBusy || !showControls;
+  }
+  const toggleLabel = toggle?.closest(".support-ai-toggle");
+  if (toggleLabel) toggleLabel.classList.toggle("is-disabled", Boolean(toggle?.disabled));
+  if (suggestBtn) {
+    suggestBtn.hidden = !showControls;
+    suggestBtn.disabled = !showControls;
+  }
+}
+
+function syncActiveSupportAiFromCache() {
+  const chat = supportChatsCache.find((c) => c.userUid === activeSupportUid);
+  activeSupportAiEnabled = chat?.aiAgentEnabled !== false;
+  updateSupportThreadControls();
+}
+
 function stopSupportInboxPolling() {
   if (supportInboxTimer) {
     clearInterval(supportInboxTimer);
@@ -4273,8 +4308,12 @@ function renderSupportChatList() {
         unread > 0 ? `<span class="admin-support-unread">${unread > 99 ? "99+" : unread}</span>` : "";
       const active = c.userUid === activeSupportUid ? " active" : "";
       const when = c.lastMessageAt ? fmtTime(c.lastMessageAt) : "";
+      const aiOff =
+        supportAiAgentEnabled && c.aiAgentEnabled === false
+          ? `<span class="support-ai-off" title="AI auto-reply off">AI off</span>`
+          : "";
       return `<button type="button" class="admin-support-chat-item${active}" data-support-uid="${escapeHtml(c.userUid)}">
-        <strong>${escapeHtml(c.userEmail || c.userUid)}${badge}</strong>
+        <strong>${escapeHtml(c.userEmail || c.userUid)}${badge}${aiOff}</strong>
         <div class="preview">${escapeHtml(c.lastMessageText || "(no messages)")}</div>
         <div class="preview">${escapeHtml(when)}</div>
       </button>`;
@@ -4362,7 +4401,10 @@ function renderAdminSupportMessages() {
   box.innerHTML = supportThreadMessages
     .map((m) => {
       const isAdmin = m.senderRole === "admin";
-      const who = isAdmin ? "Admin" : "User";
+      const who = isAdmin
+        ? escapeHtml(m.senderDisplayName || (m.isAiAgent ? "AutoReplyBot Support" : "Admin"))
+        : "User";
+      const aiBadge = m.isAiAgent ? ` <span class="admin-badge silent">AI</span>` : "";
       const time = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
       const media = (m.attachments || [])
         .map((a) => {
@@ -4379,7 +4421,7 @@ function renderAdminSupportMessages() {
         })
         .join("");
       const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
-      return `<div class="admin-support-msg ${isAdmin ? "admin" : "user"}">${text}${media}<span class="meta">${escapeHtml(who)} · ${escapeHtml(time)}</span></div>`;
+      return `<div class="admin-support-msg ${isAdmin ? "admin" : "user"}">${text}${media}<span class="meta">${who}${aiBadge} · ${escapeHtml(time)}</span></div>`;
     })
     .join("");
   box.querySelectorAll("[data-admin-support-img]").forEach((btn) => {
@@ -4402,10 +4444,13 @@ async function loadSupportInbox(opts = {}) {
       `/api/admin/support/chats?limit=100${q ? `&q=${encodeURIComponent(q)}` : ""}`
     );
     supportChatsCache = Array.isArray(data.chats) ? data.chats : [];
+    supportAiAgentEnabled = Boolean(data.aiAgentEnabled);
+    updateSupportAiBanner();
     const total = supportChatsCache.reduce((sum, c) => sum + Number(c.unreadForAdmin || 0), 0);
     updateSupportTabBadge(total);
     renderSupportChatList();
     if (activeSupportUid) {
+      syncActiveSupportAiFromCache();
       show(document.getElementById("support-compose"), true);
     }
   } catch (e) {
@@ -4418,11 +4463,13 @@ async function openSupportThread(uid) {
   if (!id) return;
   activeSupportUid = id;
   const chat = supportChatsCache.find((c) => c.userUid === id);
+  activeSupportAiEnabled = chat?.aiAgentEnabled !== false;
   const title = document.getElementById("support-thread-title");
   const sub = document.getElementById("support-thread-sub");
   if (title) title.textContent = chat?.userEmail || id;
   if (sub) sub.textContent = id;
   show(document.getElementById("support-compose"), true);
+  updateSupportThreadControls();
   renderSupportChatList();
   setAdminSupportStatus("Loading…");
   try {
@@ -4430,6 +4477,15 @@ async function openSupportThread(uid) {
       `/api/admin/support/chats/${encodeURIComponent(id)}/messages?limit=100`
     );
     supportThreadMessages = Array.isArray(data.messages) ? data.messages : [];
+    if (data.thread) {
+      activeSupportAiEnabled = data.thread.aiAgentEnabled !== false;
+      const idx = supportChatsCache.findIndex((c) => c.userUid === id);
+      if (idx >= 0) {
+        supportChatsCache[idx] = { ...supportChatsCache[idx], ...data.thread };
+      }
+      updateSupportThreadControls();
+      renderSupportChatList();
+    }
     renderAdminSupportMessages();
     await api(`/api/admin/support/chats/${encodeURIComponent(id)}/read`, {
       method: "POST",
@@ -4470,6 +4526,59 @@ async function openSupportThread(uid) {
       /* ignore */
     }
   }, 2500);
+}
+
+async function toggleSupportThreadAi(enabled) {
+  if (!activeSupportUid || !supportAiAgentEnabled || supportAiToggleBusy) return;
+  supportAiToggleBusy = true;
+  updateSupportThreadControls();
+  setAdminSupportStatus(enabled ? "Enabling AI auto-reply…" : "Disabling AI auto-reply…");
+  try {
+    const data = await api(
+      `/api/admin/support/chats/${encodeURIComponent(activeSupportUid)}/ai`,
+      { method: "POST", body: JSON.stringify({ enabled: Boolean(enabled) }) }
+    );
+    activeSupportAiEnabled = data.thread?.aiAgentEnabled !== false;
+    const idx = supportChatsCache.findIndex((c) => c.userUid === activeSupportUid);
+    if (idx >= 0 && data.thread) {
+      supportChatsCache[idx] = { ...supportChatsCache[idx], ...data.thread };
+    }
+    renderSupportChatList();
+    setAdminSupportStatus(activeSupportAiEnabled ? "AI auto-reply on for this chat" : "AI auto-reply off for this chat");
+  } catch (e) {
+    syncActiveSupportAiFromCache();
+    setAdminSupportStatus(e instanceof Error ? e.message : String(e));
+  } finally {
+    supportAiToggleBusy = false;
+    updateSupportThreadControls();
+  }
+}
+
+async function suggestAdminSupportReply() {
+  if (!activeSupportUid || !supportAiAgentEnabled || adminSupportSending) return;
+  const input = document.getElementById("admin-support-input");
+  const suggestBtn = document.getElementById("btn-admin-support-suggest");
+  if (suggestBtn) suggestBtn.disabled = true;
+  setAdminSupportStatus("Generating AI suggestion…");
+  try {
+    const data = await api(
+      `/api/admin/support/chats/${encodeURIComponent(activeSupportUid)}/suggest-reply`,
+      { method: "POST", body: "{}" }
+    );
+    const suggestion = String(data.suggestion || "").trim();
+    if (!suggestion) throw new Error("Empty suggestion");
+    if (input) {
+      input.value = suggestion;
+      input.focus();
+      input.setSelectionRange(suggestion.length, suggestion.length);
+    }
+    setAdminSupportStatus("Suggestion ready — edit and press Send");
+  } catch (e) {
+    setAdminSupportStatus(e instanceof Error ? e.message : String(e));
+  } finally {
+    if (suggestBtn) suggestBtn.disabled = false;
+    updateSupportThreadControls();
+  }
 }
 
 function clearAdminSupportAttach() {
@@ -4659,6 +4768,8 @@ function setLoggedOut() {
   activeSupportUid = "";
   supportThreadMessages = [];
   supportChatsCache = [];
+  activeSupportAiEnabled = true;
+  updateSupportThreadControls();
   exploreCtx = null;
   openUserUid = "";
   setAdminLoading(false);
@@ -4751,6 +4862,12 @@ async function main() {
   document.getElementById("btn-support-refresh")?.addEventListener("click", () => loadSupportInbox());
   document.getElementById("support-search")?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") void loadSupportInbox();
+  });
+  document.getElementById("support-ai-toggle")?.addEventListener("change", (ev) => {
+    void toggleSupportThreadAi(Boolean(ev.target?.checked));
+  });
+  document.getElementById("btn-admin-support-suggest")?.addEventListener("click", () => {
+    void suggestAdminSupportReply();
   });
   document.getElementById("btn-admin-support-attach")?.addEventListener("click", () => {
     document.getElementById("admin-support-file")?.click();

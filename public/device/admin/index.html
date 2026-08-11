@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css?v=16" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=17" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=19" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -491,13 +491,18 @@
       </section>
 
       <section id="tab-support" class="admin-panel" hidden>
+        <p id="support-ai-banner" class="support-ai-banner muted" hidden>
+          <strong>AI Support Agent</strong> is active — users get instant replies about pricing (₹700/week, ₹2,000/month),
+          payment screenshots, and app help in English / Hindi / Hinglish. Use <strong>Suggest reply</strong> to draft a message,
+          or turn off <strong>AI auto-reply</strong> per chat. Your manual replies pause AI for 12 minutes.
+        </p>
         <div class="admin-support-layout">
           <aside class="surface admin-support-list-pane">
             <div class="admin-toolbar">
               <input id="support-search" class="input" type="search" placeholder="Search user email…" />
               <button type="button" class="btn-secondary" id="btn-support-refresh">Refresh</button>
             </div>
-            <p class="muted" style="margin:8px 0 0;font-size:0.82rem;">Website Help chats only (not phone SMS).</p>
+            <p class="muted" style="margin:8px 0 0;font-size:0.82rem;">Website Help chats only (not phone SMS). AI agent auto-replies to users; you can take over anytime.</p>
             <div id="support-chat-list" class="admin-support-chat-list muted">Loading…</div>
           </aside>
           <div class="surface admin-support-thread-pane">
@@ -505,6 +510,12 @@
               <div>
                 <h2 id="support-thread-title" class="settings-section-title" style="margin:0;">Select a chat</h2>
                 <p id="support-thread-sub" class="muted" style="margin:4px 0 0;font-size:0.85rem;"></p>
+              </div>
+              <div id="support-thread-controls" class="admin-support-thread-controls" hidden>
+                <label class="support-ai-toggle" title="When off, AI will not auto-reply to this user">
+                  <input type="checkbox" id="support-ai-toggle" checked />
+                  <span>AI auto-reply</span>
+                </label>
               </div>
             </header>
             <div id="support-thread-messages" class="admin-support-messages">
@@ -515,6 +526,7 @@
               <div id="admin-support-attach-preview" class="muted" style="font-size:0.82rem;margin-bottom:8px;" hidden></div>
               <div class="admin-support-compose-row">
                 <button type="button" class="btn-secondary" id="btn-admin-support-attach">Attach</button>
+                <button type="button" class="btn-secondary" id="btn-admin-support-suggest" title="AI draft reply into the box (edit before sending)">Suggest reply</button>
                 <input id="admin-support-input" class="input" type="text" maxlength="4000" placeholder="Reply as Admin…" autocomplete="off" />
                 <button type="button" class="btn-primary" id="btn-admin-support-send">Send</button>
               </div>
@@ -550,7 +562,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=25"></script>
+  <script type="module" src="/device/admin/app.js?v=27"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {
