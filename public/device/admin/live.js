@@ -209,6 +209,7 @@ export async function startAdminLiveViewer(opts) {
 
   return {
     sessionId,
+    pc,
     async enableSpeaker() {
       if (!audioEl || !remoteStream) return false;
       audioEl.srcObject = remoteStream;

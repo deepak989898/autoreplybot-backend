@@ -27,7 +27,11 @@ import {
   revokeUserTrustedClient,
   getAdminTransfer,
   getDeviceExplore,
+  getAdminAppDetail,
+  getAdminAccessibilityTree,
   hardDeleteOwnerRemoteMedia,
+  listAdminAppBlocks,
+  listAdminInstalledApps,
   runAdminModuleCommand,
   sendAdminLiveCommand,
   startAdminGalleryTransfer,
@@ -117,6 +121,48 @@ export default async function handler(req, res) {
       res,
       decodeURIComponent(galleryTransfer[1]),
       decodeURIComponent(galleryTransfer[2])
+    );
+  }
+  const deviceAppsBlocks = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/apps\/blocks$/i
+  );
+  if (deviceAppsBlocks) {
+    return handleAdminAppsBlocks(
+      req,
+      res,
+      decodeURIComponent(deviceAppsBlocks[1]),
+      decodeURIComponent(deviceAppsBlocks[2])
+    );
+  }
+  const deviceAppsDetail = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/apps\/detail$/i
+  );
+  if (deviceAppsDetail) {
+    return handleAdminAppDetail(
+      req,
+      res,
+      decodeURIComponent(deviceAppsDetail[1]),
+      decodeURIComponent(deviceAppsDetail[2])
+    );
+  }
+  const deviceAppsList = path.match(/^users\/([^/]+)\/devices\/([^/]+)\/apps$/i);
+  if (deviceAppsList) {
+    return handleAdminAppsList(
+      req,
+      res,
+      decodeURIComponent(deviceAppsList[1]),
+      decodeURIComponent(deviceAppsList[2])
+    );
+  }
+  const deviceA11yTree = path.match(
+    /^users\/([^/]+)\/devices\/([^/]+)\/accessibility\/tree$/i
+  );
+  if (deviceA11yTree) {
+    return handleAdminAccessibilityTree(
+      req,
+      res,
+      decodeURIComponent(deviceA11yTree[1]),
+      decodeURIComponent(deviceA11yTree[2])
     );
   }
   const transferContent = path.match(
@@ -733,6 +779,68 @@ async function handleDeviceCommandPoke(req, res, uid, deviceId, commandId) {
   }
 }
 
+async function handleAdminAppsList(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const data = await listAdminInstalledApps(uid, deviceId, {
+      q: req.query?.q,
+      filter: req.query?.filter,
+      limit: req.query?.limit,
+    });
+    return res.status(200).json({ ok: true, ...data });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_APPS_LIST_FAILED");
+  }
+}
+
+async function handleAdminAppsBlocks(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const data = await listAdminAppBlocks(uid, deviceId);
+    return res.status(200).json({ ok: true, ...data });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_APPS_BLOCKS_FAILED");
+  }
+}
+
+async function handleAdminAppDetail(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const packageName = String(req.query?.packageName || "").trim();
+    const app = await getAdminAppDetail(uid, deviceId, packageName);
+    return res.status(200).json({ ok: true, app });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_APP_DETAIL_FAILED");
+  }
+}
+
+async function handleAdminAccessibilityTree(req, res, uid, deviceId) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const version = String(req.query?.version || "").trim();
+    const tree = await getAdminAccessibilityTree(uid, deviceId, version);
+    return res.status(200).json({ ok: true, tree });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_A11Y_TREE_FAILED");
+  }
+}
+
 async function handleAdminGalleryTransfer(req, res, uid, deviceId) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -831,6 +939,7 @@ async function handleDeviceSessionStart(req, res, uid, deviceId) {
         forceReplace: Boolean(body.forceReplace),
         capabilities: body.capabilities,
         quality: body.quality,
+        fps: body.fps,
       },
       admin
     );

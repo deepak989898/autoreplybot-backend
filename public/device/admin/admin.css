@@ -653,3 +653,50 @@
     max-height: 280px;
   }
 }
+
+.admin-badge.silent {
+  background: #ede9fe;
+  color: #5b21b6;
+  border: 1px solid #c4b5fd;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-silent-recordings {
+  background: linear-gradient(180deg, #faf5ff 0%, #fff 40%);
+}
+
+.silent-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.silent-session-group {
+  padding: 12px;
+  border-left: 4px solid #8b5cf6;
+}
+
+.silent-session-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.silent-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.silent-segment-row {
+  padding: 10px;
+  border: 1px solid #e9d5ff;
+  border-radius: 10px;
+  background: #fff;
+}
