@@ -477,7 +477,7 @@ function renderUserDetailBody(uid, data) {
       <h2 class="settings-section-title" style="margin-top:0;">Website features access</h2>
       <p class="muted" style="margin-top:0;">
         Only checked features appear for this user on the normal website. Set how many days access lasts, then Save.
-        New users start with everything off. After the time ends, features lock until you grant again.
+        New users get all features for <strong>1 day</strong> automatically. After that, features lock until you grant again.
       </p>
       <div class="admin-features-toolbar">
         <label class="admin-feature-check"><input type="checkbox" id="feat-select-all" /> <strong>Select all</strong></label>

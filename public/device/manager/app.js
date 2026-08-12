@@ -233,7 +233,7 @@ function renderUserFeatures(uid, u) {
       <h2 class="settings-section-title" style="margin-top:0;">Website features access</h2>
       <p class="muted" style="margin-top:0;">
         Check features to grant access on the user website. Set duration in days, then Save.
-        Uncheck all and Save to deny access.
+        New accounts get all features for <strong>1 day</strong> automatically, then lock until renewed.
       </p>
       <div class="admin-features-toolbar">
         <label class="admin-feature-check"><input type="checkbox" id="feat-select-all" /> <strong>Select all</strong></label>
