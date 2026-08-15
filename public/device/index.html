@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=17" />
+  <link rel="stylesheet" href="/device/styles.css?v=18" />
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -198,6 +198,7 @@
             <div class="device-picker-row">
               <select id="workspace-device-select" class="input device-picker-select" aria-label="Select device"></select>
               <button id="btn-add-device" class="btn-primary" type="button">Connect new device</button>
+              <button id="btn-remove-device" class="btn-danger-soft" type="button" disabled title="Remove selected phone from your account">Remove device</button>
             </div>
             <p id="workspace-device-hint" class="muted device-picker-hint">Loading devices…</p>
           </div>
@@ -797,6 +798,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=37"></script>
+  <script type="module" src="/device/app.js?v=38"></script>
 </body>
 </html>

@@ -1819,8 +1819,14 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
 }
 
 #btn-add-device.btn-primary,
+#btn-remove-device.btn-danger-soft,
 #btn-refresh.btn-secondary {
   border-radius: 11px;
+}
+
+#btn-remove-device.btn-danger-soft {
+  flex-shrink: 0;
+  min-height: 44px;
 }
 
 #btn-add-device.btn-primary {

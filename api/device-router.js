@@ -95,6 +95,10 @@ export default async function handler(req, res) {
 
   if (path === "account-status") return handleAccountStatus(req, res);
   if (path === "list") return handleList(req, res);
+  const deviceRemove = path.match(/^devices\/([^/]+)\/remove$/i);
+  if (deviceRemove) {
+    return handleRemoveDevice(req, res, decodeURIComponent(deviceRemove[1]));
+  }
   if (path === "sessions") return handleSessions(req, res);
   if (path === "media") return handleMediaList(req, res);
   if (path === "media/delete") return handleMediaSoftDelete(req, res);
@@ -302,6 +306,56 @@ async function handleList(req, res) {
     return res.status(200).json({ ok: true, devices });
   } catch (e) {
     return clientError(res, e, "DEVICE_LIST_FAILED");
+  }
+}
+
+async function handleRemoveDevice(req, res, deviceId) {
+  if (req.method !== "POST" && req.method !== "DELETE") {
+    res.setHeader("Allow", "POST, DELETE");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const id = String(deviceId || "").trim();
+    if (!id || !ID_RE.test(id)) {
+      return res.status(400).json({ error: "Invalid device id", code: "BAD_REQUEST" });
+    }
+    const ref = db().collection(R.COL_USERS).doc(uid).collection(R.COL_DEVICES).doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Device not found", code: "DEVICE_NOT_FOUND" });
+    }
+    const data = snap.data() || {};
+    if (data.revoked === true) {
+      return res.status(200).json({ ok: true, deviceId: id, removed: true, alreadyRemoved: true });
+    }
+    const now = Date.now();
+    const endedSessions = await endActiveSessionsForDevice(uid, id, "device_removed_by_user");
+    await ref.set(
+      {
+        revoked: true,
+        revokedAt: now,
+        revokedBy: "website_user",
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+    await writeAuditLog(uid, {
+      action: "DEVICE_REMOVED",
+      deviceId: id,
+      deviceName: String(data.deviceName || ""),
+      endedSessions,
+      at: now,
+    });
+    void refreshUserDeviceStats(uid);
+    return res.status(200).json({
+      ok: true,
+      deviceId: id,
+      removed: true,
+      endedSessions,
+    });
+  } catch (e) {
+    return clientError(res, e, "DEVICE_REMOVE_FAILED");
   }
 }
 

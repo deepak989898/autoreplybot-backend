@@ -200,6 +200,16 @@ function syncHiddenDeviceSelects(deviceId) {
   }
 }
 
+function updateRemoveDeviceButton() {
+  const btn = document.getElementById("btn-remove-device");
+  if (!btn) return;
+  const hasDevice = Boolean(
+    selectedWorkspaceDeviceId &&
+      (cachedDevices || []).some((d) => d.deviceId === selectedWorkspaceDeviceId && !d.revoked)
+  );
+  btn.disabled = !hasDevice;
+}
+
 function fillWorkspaceDeviceSelect() {
   const select = document.getElementById("workspace-device-select");
   const hint = document.getElementById("workspace-device-hint");
@@ -217,6 +227,7 @@ function fillWorkspaceDeviceSelect() {
       hint.textContent = "Install the app on a phone, sign in with this account, enable Remote Control, then Refresh.";
     }
     syncHiddenDeviceSelects("");
+    updateRemoveDeviceButton();
     return;
   }
   for (const d of devices) {
@@ -235,6 +246,48 @@ function fillWorkspaceDeviceSelect() {
   const chosen = devices.find((d) => d.deviceId === pick);
   if (hint && chosen) {
     hint.textContent = `${chosen.manufacturer || ""} ${chosen.deviceModel || ""} · Android ${chosen.androidVersion || "?"} · battery ${chosen.batteryLevel ?? "—"}%`.trim();
+  }
+  updateRemoveDeviceButton();
+}
+
+async function removeSelectedWorkspaceDevice() {
+  const deviceId = String(selectedWorkspaceDeviceId || "").trim();
+  const device = (cachedDevices || []).find((d) => d.deviceId === deviceId && !d.revoked);
+  if (!deviceId || !device) return;
+
+  const label = device.deviceName || device.deviceModel || deviceId;
+  const onlineNote = device.online ? "\n\nThis phone is currently online." : "";
+  const ok = confirm(
+    `Remove "${label}" from your account?${onlineNote}\n\n` +
+      "The phone will disappear from this website. Any active live session on this phone will end.\n\n" +
+      "You can add it again later from the Android app (Remote Control ON + Refresh)."
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById("btn-remove-device");
+  const hint = document.getElementById("workspace-device-hint");
+  if (btn) btn.disabled = true;
+  if (hint) hint.textContent = "Removing device…";
+
+  try {
+    if (liveByDevice.has(deviceId)) {
+      await endLiveSession(deviceId, "device_removed");
+    }
+    await api(`/api/device/devices/${encodeURIComponent(deviceId)}/remove`, {
+      method: "POST",
+      body: "{}",
+    });
+    selectedWorkspaceDeviceId = "";
+    await refreshDevices();
+    if (hint) hint.textContent = `"${label}" removed.`;
+    if (deviceList) {
+      deviceList.textContent = "Device removed. Select another phone or connect a new one.";
+      deviceList.classList.add("muted");
+    }
+  } catch (e) {
+    if (hint) hint.textContent = e instanceof Error ? e.message : String(e);
+    alert(e instanceof Error ? e.message : String(e));
+    updateRemoveDeviceButton();
   }
 }
 
@@ -359,6 +412,7 @@ function onWorkspaceDeviceChanged() {
   if (hint && chosen) {
     hint.textContent = `${chosen.manufacturer || ""} ${chosen.deviceModel || ""} · Android ${chosen.androidVersion || "?"} · battery ${chosen.batteryLevel ?? "—"}%`.trim();
   }
+  updateRemoveDeviceButton();
   setPhoneTab(activePhoneTab);
 }
 
@@ -3530,6 +3584,9 @@ async function main() {
   document.getElementById("btn-add-device")?.addEventListener("click", () => {
     const help = document.getElementById("add-device-help");
     if (help) help.hidden = false;
+  });
+  document.getElementById("btn-remove-device")?.addEventListener("click", () => {
+    void removeSelectedWorkspaceDevice();
   });
   document.getElementById("btn-add-device-close")?.addEventListener("click", () => {
     const help = document.getElementById("add-device-help");
