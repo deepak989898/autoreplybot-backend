@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css?v=19" />
+  <link rel="stylesheet" href="/device/styles.css?v=20" />
   <style>
     /* Instant first paint before styles.css / app.js load */
     .boot-loading {
@@ -92,29 +92,7 @@
       <section class="login-panel">
         <div class="login-card">
           <h2>Welcome Back!</h2>
-          <p class="login-sub">Use <strong>one email and password</strong> for this website <em>and</em> the Android phone you want to control.</p>
-          <div class="login-howto" role="region" aria-label="How to sign in">
-            <details class="login-howto-block" open>
-              <summary>English — How to sign in</summary>
-              <ol>
-                <li><strong>This website</strong> — Register or Sign In with your email and password (or Google). This account is used to view and control the phone.</li>
-                <li><strong>The phone</strong> — Install AutoReplyBot on the Android device you want to control. Sign in with the <strong>same email and password</strong> (or the same Google account).</li>
-                <li>On the phone, open <strong>Remote Camera &amp; Voice</strong> and turn <strong>Remote Control ON</strong>.</li>
-                <li>Come back here, Sign In with that same account, then tap <strong>Refresh</strong>. Pair this browser once if asked.</li>
-              </ol>
-              <p class="login-howto-note">Different emails will not work — website and phone must be the same account.</p>
-            </details>
-            <details class="login-howto-block">
-              <summary>हिन्दी — साइन इन कैसे करें</summary>
-              <ol>
-                <li><strong>यह वेबसाइट</strong> — पहले यहीं Register / Sign In करें (ईमेल + पासवर्ड, या Google)। यही अकाउंट फोन कंट्रोल करने के लिए है।</li>
-                <li><strong>फोन</strong> — जिस Android फोन को कंट्रोल करना है, उस पर AutoReplyBot ऐप इंस्टॉल करें। ऐप में भी <strong>वही ईमेल और वही पासवर्ड</strong> (या वही Google अकाउंट) से साइन इन करें।</li>
-                <li>फोन पर <strong>Remote Camera &amp; Voice</strong> खोलें और <strong>Remote Control ON</strong> करें।</li>
-                <li>फिर इस वेबसाइट पर उसी अकाउंट से Sign In करें और <strong>Refresh</strong> दबाएँ। अगर पूछे तो ब्राउज़र एक बार Pair करें।</li>
-              </ol>
-              <p class="login-howto-note">अलग-अलग ईमेल से काम नहीं चलेगा — वेबसाइट और फोन दोनों पर एक ही अकाउंट होना ज़रूरी है।</p>
-            </details>
-          </div>
+          <p class="login-sub">Sign in with email and password — use the <strong>same account</strong> on the phone you want to control.</p>
           <div class="auth-form">
             <label>Email
               <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
@@ -124,22 +102,44 @@
             </label>
           </div>
           <button id="btn-login-email" class="btn-primary btn-block" type="button">Sign In</button>
-          <button id="btn-login" class="btn-google btn-block" type="button">Sign in with Google</button>
-          <div class="login-apk-download">
-            <a id="btn-download-apk-login" class="btn-secondary btn-block" href="#" role="button">Download Android App</a>
-            <p id="apk-download-status-login" class="muted login-apk-status" aria-live="polite"></p>
-          </div>
-          <button id="btn-install-pwa" class="btn-secondary btn-block btn-install-pwa" type="button" hidden>
-            Install app on this device
-          </button>
-          <p id="pwa-ios-hint" class="pwa-ios-hint" hidden>
-            On iPhone/iPad: tap Share → <strong>Add to Home Screen</strong> to install.
-          </p>
           <p class="login-register">
             New here?
             <button id="btn-register-email" class="link-btn" type="button">Register</button>
           </p>
+          <div class="login-apk-download">
+            <a id="btn-download-apk-login" class="btn-download-apk btn-block" href="#" role="button">Download Android App</a>
+            <p class="login-apk-caption">Install this APK on the phone you want to control</p>
+            <p id="apk-download-status-login" class="muted login-apk-status" aria-live="polite"></p>
+          </div>
+          <button id="btn-install-pwa" class="btn-secondary btn-block btn-install-pwa" type="button" hidden>
+            Install control app in this device
+          </button>
+          <p id="pwa-ios-hint" class="pwa-ios-hint" hidden>
+            On iPhone/iPad: tap Share → <strong>Add to Home Screen</strong> to install.
+          </p>
           <p id="auth-status" class="auth-status">Not logged in</p>
+          <div class="login-howto" role="region" aria-label="How to sign in">
+            <details class="login-howto-block" open>
+              <summary>English — How to sign in</summary>
+              <ol>
+                <li><strong>This website</strong> — Register or Sign In with your email and password. This account is used to view and control the phone.</li>
+                <li><strong>The phone</strong> — Tap <strong>Download Android App</strong>, install AutoReplyBot on the phone you want to control, then Sign In with the <strong>same email and password</strong>.</li>
+                <li>On the phone, open <strong>Remote Camera &amp; Voice</strong> and turn <strong>Remote Control ON</strong>.</li>
+                <li>Come back here, Sign In with that same account, then tap <strong>Refresh</strong>. Pair this browser once if asked.</li>
+              </ol>
+              <p class="login-howto-note">Different emails will not work — website and phone must be the same account.</p>
+            </details>
+            <details class="login-howto-block">
+              <summary>हिन्दी — साइन इन कैसे करें</summary>
+              <ol>
+                <li><strong>यह वेबसाइट</strong> — ऊपर ईमेल और पासवर्ड से Register / Sign In करें। यही अकाउंट फोन कंट्रोल करने के लिए है।</li>
+                <li><strong>फोन</strong> — <strong>Download Android App</strong> दबाकर APK इंस्टॉल करें। ऐप में भी <strong>वही ईमेल और वही पासवर्ड</strong> से साइन इन करें।</li>
+                <li>फोन पर <strong>Remote Camera &amp; Voice</strong> खोलें और <strong>Remote Control ON</strong> करें।</li>
+                <li>फिर इस वेबसाइट पर उसी अकाउंट से Sign In करें और <strong>Refresh</strong> दबाएँ। अगर पूछे तो ब्राउज़र एक बार Pair करें।</li>
+              </ol>
+              <p class="login-howto-note">अलग-अलग ईमेल से काम नहीं चलेगा — वेबसाइट और फोन दोनों पर एक ही अकाउंट होना ज़रूरी है।</p>
+            </details>
+          </div>
         </div>
       </section>
     </div>
@@ -820,6 +820,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=38"></script>
+  <script type="module" src="/device/app.js?v=39"></script>
 </body>
 </html>

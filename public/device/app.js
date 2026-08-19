@@ -3535,7 +3535,7 @@ async function main() {
       }
     });
   }
-  btnLogin.addEventListener("click", async () => {
+  btnLogin?.addEventListener("click", async () => {
     setAuthBusy(true, "Opening Google...");
     if (btnLogin) {
       btnLogin.dataset.label = btnLogin.dataset.label || "Sign in with Google";
