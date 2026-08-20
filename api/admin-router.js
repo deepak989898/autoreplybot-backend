@@ -50,6 +50,7 @@ import {
 import { db } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
+import { isDeviceRecentlyOnline, toEpochMs } from "../lib/device-readiness.js";
 import {
   createUploadSlot,
   ensureThread,
@@ -430,9 +431,8 @@ async function handleUsers(req, res) {
 
 function sanitizeDeviceAdmin(id, data) {
   if (!data || typeof data !== "object") return null;
-  const lastSeenAt = Number(data.lastSeenAt || data.updatedAt || data.createdAt || 0);
-  const online =
-    Boolean(data.online) || (lastSeenAt > 0 && Date.now() - lastSeenAt < 5 * 60 * 1000);
+  const lastSeenAt = toEpochMs(data.lastSeenAt || data.updatedAt || data.createdAt || 0);
+  const online = isDeviceRecentlyOnline(data);
   return {
     deviceId: data.deviceId || id,
     deviceName: String(data.deviceName || data.name || ""),

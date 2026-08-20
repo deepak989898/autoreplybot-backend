@@ -24,6 +24,7 @@ import {
   isDeviceCameraReady,
   isDeviceMicReady,
   isDeviceRecentlyOnline,
+  toEpochMs,
   isRemoteControlReady,
 } from "../lib/device-readiness.js";
 import * as R from "../lib/remote-constants.js";
@@ -174,7 +175,7 @@ function sanitizeDevice(id, data) {
     androidVersion: String(data.androidVersion || ""),
     appVersion: String(data.appVersion || ""),
     createdAt: Number(data.createdAt || 0),
-    lastSeenAt: Number(data.lastSeenAt || 0),
+    lastSeenAt: toEpochMs(data.lastSeenAt || data.updatedAt || 0),
     online: isDeviceRecentlyOnline(data),
     batteryLevel: Number(data.batteryLevel || 0),
     isCharging: Boolean(data.isCharging),

@@ -98,8 +98,6 @@ let messagesLiveTimer = null;
 const PANEL_TITLES = {
   phone: "My Phone",
   pair: "Pair Browser",
-  multiview: "Multi Device View",
-  settings: "Settings",
   sessions: "Sessions",
   media: "Media",
 };
@@ -139,7 +137,7 @@ function showPanel(panelId) {
   if (id === "home" || id === "devices" || id === "location" || id === "info"
       || id === "gallery" || id === "files" || id === "notifications" || id === "messages"
       || id === "call-logs" || id === "contacts"
-      || id === "transfers") {
+      || id === "transfers" || id === "multiview" || id === "settings") {
     id = "phone";
   }
   document.querySelectorAll(".panel").forEach((el) => {
@@ -159,22 +157,16 @@ function showPanel(panelId) {
   }
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
-  if (id === "multiview") refreshMultiViewPanel().catch(() => {});
-  if (id === "settings") {
-    prepareApkDownloadLink().catch(() => {});
-    refreshAdminSettingsLink().catch(() => {});
-    refreshPasswordChangeUi(auth?.currentUser || null);
-  }
 }
 
 async function refreshAdminSettingsLink() {
-  const card = document.getElementById("settings-admin-card");
-  if (!card) return;
+  const link = document.getElementById("nav-admin-link");
+  if (!link) return;
   try {
     const data = await api("/api/admin/me");
-    card.hidden = !data?.isAdmin;
+    link.hidden = !data?.isAdmin;
   } catch {
-    card.hidden = true;
+    link.hidden = true;
   }
 }
 
@@ -637,6 +629,7 @@ function setLoggedInUi(user) {
   startSupportUnreadPolling();
   void refreshUserEntitlements();
   refreshPasswordChangeUi(user);
+  refreshAdminSettingsLink().catch(() => {});
 }
 
 function setLoggedOutUi() {
@@ -659,6 +652,8 @@ function setLoggedOutUi() {
   }
   if (headerUser) headerUser.textContent = "";
   if (authStatus) authStatus.textContent = "Not logged in";
+  const adminLink = document.getElementById("nav-admin-link");
+  if (adminLink) adminLink.hidden = true;
   showPanel("phone");
 }
 
@@ -833,6 +828,8 @@ function resetLiveControlState(deviceId) {
  * @property {(() => void) | null} unsubSignals
  * @property {(() => void) | null} unsubSession
  * @property {ReturnType<typeof setTimeout> | null} expiryTimer
+ * @property {ReturnType<typeof setTimeout> | null} [offerWaitTimer]
+ * @property {boolean} [iceRestarted]
  * @property {Set<string>} seenSignals
  * @property {boolean} remoteDescriptionSet
  * @property {RTCIceCandidateInit[]} pendingIce
@@ -912,10 +909,28 @@ async function forceLogoutBlocked(message) {
   }
 }
 
+function formatRelativeAge(ms) {
+  const delta = Date.now() - Number(ms);
+  if (!Number.isFinite(delta) || delta < 0) return "";
+  const sec = Math.round(delta / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 48) return `${hr} hr ago`;
+  const day = Math.round(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
+}
+
 function formatSeen(ms) {
   if (!ms) return "never";
-  const d = new Date(ms);
-  return Number.isNaN(d.getTime()) ? "unknown" : d.toLocaleString();
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return "unknown";
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  const rel = formatRelativeAge(t);
+  const abs = d.toLocaleString();
+  return rel ? `${rel} · ${abs}` : abs;
 }
 
 function escapeHtml(value) {
@@ -2179,22 +2194,31 @@ async function sendCommand(deviceId, action) {
   }
 }
 
+/** @type {Set<string>} */
+const connectInFlight = new Set();
+/** @type {Map<string, number>} */
+const autoRetryConnect = new Map();
+
+function liveHasMedia(live) {
+  const pc = live?.pc;
+  if (!pc) return false;
+  return pc.getReceivers().some((r) => r.track && r.track.readyState === "live");
+}
+
 /**
  * @param {string} deviceId
  * @param {string} clientId
  */
 async function startConnect(deviceId, clientId) {
   if (!firebaseUid || !db) return;
+  if (connectInFlight.has(deviceId)) return;
+  connectInFlight.add(deviceId);
+  try {
   if (liveByDevice.has(deviceId)) {
     // DOM may have been rebuilt after a tab switch — restore UI instead of failing.
     restoreActiveLiveSessionsUi();
     const existing = liveByDevice.get(deviceId);
-    const pcState = existing?.pc?.connectionState || "";
-    if (
-      existing?.pc &&
-      pcState !== "closed" &&
-      pcState !== "failed"
-    ) {
+    if (liveHasMedia(existing) && existing?.pc?.connectionState === "connected") {
       setDeviceError(deviceId, "");
       setConnectionLabel(
         deviceId,
@@ -2203,17 +2227,16 @@ async function startConnect(deviceId, clientId) {
       );
       return;
     }
-    setDeviceError(deviceId, "Already connecting or live for this device.");
-    return;
+    await endLiveSession(deviceId, "reconnect");
   }
   const device = deviceById.get(deviceId);
   if (device && device.online === false) {
     setDeviceError(
       deviceId,
-      "Device is offline. Open the app on the phone, turn Remote Control on, then Refresh."
+      "Last heartbeat is old. Connecting anyway — keep Remote Control on so the phone can start the camera."
     );
-    setConnectionLabel(deviceId, CONN.FAILED, "offline");
-    return;
+  } else {
+    setDeviceError(deviceId, "");
   }
   if (device && device.remoteControlEnabled === false) {
     setDeviceError(
@@ -2267,6 +2290,8 @@ async function startConnect(deviceId, clientId) {
       unsubSignals: null,
       unsubSession: null,
       expiryTimer: null,
+      offerWaitTimer: null,
+      iceRestarted: false,
       seenSignals: new Set(),
       remoteDescriptionSet: false,
       pendingIce: [],
@@ -2383,6 +2408,9 @@ async function startConnect(deviceId, clientId) {
     setConnectionLabel(deviceId, CONN.FAILED, "request");
     cleanupLive(deviceId, false);
   }
+  } finally {
+    connectInFlight.delete(deviceId);
+  }
 }
 
 /**
@@ -2408,6 +2436,7 @@ async function beginWebRtc(live) {
   pc.ontrack = (ev) => {
     const track = ev.track;
     if (!track) return;
+    autoRetryConnect.delete(deviceId);
     attachRemoteTrack(deviceId, track, ev.streams && ev.streams[0]);
     track.onunmute = () => {
       attachRemoteTrack(deviceId, track, ev.streams && ev.streams[0]);
@@ -2434,6 +2463,17 @@ async function beginWebRtc(live) {
   };
   pc.oniceconnectionstatechange = () => {
     if (pc.iceConnectionState === "failed") {
+      if (!live.iceRestarted && live.remoteDescriptionSet) {
+        live.iceRestarted = true;
+        try {
+          pc.restartIce();
+          setConnectionLabel(deviceId, CONN.CONNECTING, "ICE restart");
+        } catch (e) {
+          setDeviceError(deviceId, "ICE failed. Optional TURN may be required.");
+          setConnectionLabel(deviceId, CONN.FAILED, "ICE");
+        }
+        return;
+      }
       setDeviceError(deviceId, "ICE failed. Optional TURN may be required.");
       setConnectionLabel(deviceId, CONN.FAILED, "ICE");
     }
@@ -2453,6 +2493,28 @@ async function beginWebRtc(live) {
 
   setConnectUi(deviceId, { connecting: false, live: true });
   setConnectionLabel(deviceId, CONN.CONNECTING, "listening for phone offer");
+
+  if (live.offerWaitTimer) clearTimeout(live.offerWaitTimer);
+  live.offerWaitTimer = setTimeout(() => {
+    if (liveByDevice.get(deviceId) !== live) return;
+    if (live.remoteDescriptionSet) return;
+    const n = Number(autoRetryConnect.get(deviceId) || 0);
+    const cid = live.clientId;
+    if (n >= 2) {
+      setDeviceError(
+        deviceId,
+        "Phone did not start the camera in time. Keep Remote Control on, then Connect again."
+      );
+      setConnectionLabel(deviceId, CONN.FAILED, "no phone offer");
+      cleanupLive(deviceId, true);
+      autoRetryConnect.delete(deviceId);
+      return;
+    }
+    autoRetryConnect.set(deviceId, n + 1);
+    setConnectionLabel(deviceId, CONN.CONNECTING, "no offer yet — retrying");
+    cleanupLive(deviceId, true);
+    startConnect(deviceId, cid).catch(() => {});
+  }, 22000);
 
   const sessionRef = doc(db, "users", firebaseUid, "sessions", sessionId);
   live.unsubSession = onSnapshot(sessionRef, (snap) => {
@@ -2516,6 +2578,10 @@ async function applyDeviceSignal(live, data) {
       sdp,
     });
     live.remoteDescriptionSet = true;
+    if (live.offerWaitTimer) {
+      clearTimeout(live.offerWaitTimer);
+      live.offerWaitTimer = null;
+    }
     for (const c of live.pendingIce.splice(0)) {
       try {
         await pc.addIceCandidate(c);
@@ -2645,6 +2711,7 @@ function cleanupLive(deviceId, endOnServer) {
     return;
   }
   if (live.expiryTimer) clearTimeout(live.expiryTimer);
+  if (live.offerWaitTimer) clearTimeout(live.offerWaitTimer);
   if (live.unsubRequest) live.unsubRequest();
   if (live.unsubSignals) live.unsubSignals();
   if (live.unsubSession) live.unsubSession();
@@ -7407,6 +7474,24 @@ function alertAppControlError(e) {
   }
 }
 
+function formatUsageLastUsed(lastUsed, dateMs) {
+  const t = Number(lastUsed || 0);
+  if (!t) return "unknown";
+  const day = Number(dateMs || 0);
+  // Old sync stored INTERVAL_DAILY bucket start (local midnight) as lastUsed.
+  if (day > 0 && Math.abs(t - day) < 2000) return "unknown";
+  try {
+    return new Date(t).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "unknown";
+  }
+}
+
 function formatUsageDuration(ms) {
   const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
   const h = Math.floor(totalSec / 3600);
@@ -7479,7 +7564,7 @@ function renderAppUsageDayHtml(groups) {
               const name = escapeHtml(it.appName || it.packageName || "App");
               const pkg = escapeHtml(it.packageName || "");
               const dur = escapeHtml(formatUsageDuration(it.totalDurationMs));
-              const last = escapeHtml(formatNotifDate(it.lastUsed));
+              const last = escapeHtml(formatUsageLastUsed(it.lastUsed, it.dateMs));
               return `<article class="usage-app-row">
                 <strong class="usage-app-name">${name}</strong>
                 <span class="usage-app-duration">${dur}</span>

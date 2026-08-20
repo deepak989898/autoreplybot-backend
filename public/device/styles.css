@@ -709,6 +709,13 @@ a.btn-primary[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; pointe
   cursor: pointer;
 }
 
+a.btn-sidebar-secondary {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
 .settings-password-form {
   display: grid;
   gap: 12px;

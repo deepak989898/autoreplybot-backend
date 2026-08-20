@@ -3911,6 +3911,23 @@ function fmtTimeAmPm(ms) {
   }
 }
 
+function formatUsageLastUsed(lastUsed, dateMs) {
+  const t = Number(lastUsed || 0);
+  if (!t) return "unknown";
+  const day = Number(dateMs || 0);
+  if (day > 0 && Math.abs(t - day) < 2000) return "unknown";
+  try {
+    return new Date(t).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "unknown";
+  }
+}
+
 function formatUsageDuration(ms) {
   const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
   const h = Math.floor(totalSec / 3600);
@@ -4014,7 +4031,7 @@ function renderAppUsagePanel() {
               const name = escapeHtml(it.appName || it.packageName || "App");
               const pkg = escapeHtml(it.packageName || "");
               const dur = escapeHtml(formatUsageDuration(it.totalDurationMs));
-              const last = escapeHtml(fmtTimeAmPm(it.lastUsed));
+              const last = escapeHtml(formatUsageLastUsed(it.lastUsed, it.dateMs));
               return `<article class="usage-app-row">
                 <strong class="usage-app-name">${name}</strong>
                 <span class="usage-app-duration">${dur}</span>
