@@ -6574,7 +6574,7 @@ function setApkDownloadStatus(text) {
 function applyApkHrefToButtons(url, fileName) {
   for (const btn of apkDownloadButtons()) {
     btn.href = url;
-    btn.setAttribute("download", fileName || "AutoReplyBot.apk");
+    btn.setAttribute("download", fileName || "kalyanifarm.apk");
     btn.target = "_blank";
     btn.rel = "noopener noreferrer";
     btn.dataset.ready = "1";
@@ -6593,7 +6593,7 @@ async function fetchApkDownloadJson() {
 
 async function prepareApkDownloadLink() {
   if (apkDownloadUrlCache && Date.now() < apkDownloadUrlExpiresAt) {
-    applyApkHrefToButtons(apkDownloadUrlCache, "AutoReplyBot.apk");
+    applyApkHrefToButtons(apkDownloadUrlCache, "kalyanifarm.apk");
     return apkDownloadUrlCache;
   }
   const data = await fetchApkDownloadJson();
@@ -6601,7 +6601,7 @@ async function prepareApkDownloadLink() {
   if (!url) throw new Error("Download URL missing");
   apkDownloadUrlCache = url;
   apkDownloadUrlExpiresAt = Date.now() + 45 * 60 * 1000;
-  applyApkHrefToButtons(url, String(data.fileName || "AutoReplyBot.apk"));
+  applyApkHrefToButtons(url, String(data.fileName || "kalyanifarm.apk"));
   return url;
 }
 

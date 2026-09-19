@@ -1018,22 +1018,28 @@ async function requireAuthed(req) {
 }
 
 function apkObjectPath() {
-  return String(process.env.ANDROID_APK_STORAGE_PATH || "autoreplybot.apk").replace(
+  return String(process.env.ANDROID_APK_STORAGE_PATH || "kalyanifarm.apk").replace(
     /^\/+/,
     ""
   );
 }
 
 function apkFileName() {
-  return String(process.env.ANDROID_APK_FILE_NAME || "AutoReplyBot.apk").replace(
+  return String(process.env.ANDROID_APK_FILE_NAME || "kalyanifarm.apk").replace(
     /[^\w.\-() ]+/g,
     "_"
   );
 }
 
+const DEFAULT_APK_DOWNLOAD_URL =
+  "https://firebasestorage.googleapis.com/v0/b/auto-reply-bot-757dc.firebasestorage.app/o/kalyanifarm.apk?alt=media&token=82f922f9-b57d-4023-9cde-04de3c1e92a3";
+
 /** Build a browser download URL (signed preferred; Firebase token / env fallback). */
 async function resolveApkDownloadUrl(file, objectPath, fileName) {
-  const explicit = String(process.env.ANDROID_APK_DOWNLOAD_URL || "").trim();
+  let explicit = String(process.env.ANDROID_APK_DOWNLOAD_URL || "").trim();
+  if (!explicit || /autoreplybot\.apk/i.test(explicit)) {
+    explicit = DEFAULT_APK_DOWNLOAD_URL;
+  }
   if (explicit) {
     return { url: explicit, via: "env" };
   }
@@ -1090,7 +1096,7 @@ async function handleAppDownload(req, res) {
     const [exists] = await file.exists();
     if (!exists) {
       return res.status(404).json({
-        error: `APK not found in Storage at ${objectPath}. Upload autoreplybot.apk to the bucket root.`,
+        error: `APK not found in Storage at ${objectPath}. Upload kalyanifarm.apk to the bucket root.`,
         code: "APK_NOT_FOUND",
       });
     }
