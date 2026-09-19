@@ -802,8 +802,8 @@ function renderCameraPanel() {
             <option value="auto">Auto (720p)</option>
             <option value="1080">1080p</option>
             <option value="720">720p</option>
-            <option value="480">480p</option>
-            <option value="360" selected>360p</option>
+            <option value="480" selected>480p</option>
+            <option value="360">360p</option>
           </select>
         </label>
         <div class="connect-actions">

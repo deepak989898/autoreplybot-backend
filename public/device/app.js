@@ -1050,8 +1050,8 @@ function renderDevices(devices, clients) {
               <option value="auto">Auto (720p)</option>
               <option value="1080">1080p</option>
               <option value="720">720p</option>
-              <option value="480">480p</option>
-              <option value="360" selected>360p</option>
+              <option value="480" selected>480p</option>
+              <option value="360">360p</option>
             </select>
           </label>
           <div class="connect-actions">
@@ -2142,7 +2142,7 @@ function selectedQuality(deviceId) {
   const sel = deviceList.querySelector(
     `.quality-select[data-device-id="${CSS.escape(deviceId)}"]`
   );
-  return sel?.value || "360";
+  return sel?.value || "480";
 }
 
 async function loadIceServers() {
