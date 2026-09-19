@@ -1,0 +1,21 @@
+.manager-app .manager-brand,
+.manager-app .manager-hero h1 {
+  color: #0f766e;
+}
+
+.manager-login-split .manager-hero {
+  background: linear-gradient(145deg, #0f766e 0%, #134e4a 100%);
+}
+
+.manager-top {
+  border-bottom-color: #99f6e4;
+}
+
+.manager-app .btn-primary {
+  background: linear-gradient(180deg, #14b8a6 0%, #0d9488 100%);
+}
+
+.manager-app .admin-tab.active {
+  color: #0f766e;
+  border-bottom-color: #14b8a6;
+}
