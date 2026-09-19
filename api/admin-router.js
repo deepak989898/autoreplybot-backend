@@ -47,7 +47,7 @@ import {
   pokeAdminModuleCommand,
   runAdminScreenRecord,
 } from "../lib/admin-device-control.js";
-import { db } from "../lib/firebase.js";
+import { db, isFirebaseAdminCredentialError } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
 import { isDeviceRecentlyOnline, toEpochMs } from "../lib/device-readiness.js";
@@ -352,6 +352,14 @@ function adminError(res, e, fallback) {
   const msg = e instanceof Error ? e.message : String(e);
   const code = e?.code || fallback || "FAILED";
   let status = 400;
+  if (code === "ADMIN_FIREBASE_CREDENTIALS" || isFirebaseAdminCredentialError(e)) {
+    status = 503;
+    return res.status(status).json({
+      error:
+        "Admin server cannot talk to Firebase. In Vercel → Project → Settings → Environment Variables, set FIREBASE_SERVICE_ACCOUNT_JSON for Production to the full Firebase service account JSON, then Redeploy.",
+      code: "ADMIN_FIREBASE_CREDENTIALS",
+    });
+  }
   if (code === "AUTH_FAILED" || msg.includes("Authorization")) status = 401;
   else if (code === "ADMIN_FORBIDDEN") status = 403;
   else if (code === "NOT_FOUND") status = 404;

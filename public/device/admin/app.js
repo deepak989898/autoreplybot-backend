@@ -4844,8 +4844,7 @@ async function completeAdminLogin(user) {
   try {
     await enterAdmin(user);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    setAuthError(msg);
+    setAuthError(formatAdminLoginError(e));
     setAdminLoading(false);
     setLoginBusy(false);
     show(viewApp, false);
@@ -4887,9 +4886,26 @@ async function loginWithEmailPassword() {
     loginInProgress = false;
     setAdminLoading(false);
     setLoginBusy(false);
-    const code = e?.code ? ` (${e.code})` : "";
-    setAuthError((e instanceof Error ? e.message : String(e)) + code);
+    setAuthError(formatAdminLoginError(e));
   }
+}
+
+function formatAdminLoginError(e) {
+  const raw = e instanceof Error ? e.message : String(e);
+  const code = e?.code ? String(e.code) : "";
+  if (code === "ADMIN_FIREBASE_CREDENTIALS" || /UNAUTHENTICATED|service account/i.test(raw)) {
+    return "Your password was accepted, but the admin server could not verify it with Firebase. Set FIREBASE_SERVICE_ACCOUNT_JSON on Vercel (Production) and redeploy.";
+  }
+  if (code.startsWith("auth/")) {
+    if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+      return "Wrong email or password.";
+    }
+    if (code === "auth/unauthorized-domain") {
+      return "Add kalyanifarm.com to Firebase Authentication → Settings → Authorized domains.";
+    }
+    return `${raw} (${code})`;
+  }
+  return code ? `${raw} (${code})` : raw;
 }
 
 async function main() {
