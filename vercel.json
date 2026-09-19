@@ -27,6 +27,13 @@
       ]
     },
     {
+      "source": "/google0335cc81e40a6719.html",
+      "headers": [
+        { "key": "Content-Type", "value": "text/html; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
       "source": "/device/manifest.webmanifest",
       "headers": [
         { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
