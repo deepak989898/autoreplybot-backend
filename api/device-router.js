@@ -5,6 +5,7 @@ import {
   refreshUserDeviceStats,
   requireAuthedUser,
   touchPlatformUserFromAuth,
+  upsertPlatformUser,
 } from "../lib/platform-admin.js";
 import { buildIceServers } from "../lib/ice-servers.js";
 import {
@@ -95,6 +96,7 @@ export default async function handler(req, res) {
   }
 
   if (path === "account-status") return handleAccountStatus(req, res);
+  if (path === "account-profile") return handleAccountProfile(req, res);
   if (path === "list") return handleList(req, res);
   const deviceRemove = path.match(/^devices\/([^/]+)\/remove$/i);
   if (deviceRemove) {
@@ -280,6 +282,39 @@ async function handleAccountStatus(req, res) {
     });
   } catch (e) {
     return clientError(res, e, "ACCOUNT_STATUS_FAILED");
+  }
+}
+
+async function handleAccountProfile(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const username = String(body.username || "").trim().slice(0, 80);
+    const phone = String(body.phone || "").replace(/[^\d+]/g, "").slice(0, 20);
+    const referralCode = String(body.referralCode || "").trim().slice(0, 40);
+    if (username.length < 2) {
+      return res.status(400).json({ error: "User name is required", code: "BAD_USERNAME" });
+    }
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 8 || digits.length > 15) {
+      return res.status(400).json({ error: "Valid mobile number is required", code: "BAD_PHONE" });
+    }
+    await upsertPlatformUser({
+      uid,
+      email: req._platformEmail || "",
+      displayName: username,
+      username,
+      phone,
+      referralCode,
+      lastSeenAt: Date.now(),
+    });
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    return clientError(res, e, "ACCOUNT_PROFILE_FAILED");
   }
 }
 

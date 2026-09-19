@@ -234,7 +234,7 @@ function renderUsers(users) {
       return `<tr>
         <td data-label="Email">
           <div>${email}</div>
-          <div class="muted" style="font-size:0.8rem;">${escapeHtml(u.displayName || "")}</div>
+          <div class="muted" style="font-size:0.8rem;">${escapeHtml(u.username || u.displayName || "")}${u.phone ? ` · ${escapeHtml(u.phone)}` : ""}</div>
         </td>
         <td data-label="Devices">${Number(u.deviceCount || 0)}</td>
         <td data-label="Online">${Number(u.onlineDeviceCount || 0)}</td>
@@ -801,9 +801,9 @@ function renderCameraPanel() {
           <select id="admin-quality" class="quality-select input">
             <option value="auto">Auto (720p)</option>
             <option value="1080">1080p</option>
-            <option value="720" selected>720p</option>
+            <option value="720">720p</option>
             <option value="480">480p</option>
-            <option value="360">360p</option>
+            <option value="360" selected>360p</option>
           </select>
         </label>
         <div class="connect-actions">
