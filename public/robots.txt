@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /device/
+Disallow: /dashboard/
+Disallow: /api/
+
+Sitemap: https://kalyanifarm.com/sitemap.xml

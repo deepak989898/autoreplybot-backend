@@ -3,96 +3,194 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AutoReplyBot Web</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <title>Kalyani Loan | Instant Personal Loans Online</title>
+  <meta name="description" content="Kalyani Loan helps you get quick, safe, paperless personal loans on the Kalyani Loan app. Apply anytime, complete KYC, and get funds transferred to your bank account." />
+  <link rel="canonical" href="https://kalyanifarm.com/" />
+  <link rel="icon" href="/images/logo.png" type="image/png" />
+  <meta property="og:title" content="Kalyani Loan | Instant Personal Loans Online" />
+  <meta property="og:description" content="Quick. Safe. Simple. Apply for a personal loan on the Kalyani Loan app and get support when you need it." />
+  <meta property="og:url" content="https://kalyanifarm.com/" />
+  <meta property="og:image" content="https://kalyanifarm.com/images/logo.png" />
+  <meta name="theme-color" content="#0b2d6b" />
+  <link rel="stylesheet" href="/landing.css" />
 </head>
 <body>
-  <main class="container" id="fb-dashboard">
-    <h1 id="fb-title">AutoReplyBot Dashboard</h1>
-    <p class="muted" id="fb-nav-line">
-      Firebase login + Facebook/Instagram connect + schedule + post now ·
-      <a href="/device/">Remote devices</a>
-    </p>
-    <p class="muted embed-only" id="fb-embed-hint" hidden>
-      Embedded in Remote admin — use the left sidebar to open My Phones, Media Files, and other pages.
-    </p>
-    <section class="card">
-      <h2>Account</h2>
-      <p class="muted">Use the same email and password as the Android app (Firebase Email/Password).</p>
-      <div class="auth-form">
-        <label>Email
-          <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
-        </label>
-        <label>Password
-          <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password" />
-        </label>
-      </div>
-      <div class="row">
-        <button id="btn-login-email" type="button">Sign in</button>
-        <button id="btn-register-email" class="secondary" type="button">Register</button>
-        <button id="btn-logout" class="secondary" type="button">Logout</button>
-      </div>
-      <div class="row">
-        <button id="btn-login" class="secondary" type="button">Login with Google</button>
-      </div>
-      <p id="auth-status" class="muted">Not logged in</p>
-    </section>
+  <header class="site-header">
+    <div class="wrap nav">
+      <a class="brand" href="/"><img src="/images/logo.png" alt="" /> Kalyani Loan</a>
+      <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
+      <ul class="nav-links">
+        <li><a class="active" href="/">Home</a></li>
+        <li><a href="/about.html">About Us</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how">How It Works</a></li>
+        <li><a href="#faqs">FAQs</a></li>
+      </ul>
+      <a class="btn btn-primary" href="#download">Download App</a>
+    </div>
+  </header>
 
-    <section class="card">
-      <h2>Connect Meta</h2>
-      <p class="muted meta-hint">
-        <strong>Facebook only:</strong> use the blue button — you only need Page permissions to post to your Facebook Page.<br />
-        <strong>Instagram too:</strong> link the Instagram account to your Page in Meta Business first, then either stay on Pages-only (works if Meta returns your IG on the Page) or use the gray button to add Instagram API permissions if Meta asks for them.
-      </p>
-      <div class="row">
-        <button id="btn-fb-login">Connect Facebook (Pages)</button>
-        <button id="btn-fb-ig-login" class="secondary">Link Instagram permissions</button>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Your Dreams | Our Support</p>
+        <h1>Get Instant Loans<br>with <span>Kalyani Loan</span></h1>
+        <p class="lead">Quick. Safe. Simple.</p>
+        <p>Kalyani Loan helps you get the financial support you need, when you need it. Apply anytime, anywhere and get approved in minutes on the Kalyani Loan app.</p>
+        <div class="pills">
+          <div class="pill"><div class="icon-circle ic-blue"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 10-14h-7l0-6z"/></svg></div>Fast Approval</div>
+          <div class="pill"><div class="icon-circle ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div>100% Safe &amp; Secure</div>
+          <div class="pill"><div class="icon-circle ic-orange"><svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></div>Paperless Process</div>
+          <div class="pill"><div class="icon-circle ic-teal"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9 11h4.5a2 2 0 010 4H9"/></svg></div>Flexible Repayment</div>
+        </div>
+        <div class="hero-actions" id="download">
+          <a class="btn btn-primary" href="#how">Download Kalyani Loan App →</a>
+          <a class="btn btn-dark" href="https://play.google.com/store" rel="noopener noreferrer">Get it on Google Play</a>
+          <a class="btn btn-dark" href="https://apps.apple.com/" rel="noopener noreferrer">Download on the App Store</a>
+        </div>
       </div>
-      <div class="row">
-        <button id="btn-load-pages" class="secondary">Load Pages</button>
+      <div class="hero-visual">
+        <div class="script-note">Your Loan<br>Partner<br>Always!</div>
+        <div class="phone" aria-hidden="true">
+          <div class="phone-screen">
+            <div class="phone-status"><span>9:41</span><span>●●●</span></div>
+            <div class="phone-logo"><img src="/images/logo.png" alt="" /> Kalyani Loan</div>
+            <div class="credit-card">
+              <small>Get Loan Up to</small>
+              <strong>₹ 2,00,000</strong>
+              <div class="meta">Low Interest | Flexible Tenure</div>
+              <button class="phone-btn" type="button">Apply Now →</button>
+            </div>
+            <div class="mini-grid">
+              <div class="mini-tile">⚡ Quick Approval<span>Minutes, not days</span></div>
+              <div class="mini-tile">🛡 Secure &amp; Safe<span>Encrypted data</span></div>
+              <div class="mini-tile">📄 Paperless<span>In-app KYC</span></div>
+              <div class="mini-tile">📅 Flexible EMI<span>Choose your plan</span></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="row">
-        <select id="page-select"></select>
-        <button id="btn-use-page">Use Selected Page</button>
+    </div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap two-col">
+      <div>
+        <h2>How It Works?</h2>
+        <p class="sub">Get your loan in just 4 simple steps</p>
+        <div class="steps">
+          <div class="step">
+            <div class="step-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+            <h3>1. Download App</h3>
+            <p>Install Kalyani Loan from Play Store or App Store</p>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <div class="step-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 14.5-4 16 0"/></svg></div>
+            <h3>2. Register</h3>
+            <p>Create your account in minutes</p>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <div class="step-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h10v18H7z"/><path d="M10 7h4M10 11h4"/></svg></div>
+            <h3>3. Complete KYC</h3>
+            <p>Upload required documents and verify your profile</p>
+          </div>
+          <span class="arrow">→</span>
+          <div class="step">
+            <div class="step-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h4.2a2 2 0 010 4H9"/></svg></div>
+            <h3>4. Get Loan</h3>
+            <p>Funds transferred directly to your bank account</p>
+          </div>
+        </div>
       </div>
-      <p id="meta-status" class="muted">No Facebook token yet</p>
-    </section>
-
-    <section class="card">
-      <h2>Auto Posting Settings</h2>
-      <div class="grid">
-        <label><input id="scheduleEnabled" type="checkbox" /> Schedule enabled</label>
-        <label><input id="facebookAutoPostEnabled" type="checkbox" checked /> Post to Facebook</label>
-        <label><input id="instagramAutoPostEnabled" type="checkbox" /> Post to Instagram</label>
-        <label>Hour (0-23) <input id="hour" type="number" min="0" max="23" value="21" /></label>
-        <label>Minute (0-59) <input id="minute" type="number" min="0" max="59" value="0" /></label>
-        <label>Timezone (IANA) <input id="scheduleTimezone" type="text" placeholder="Asia/Kolkata" /></label>
+      <div>
+        <h2>Why Choose Kalyani Loan?</h2>
+        <ul class="why">
+          <li><span class="check">✓</span> Instant cash for your needs</li>
+          <li><span class="check">✓</span> Low interest rates</li>
+          <li><span class="check">✓</span> Complete online process</li>
+          <li><span class="check">✓</span> No hidden charges</li>
+          <li><span class="check">✓</span> Trusted by 1M+ users</li>
+        </ul>
+        <p class="side-quote">Small Steps<br>for a Bigger<br>Tomorrow</p>
       </div>
+    </div>
+  </section>
 
-      <label>Topics (use --- between blocks)
-        <textarea id="topicBlocks" rows="5"></textarea>
-      </label>
-      <label>Brand / page name <input id="pageBrandName" type="text" /></label>
-      <label>Caption tone <input id="captionTone" type="text" /></label>
-      <label>Post requirements <textarea id="postRequirements" rows="3"></textarea></label>
-      <label>Image requirements <textarea id="imageGenerationRequirements" rows="3"></textarea></label>
-
-      <div class="row">
-        <button id="btn-save">Save Settings</button>
-        <button id="btn-load" class="secondary">Reload</button>
-        <button id="btn-post-now" class="warn">Post Now</button>
+  <section class="section features" id="features">
+    <div class="wrap">
+      <h2>Features built for real needs</h2>
+      <p class="sub">Everything you need to apply, track, and repay from the Kalyani Loan app.</p>
+      <div class="cards">
+        <article class="card">
+          <div class="icon-circle ic-blue"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 10-14h-7z"/></svg></div>
+          <h3>Quick approval</h3>
+          <p>Submit your application in the app and get a decision without long branch visits.</p>
+        </article>
+        <article class="card">
+          <div class="icon-circle ic-purple"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V7l8-4z"/></svg></div>
+          <h3>Secure KYC</h3>
+          <p>Complete Aadhaar, PAN, and selfie verification in a guided, paperless flow.</p>
+        </article>
+        <article class="card">
+          <div class="icon-circle ic-orange"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/></svg></div>
+          <h3>Flexible EMI</h3>
+          <p>Choose an amount and tenure that fits your budget, with transparent interest slabs.</p>
+        </article>
+        <article class="card">
+          <div class="icon-circle ic-teal"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M8 7V5h8v2"/></svg></div>
+          <h3>Easy repayment</h3>
+          <p>Pay EMIs from the app with bank transfer and keep your loan status updated.</p>
+        </article>
       </div>
-      <p id="schedule-status" class="muted"></p>
-    </section>
+    </div>
+  </section>
 
-    <section class="card">
-      <h2>API Check</h2>
-      <p><a href="/api/health" target="_blank" rel="noreferrer">/api/health</a></p>
-      <p class="muted">Deploy marker: web-dashboard-v2</p>
-    </section>
-  </main>
+  <section class="section faq" id="faqs">
+    <div class="wrap" style="max-width:860px">
+      <h2>FAQs</h2>
+      <p class="sub">Answers to common questions about the Kalyani Loan app.</p>
+      <details open>
+        <summary>Who can apply for a Kalyani Loan?</summary>
+        <p>Indian residents who can complete in-app registration and KYC may apply, subject to eligibility and verification.</p>
+      </details>
+      <details>
+        <summary>How much can I borrow?</summary>
+        <p>You can apply for a personal loan of up to ₹2,00,000 in the app, depending on your profile and review.</p>
+      </details>
+      <details>
+        <summary>How do interest rates work?</summary>
+        <p>Rates are shown in the app before you submit. Lower amounts may have a higher rate; larger approved amounts can qualify for a lower slab.</p>
+      </details>
+      <details>
+        <summary>How do I repay?</summary>
+        <p>Open the Kalyani Loan app, go to EMI / repayment, transfer the amount to the listed bank details, and submit your payment proof.</p>
+      </details>
+      <details>
+        <summary>Is my data safe?</summary>
+        <p>We use account login and encrypted connections. Read our <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms &amp; Conditions</a> for details.</p>
+      </details>
+    </div>
+  </section>
 
-  <!-- FB SDK is injected from app.js after /api/config so FB.init runs inside fbAsyncInit (Meta-recommended). -->
-  <script type="module" src="/app.js"></script>
+  <footer class="site-footer">
+    <div class="wrap trust">
+      <div class="trust-item">🛡 Your Data is Safe with Us</div>
+      <div class="trust-item">🏛 RBI Compliant (Partner NBFCs)</div>
+      <div class="trust-item">👤 Trusted by 1M+ Users</div>
+      <a class="footer-brand" href="/"><img src="/images/logo.png" alt="" /> Kalyani Loan</a>
+    </div>
+    <div class="wrap legal">
+      <span>© 2026 Kalyani Loan. All rights reserved.</span>
+      <span>
+        <a href="/about.html">About</a> ·
+        <a href="/contact.html">Contact Us</a> ·
+        <a href="/terms.html">Terms &amp; Conditions</a> ·
+        <a href="/privacy.html">Privacy Policy</a>
+      </span>
+    </div>
+  </footer>
+  <script src="/landing.js"></script>
 </body>
 </html>
