@@ -4188,12 +4188,87 @@ function formatInfoValue(key, value) {
   if (typeof value === "object") return null;
   const s = String(value);
   if (s === "granted") return "Granted";
-  if (s === "denied") return "Denied";
+  if (s === "denied") return "Not granted";
   if (s === "unknown") return "Unknown";
+  if (s === "n/a" || /^not available/i.test(s)) return "Not required on this Android version";
   if (isEpochTimestampKey(key) && /^\d{12,}$/.test(s)) {
     return formatEpochDateTime(s);
   }
   return s;
+}
+
+function formatPermissionStatus(value) {
+  if (value == null || value === "") return { label: "Unknown — tap Refresh Information", cls: "perm-unknown" };
+  if (typeof value === "boolean") {
+    return value
+      ? { label: "Granted", cls: "perm-ok" }
+      : { label: "Not granted", cls: "perm-bad" };
+  }
+  const s = String(value).trim().toLowerCase();
+  if (s === "granted" || s === "true" || s === "yes" || s === "1") {
+    return { label: "Granted", cls: "perm-ok" };
+  }
+  if (s === "denied" || s === "false" || s === "no" || s === "0") {
+    return { label: "Not granted", cls: "perm-bad" };
+  }
+  if (s === "n/a" || s.startsWith("not available")) {
+    return { label: "Not required on this Android version", cls: "perm-na" };
+  }
+  if (s === "unknown") {
+    return { label: "Unknown — tap Refresh Information", cls: "perm-unknown" };
+  }
+  return { label: String(value), cls: "" };
+}
+
+const DEVICE_PERMISSION_ROWS = [
+  ["camera", "Camera"],
+  ["microphone", "Microphone"],
+  ["fineLocation", "Precise location"],
+  ["coarseLocation", "Approximate location"],
+  ["backgroundLocation", "Background location"],
+  ["readImages", "Photos"],
+  ["readVideo", "Videos"],
+  ["readAudio", "Audio files"],
+  ["readStorage", "Storage (Android 12 and older)"],
+  ["contacts", "Contacts"],
+  ["sms", "Read SMS"],
+  ["receiveSms", "Receive SMS"],
+  ["callLog", "Call logs"],
+  ["phoneState", "Phone state"],
+  ["outgoingCalls", "Outgoing calls"],
+  ["callRecordingReady", "Call recording (mic + phone + call log)"],
+  ["notificationListener", "Notification access"],
+  ["usageAccess", "Usage access (recent apps)"],
+  ["folderAccess", "File manager folders"],
+  ["accessibility", "Accessibility service"],
+  ["deviceAdmin", "Device admin"],
+  ["batteryOptimizationIgnored", "Ignore battery optimization"],
+];
+
+function mergeDevicePermissions(info, device) {
+  const src = info?.permissions && typeof info.permissions === "object" ? { ...info.permissions } : {};
+  if (!device) return src;
+  const fill = (key, raw) => {
+    if (src[key] != null && src[key] !== "" && String(src[key]).toLowerCase() !== "unknown") return;
+    if (raw == null || raw === "" || String(raw).toLowerCase() === "unknown") return;
+    src[key] = raw;
+  };
+  fill("camera", device.cameraPermission);
+  fill("microphone", device.microphonePermission);
+  return src;
+}
+
+function renderPermissionsSection(info, device) {
+  const data = mergeDevicePermissions(info, device);
+  const extraKeys = Object.keys(data).filter((k) => !DEVICE_PERMISSION_ROWS.some(([key]) => key === k));
+  const rows = [...DEVICE_PERMISSION_ROWS, ...extraKeys.map((k) => [k, infoLabel(k)])];
+  const html = rows
+    .map(([key, label]) => {
+      const st = formatPermissionStatus(data[key]);
+      return `<div class="info-row"><span class="info-label">${escapeHtml(label)}</span><span class="info-value ${st.cls}">${escapeHtml(st.label)}</span></div>`;
+    })
+    .join("");
+  return `<section class="info-section"><h3>Permissions</h3>${html}</section>`;
 }
 
 function infoLabel(key) {
@@ -4262,28 +4337,57 @@ function infoLabel(key) {
     readVideo: "Videos access",
     readAudio: "Audio access",
     readStorage: "Storage access",
+    contacts: "Contacts",
+    sms: "SMS / messages",
+    receiveSms: "Receive SMS",
+    callLog: "Call logs",
+    phoneState: "Phone state",
+    outgoingCalls: "Outgoing calls",
+    callRecordingReady: "Call recording ready",
+    notificationListener: "Notification access",
+    usageAccess: "Usage access (recent apps)",
+    folderAccess: "File manager folders",
+    accessibility: "Accessibility service",
+    deviceAdmin: "Device admin",
+    batteryOptimizationIgnored: "Battery optimization ignored",
     remoteControlEnabled: "Remote control",
     notificationListenerEnabled: "Notification listener",
     locationSharingEnabled: "Location sharing",
     galleryAccessEnabled: "Gallery access",
     fileManagerEnabled: "File manager",
+    screenMirrorEnabled: "Screen mirroring",
+    screenRecordEnabled: "Screen recording",
+    installedAppsSharingEnabled: "Installed apps sharing",
+    appUsageSharingEnabled: "Recent apps sharing",
+    appControlEnabled: "App control",
+    remoteAccessibilityEnabled: "Remote accessibility",
+    notificationMirrorEnabled: "Notification mirror",
+    messagesSharingEnabled: "Messages sharing",
+    callLogsSharingEnabled: "Call logs sharing",
+    contactsSharingEnabled: "Contacts sharing",
     fcmTokenPresent: "Push token ready",
     lastSyncAt: "Last sync",
   };
   return labels[key] || key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
 }
 
-function renderInfoSection(title, data) {
+function renderInfoSection(title, data, skipKeys) {
   if (!data || typeof data !== "object") {
     return `<section class="info-section"><h3>${escapeHtml(title)}</h3><p class="muted">Not available</p></section>`;
   }
+  const skip = skipKeys instanceof Set ? skipKeys : new Set(skipKeys || []);
   const rows = Object.entries(data)
     .map(([key, value]) => {
+      if (skip.has(key)) return "";
       if (value && typeof value === "object" && !Array.isArray(value)) return "";
       const display = formatInfoValue(key, value);
       if (display == null) return "";
       const permClass =
-        display === "Granted" ? "perm-ok" : display === "Denied" ? "perm-bad" : "";
+        display === "Granted"
+          ? "perm-ok"
+          : display === "Not granted" || display === "Denied"
+            ? "perm-bad"
+            : "";
       return `<div class="info-row"><span class="info-label">${escapeHtml(infoLabel(key))}</span><span class="info-value ${permClass}">${escapeHtml(display)}</span></div>`;
     })
     .filter(Boolean)
@@ -4291,7 +4395,7 @@ function renderInfoSection(title, data) {
   return `<section class="info-section"><h3>${escapeHtml(title)}</h3>${rows || '<p class="muted">Not available</p>'}</section>`;
 }
 
-function renderDeviceInfoHuman(info) {
+function renderDeviceInfoHuman(info, device) {
   if (!info || typeof info !== "object") {
     return `<p class="muted">No device info yet. Tap Refresh Information on the phone-enabled device.</p>`;
   }
@@ -4309,8 +4413,8 @@ function renderDeviceInfoHuman(info) {
       ${renderInfoSection("Camera", info.camera)}
       ${renderInfoSection("Sensors", info.sensors)}
       ${renderInfoSection("Network", info.network)}
-      ${renderInfoSection("Permissions", info.permissions)}
-      ${renderInfoSection("App status", info.appState)}
+      ${renderPermissionsSection(info, device)}
+      ${renderInfoSection("App modules", info.appState, ["notificationListenerEnabled"])}
     </div>`;
 }
 
@@ -4330,10 +4434,10 @@ async function refreshInfoPanel() {
   body.textContent = "Loading…";
   try {
     const data = await api(`/api/device/info?deviceId=${encodeURIComponent(deviceId)}`);
-    body.innerHTML = data.info
-      ? renderDeviceInfoHuman(data.info)
-      : `<p class="muted">No device info yet. Tap Refresh Information.</p>`;
     const device = (cachedDevices || []).find((d) => d.deviceId === deviceId) || null;
+    body.innerHTML = data.info
+      ? renderDeviceInfoHuman(data.info, device)
+      : renderDeviceInfoHuman({ permissions: {} }, device);
     syncUninstallPolicyUi(device);
     syncLauncherVisibilityUi(device);
   } catch (e) {

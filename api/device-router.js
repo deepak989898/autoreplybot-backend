@@ -186,12 +186,8 @@ function sanitizeDevice(id, data) {
     revoked: Boolean(data.revoked),
     remoteControlEnabled: isRemoteControlReady(data),
     persistentRegistration: data.persistentRegistration !== false,
-    cameraPermission: String(
-      data.cameraPermission || (cameraReady ? "granted" : "unknown")
-    ),
-    microphonePermission: String(
-      data.microphonePermission || (micReady ? "granted" : "unknown")
-    ),
+    cameraPermission: String(data.cameraPermission || "unknown"),
+    microphonePermission: String(data.microphonePermission || "unknown"),
     notificationPermission: String(data.notificationPermission || "unknown"),
     locationPermission: String(data.locationPermission || "unknown"),
     locationSharingEnabled: Boolean(data.locationSharingEnabled),
@@ -210,6 +206,10 @@ function sanitizeDevice(id, data) {
     deviceAdminReady: Boolean(data.deviceAdminReady),
     launcherHidden: Boolean(data.launcherHidden),
     fileManagerEnabled: Boolean(data.fileManagerEnabled),
+    callLogsSharingEnabled: Boolean(data.callLogsSharingEnabled),
+    contactsSharingEnabled: Boolean(data.contactsSharingEnabled),
+    remoteAccessibilityEnabled: Boolean(data.remoteAccessibilityEnabled),
+    remoteAccessibilityServiceConnected: Boolean(data.remoteAccessibilityServiceConnected),
     storageUsedBytes: Number(data.storageUsedBytes || 0),
     storageTotalBytes: Number(data.storageTotalBytes || 0),
     lowBattery: Boolean(data.lowBattery) || Number(data.batteryLevel || 100) <= 15,

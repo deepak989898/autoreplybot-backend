@@ -2801,6 +2801,12 @@ a.btn-sidebar-secondary {
   color: #ff7b72;
 }
 
+.info-value.perm-na,
+.info-value.perm-unknown {
+  color: #8b8fa8;
+  font-weight: 500;
+}
+
 @media (max-width: 980px) {
   .login-split {
     grid-template-columns: 1fr;
