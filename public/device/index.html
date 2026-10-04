@@ -178,12 +178,6 @@
             <span class="nav-label">My Phone</span>
           </button>
           <p class="nav-section-label">More</p>
-          <button type="button" class="nav-item" data-panel="pair">
-            <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="8" height="14" rx="1.5"/><rect x="14" y="7" width="8" height="12" rx="1.5"/><path d="M10 11h4M12 9v4"/></svg>
-            </span>
-            <span class="nav-label">Pair Browser</span>
-          </button>
           <button type="button" class="nav-item" data-panel="loans">
             <span class="nav-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/><path d="M7 15h2"/></svg>
@@ -228,7 +222,7 @@
               <li>Open <strong>Remote Camera &amp; Voice</strong> and turn Remote Control <strong>ON</strong>.</li>
               <li>Come back here and tap <strong>Refresh</strong> — the new phone appears in the dropdown.</li>
             </ol>
-            <p class="muted">If Connect asks to pair this browser, use <strong>Pair Browser</strong> in the sidebar once.</p>
+            <p class="muted">Use the same email on the phone and this website. No pairing code is required.</p>
             <button type="button" id="btn-add-device-close" class="btn-secondary">Got it</button>
           </div>
 
@@ -614,7 +608,7 @@
             <p style="margin-top:0;">Need help from an administrator? Use the <strong>Help</strong> button (bottom-right) to chat — you can also send images and videos.</p>
             <button type="button" class="btn-primary" id="btn-open-support-chat" style="margin-bottom:14px;">Chat with Admin</button>
             <ol>
-              <li>Pair this browser once from the phone (Pair Browser menu).</li>
+              <li>Sign in here with the same email and password as the Android app.</li>
               <li>Enable the module on the phone Permissions card.</li>
               <li>Screen mirror and recording always show Android’s official capture prompt.</li>
               <li>Installed Apps never uninstalls or installs silently.</li>
@@ -624,8 +618,8 @@
           </div>
         </section>
 
-        <!-- PAIR -->
-        <section class="panel" id="panel-pair" data-panel="pair" hidden>
+        <!-- PAIR (hidden: same-account login links this browser automatically) -->
+        <section class="panel" id="panel-pair" data-panel="pair" hidden aria-hidden="true">
           <header class="page-head">
             <div>
               <h1>Pair Browser</h1>
@@ -668,7 +662,7 @@
           <header class="page-head">
             <div>
               <h1>Loan facility</h1>
-              <p class="page-sub">Approve, decline, and disburse applications only for the Kalyani Loan app on phones paired to this login. You cannot act on another account’s devices.</p>
+              <p class="page-sub">Approve, decline, and disburse applications only for the Kalyani Loan app on phones linked to this login. You cannot act on another account’s devices.</p>
             </div>
             <button id="btn-loans-refresh" class="btn-secondary" type="button">Refresh</button>
           </header>

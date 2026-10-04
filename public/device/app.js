@@ -138,7 +138,8 @@ function showPanel(panelId) {
   if (id === "home" || id === "devices" || id === "location" || id === "info"
       || id === "gallery" || id === "files" || id === "notifications" || id === "messages"
       || id === "call-logs" || id === "contacts"
-      || id === "transfers" || id === "multiview" || id === "settings") {
+      || id === "transfers" || id === "multiview" || id === "settings"
+      || id === "pair") {
     id = "phone";
   }
   document.querySelectorAll(".panel").forEach((el) => {
@@ -3078,11 +3079,11 @@ function updatePairingUi(isPaired) {
   if (homeStatus) {
     if (browserPaired) {
       homeStatus.textContent = hasLive
-        ? "This browser is paired and has a live session. Use Disconnect on Pair New Browser to end it."
+        ? "This browser is linked and has a live session."
         : "This browser is linked to your account. Open My Phone and tap Connect when you want a live session.";
     } else if (otherBrowsers > 0) {
       homeStatus.textContent =
-        "This browser is not paired yet. Your account has other paired browsers (e.g. desktop), but each browser/PWA must pair once with a QR scan on the phone.";
+        "This browser is linking to your account. Stay signed in with the same email as the app.";
     } else {
       homeStatus.textContent =
         "This browser is not linked yet. Sign in with the same email as the app. Pair Browser is only needed for an extra browser.";
@@ -3144,7 +3145,7 @@ async function disconnectThisBrowser() {
     }
     await refreshClients();
     await refreshDevices();
-    showPanel("pair");
+    showPanel("phone");
   } catch (e) {
     showPairError(e instanceof Error ? e.message : String(e));
   } finally {
