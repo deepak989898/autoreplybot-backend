@@ -9154,10 +9154,14 @@ function rupees(n) {
   return "₹ " + v.toLocaleString("en-IN");
 }
 
-function loanStatusChip(status) {
+function loanStatusChip(status, app) {
+  const hasBank = !!(app && app.bankAccount && app.bankIfsc);
   const map = {
     REVIEW: ["review", "In review"],
-    APPROVED: ["approved", "Approved — awaiting bank details"],
+    APPROVED: [
+      "approved",
+      hasBank ? "Approved — awaiting agreement" : "Approved — awaiting bank details",
+    ],
     AWAITING_DISBURSE: ["await", "Ready to disburse"],
     DISBURSED: ["disbursed", "Disbursed"],
     REJECTED: ["rejected", "Declined"],
@@ -9193,6 +9197,13 @@ function renderLoanWorkspace(data) {
   }
 
   const amount = app.approvedAmount || app.requestedAmount;
+  const hasBank = !!(app.bankAccount && app.bankIfsc);
+  const bankRows = hasBank
+    ? `<span>Account holder</span><strong>${escapeHtml(app.bankHolderName || "—")}</strong>
+      <span>Bank</span><strong>${escapeHtml(app.bankName || "—")}</strong>
+      <span>Account number</span><strong>${escapeHtml(app.bankAccount)}</strong>
+      <span>IFSC</span><strong>${escapeHtml(app.bankIfsc)}</strong>`
+    : "";
   let actions = "";
   if (app.status === "REVIEW") {
     actions = `<div class="loan-actions">
@@ -9204,10 +9215,11 @@ function renderLoanWorkspace(data) {
     </div>
     <p class="muted">The sanctioned amount cannot exceed the requested amount of ${rupees(app.requestedAmount)}.</p>`;
   } else if (app.status === "APPROVED") {
-    actions = `<p class="muted">Sanctioned. Waiting for the borrower to enter bank account details and execute the facility agreement in the app.</p>`;
+    actions = hasBank
+      ? `<p class="muted">Bank account received. Waiting for the borrower to read and accept the facility agreement in the app. You can disburse after that step.</p>`
+      : `<p class="muted">Sanctioned. Waiting for the borrower to enter bank account details in the app.</p>`;
   } else if (app.status === "AWAITING_DISBURSE") {
-    actions = `<p>Credit account: <strong>${escapeHtml(app.bankHolderName)}</strong> · ${escapeHtml(app.bankName)} · ${escapeHtml(app.bankAccount)} · IFSC ${escapeHtml(app.bankIfsc)}</p>
-    <div class="loan-actions">
+    actions = `<div class="loan-actions">
       <label>Bank UTR / UPI reference
         <input id="loan-disburse-utr" class="input" type="text" maxlength="22" placeholder="e.g. 123456789012" autocomplete="off" />
       </label>
@@ -9223,7 +9235,7 @@ function renderLoanWorkspace(data) {
   root.innerHTML = `<div class="surface loan-card">
     <div class="row-gap" style="justify-content:space-between;align-items:center;">
       <h2 style="margin:0;">Application</h2>
-      ${loanStatusChip(app.status)}
+      ${loanStatusChip(app.status, app)}
     </div>
     <div class="loan-kv">
       <span>Applicant</span><strong>${escapeHtml(app.applicantName || "—")}</strong>
@@ -9233,6 +9245,7 @@ function renderLoanWorkspace(data) {
       <span>Sanctioned limit</span><strong>${app.approvedAmount ? rupees(app.approvedAmount) : "Pending"}</strong>
       <span>Tenure</span><strong>${app.tenureMonths} months</strong>
       <span>EMI</span><strong>${rupees(app.monthlyEmi)}</strong>
+      ${bankRows}
     </div>
     <h3>Linked phones (this account)</h3>
     ${deviceList}
