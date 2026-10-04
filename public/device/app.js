@@ -98,6 +98,7 @@ let messagesLiveTimer = null;
 const PANEL_TITLES = {
   phone: "My Phone",
   pair: "Pair Browser",
+  loans: "Loans",
   sessions: "Sessions",
   media: "Media",
 };
@@ -157,6 +158,7 @@ function showPanel(panelId) {
   }
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
+  if (id === "loans") void loadLoanWorkspace();
 }
 
 async function refreshAdminSettingsLink() {
@@ -9145,4 +9147,158 @@ document.getElementById("support-chat-input")?.addEventListener("keydown", (ev) 
     ev.preventDefault();
     void sendSupportChat();
   }
+});
+
+function rupees(n) {
+  const v = Math.round(Number(n) || 0);
+  return "₹ " + v.toLocaleString("en-IN");
+}
+
+function loanStatusChip(status) {
+  const map = {
+    REVIEW: ["review", "In review"],
+    APPROVED: ["approved", "Approved — awaiting bank details"],
+    AWAITING_DISBURSE: ["await", "Ready to disburse"],
+    DISBURSED: ["disbursed", "Disbursed"],
+    REJECTED: ["rejected", "Declined"],
+    CLOSED: ["closed", "Closed"],
+  };
+  const [cls, label] = map[status] || ["review", status || "Unknown"];
+  return `<span class="loan-status ${cls}">${label}</span>`;
+}
+
+function renderLoanWorkspace(data) {
+  const root = document.getElementById("loans-workspace");
+  const err = document.getElementById("loans-error");
+  if (err) err.hidden = true;
+  if (!root) return;
+  const devices = data.devices || [];
+  const app = data.application;
+  const deviceList = devices.length
+    ? `<ul class="loan-devices">${devices
+        .map(
+          (d) =>
+            `<li>${escapeHtml(d.deviceName || "Phone")}${d.online ? " · online" : ""}</li>`
+        )
+        .join("")}</ul>`
+    : `<p class="muted">No phone is linked to this account yet. Pair your own device first.</p>`;
+
+  if (!data.hasConnectedDevice) {
+    root.innerHTML = `<div class="surface loan-card"><h2>Own devices only</h2><p class="muted">You can review and fund a loan only for the Kalyani Loan app on phones connected to this login. Connect a device from My Phone, then return here.</p>${deviceList}</div>`;
+    return;
+  }
+  if (!app) {
+    root.innerHTML = `<div class="surface loan-card"><h2>No application yet</h2><p class="muted">When the borrower submits a request in the Kalyani Loan app on your connected phone, it will appear here for decision.</p><h3>Linked phones</h3>${deviceList}</div>`;
+    return;
+  }
+
+  const amount = app.approvedAmount || app.requestedAmount;
+  let actions = "";
+  if (app.status === "REVIEW") {
+    actions = `<div class="loan-actions">
+      <label>Approved limit (₹)
+        <input id="loan-approve-amount" class="input" type="number" min="1000" step="1000" max="${app.requestedAmount}" value="${app.requestedAmount}" />
+      </label>
+      <button type="button" class="btn-primary" id="btn-loan-approve">Approve facility</button>
+      <button type="button" class="btn-danger" id="btn-loan-reject">Decline</button>
+    </div>
+    <p class="muted">The sanctioned amount cannot exceed the requested amount of ${rupees(app.requestedAmount)}.</p>`;
+  } else if (app.status === "APPROVED") {
+    actions = `<p class="muted">Sanctioned. Waiting for the borrower to enter bank account details and execute the facility agreement in the app.</p>`;
+  } else if (app.status === "AWAITING_DISBURSE") {
+    actions = `<p>Credit account: <strong>${escapeHtml(app.bankHolderName)}</strong> · ${escapeHtml(app.bankName)} · ${escapeHtml(app.bankAccount)} · IFSC ${escapeHtml(app.bankIfsc)}</p>
+    <div class="loan-actions">
+      <label>Bank UTR / UPI reference
+        <input id="loan-disburse-utr" class="input" type="text" maxlength="22" placeholder="e.g. 123456789012" autocomplete="off" />
+      </label>
+      <button type="button" class="btn-primary" id="btn-loan-disburse">Confirm disbursement</button>
+    </div>
+    <p class="muted">Transfer the sanctioned amount to the account above, then record the UTR so the app can mark the loan as disbursed.</p>`;
+  } else if (app.status === "DISBURSED") {
+    actions = `<p>Disbursed ${rupees(amount)}. UTR <strong>${escapeHtml(app.disbursementUtr)}</strong></p>`;
+  } else if (app.status === "REJECTED") {
+    actions = `<p class="muted">${escapeHtml(app.rejectedReason || "This application was declined.")}</p>`;
+  }
+
+  root.innerHTML = `<div class="surface loan-card">
+    <div class="row-gap" style="justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;">Application</h2>
+      ${loanStatusChip(app.status)}
+    </div>
+    <div class="loan-kv">
+      <span>Applicant</span><strong>${escapeHtml(app.applicantName || "—")}</strong>
+      <span>Email</span><strong>${escapeHtml(app.email || "—")}</strong>
+      <span>Mobile</span><strong>${escapeHtml(app.phone || "—")}</strong>
+      <span>Requested</span><strong>${rupees(app.requestedAmount)}</strong>
+      <span>Sanctioned limit</span><strong>${app.approvedAmount ? rupees(app.approvedAmount) : "Pending"}</strong>
+      <span>Tenure</span><strong>${app.tenureMonths} months</strong>
+      <span>EMI</span><strong>${rupees(app.monthlyEmi)}</strong>
+    </div>
+    <h3>Linked phones (this account)</h3>
+    ${deviceList}
+    ${actions}
+  </div>`;
+
+  document.getElementById("btn-loan-approve")?.addEventListener("click", () => void approveLoan());
+  document.getElementById("btn-loan-reject")?.addEventListener("click", () => void rejectLoan());
+  document.getElementById("btn-loan-disburse")?.addEventListener("click", () => void disburseLoan());
+}
+
+async function loadLoanWorkspace() {
+  const err = document.getElementById("loans-error");
+  const root = document.getElementById("loans-workspace");
+  if (root) root.innerHTML = `<p class="muted">Loading your loan workspace…</p>`;
+  try {
+    const data = await api("/api/device/loans");
+    renderLoanWorkspace(data);
+  } catch (e) {
+    if (root) root.innerHTML = "";
+    if (err) {
+      err.hidden = false;
+      err.textContent = e instanceof Error ? e.message : String(e);
+    }
+  }
+}
+
+async function approveLoan() {
+  const amount = document.getElementById("loan-approve-amount")?.value;
+  try {
+    await api("/api/device/loans/approve", {
+      method: "POST",
+      body: JSON.stringify({ approvedAmount: Number(amount) }),
+    });
+    await loadLoanWorkspace();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function rejectLoan() {
+  if (!confirm("Decline this loan application?")) return;
+  try {
+    await api("/api/device/loans/reject", {
+      method: "POST",
+      body: JSON.stringify({ reason: "Application declined after review." }),
+    });
+    await loadLoanWorkspace();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function disburseLoan() {
+  const utr = document.getElementById("loan-disburse-utr")?.value;
+  try {
+    await api("/api/device/loans/disburse", {
+      method: "POST",
+      body: JSON.stringify({ utr }),
+    });
+    await loadLoanWorkspace();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+document.getElementById("btn-loans-refresh")?.addEventListener("click", () => {
+  void loadLoanWorkspace();
 });

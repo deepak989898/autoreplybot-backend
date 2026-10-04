@@ -670,6 +670,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /users/{uid}/loan/application {
+      allow read: if owner(uid);
+      allow create: if owner(uid)
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.status == 'REVIEW';
+      allow update: if owner(uid)
+          && request.resource.data.ownerUid == uid
+          && (
+            (resource.data.status == 'REVIEW'
+              && request.resource.data.status == 'REVIEW')
+            || (resource.data.status == 'APPROVED'
+              && request.resource.data.status in ['APPROVED', 'AWAITING_DISBURSE'])
+            || (resource.data.status == 'AWAITING_DISBURSE'
+              && request.resource.data.status == 'AWAITING_DISBURSE')
+            || (resource.data.status == 'DISBURSED'
+              && request.resource.data.status == 'DISBURSED')
+          );
+      allow delete: if owner(uid);
+    }
+
     match /users/{uid}/integrations/{doc} {
       allow read, write: if false;
     }
