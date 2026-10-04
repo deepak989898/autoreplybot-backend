@@ -1019,8 +1019,8 @@ function renderDevices(devices, clients) {
     .map((d) => {
       const online = Boolean(d.online);
       const id = escapeHtml(d.deviceId);
-      const idleHint = !clientId
-        ? "This browser must be paired first."
+        const idleHint = !clientId
+        ? "Linking this browser to your account…"
         : !online
           ? "Device is offline. It will remain saved and reconnect automatically."
           : autoApprove
@@ -2249,7 +2249,18 @@ async function startConnect(deviceId, clientId) {
     return;
   }
   if (!clientId) {
-    setDeviceError(deviceId, "This browser must be paired first.");
+    try {
+      await ensureSameAccountBrowserTrust();
+      clientId = thisBrowserClientId(cachedClients);
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!clientId) {
+    setDeviceError(
+      deviceId,
+      "Could not link this browser to your account. Refresh the page while signed in with the same email as the app."
+    );
     setConnectionLabel(deviceId, CONN.FAILED, "untrusted");
     return;
   }
@@ -2987,6 +2998,42 @@ async function refreshDevices() {
   }
 }
 
+async function ensureSameAccountBrowserTrust() {
+  const { publicKeyJwk, fingerprint } = await ensureBrowserIdentity();
+  if (isThisBrowserPaired(cachedClients)) return;
+  const data = await api("/api/pair/self", {
+    method: "POST",
+    body: JSON.stringify({
+      publicKeyJwk,
+      browserFingerprintHash: fingerprint,
+      browserName: navigator.userAgentData?.brands?.slice(-1)[0]?.brand || "",
+      operatingSystem: navigator.userAgentData?.platform || "",
+    }),
+  });
+  if (data?.client?.clientId) {
+    localStorage.setItem(CLIENT_ID_KEY, data.client.clientId);
+    const others = (cachedClients || []).filter((c) => c.clientId !== data.client.clientId);
+    cachedClients = [data.client, ...others];
+  }
+}
+
+async function loadTrustedClientsFromApi() {
+  await ensureBrowserIdentity();
+  const data = await api("/api/pair/clients");
+  cachedClients = data.clients || [];
+  if (!isThisBrowserPaired(cachedClients)) {
+    try {
+      await ensureSameAccountBrowserTrust();
+      const again = await api("/api/pair/clients");
+      cachedClients = again.clients || cachedClients;
+    } catch (e) {
+      console.warn("same-account browser trust failed", e);
+    }
+  }
+  thisBrowserClientId(cachedClients);
+  updatePairingUi(isThisBrowserPaired(cachedClients));
+}
+
 async function refreshClients() {
   if (!clientList) {
     if (!idToken) {
@@ -2995,11 +3042,7 @@ async function refreshClients() {
       return;
     }
     try {
-      await ensureBrowserIdentity();
-      const data = await api("/api/pair/clients");
-      cachedClients = data.clients || [];
-      const clientId = thisBrowserClientId(cachedClients);
-      updatePairingUi(isThisBrowserPaired(cachedClients));
+      await loadTrustedClientsFromApi();
     } catch {
       cachedClients = [];
       updatePairingUi(false);
@@ -3015,12 +3058,8 @@ async function refreshClients() {
   }
   clientList.textContent = "Loading…";
   try {
-    await ensureBrowserIdentity();
-    const data = await api("/api/pair/clients");
-    cachedClients = data.clients || [];
+    await loadTrustedClientsFromApi();
     renderClients(cachedClients);
-    const clientId = thisBrowserClientId(cachedClients);
-    updatePairingUi(isThisBrowserPaired(cachedClients));
   } catch (e) {
     clientList.textContent = e instanceof Error ? e.message : String(e);
     clientList.classList.add("muted");
@@ -3040,13 +3079,13 @@ function updatePairingUi(isPaired) {
     if (browserPaired) {
       homeStatus.textContent = hasLive
         ? "This browser is paired and has a live session. Use Disconnect on Pair New Browser to end it."
-        : "This browser is paired. Open My Phone and tap Connect when you want a live session.";
+        : "This browser is linked to your account. Open My Phone and tap Connect when you want a live session.";
     } else if (otherBrowsers > 0) {
       homeStatus.textContent =
         "This browser is not paired yet. Your account has other paired browsers (e.g. desktop), but each browser/PWA must pair once with a QR scan on the phone.";
     } else {
       homeStatus.textContent =
-        "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
+        "This browser is not linked yet. Sign in with the same email as the app. Pair Browser is only needed for an extra browser.";
     }
   }
   if (btnHomePair) btnHomePair.hidden = browserPaired;
@@ -3895,7 +3934,7 @@ function fillDeviceSelect(selectEl) {
 
 function requireClientId() {
   const clientId = preferredClientId(cachedClients);
-  if (!clientId) throw new Error("Pair this browser first (Pair Browser menu).");
+  if (!clientId) throw new Error("This browser is not linked yet. Refresh the page while signed in with the same email as the app.");
   return clientId;
 }
 

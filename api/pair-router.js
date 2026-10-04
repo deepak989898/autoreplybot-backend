@@ -45,6 +45,7 @@ export default async function handler(req, res) {
   }
 
   if (action === "create") return handleCreate(req, res);
+  if (action === "self") return handleSelfPair(req, res);
   if (action === "complete") return handleComplete(req, res);
   if (action === "revoke") return handleRevoke(req, res);
   if (action === "update-client" || action === "updateclient") {
@@ -153,6 +154,101 @@ async function handleCreate(req, res) {
     return res.status(mapped.status).json({
       error: mapped.error,
       code: mapped.code,
+    });
+  }
+}
+
+async function handleSelfPair(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
+
+    const rl = checkRateLimit(`pair-self:${uid}`, PAIR_CREATE_LIMIT, PAIR_CREATE_WINDOW_MS);
+    if (!rl.allowed) {
+      res.setHeader("Retry-After", String(Math.ceil(rl.retryAfterMs / 1000) || 3600));
+      return res.status(429).json({
+        error: "Too many browser trust requests. Try again later.",
+        code: "PAIR_RATE_LIMIT",
+        retryAfterMs: rl.retryAfterMs,
+      });
+    }
+
+    const body = parseBody(req.body);
+    const publicKeyJwk = body.publicKeyJwk;
+    if (!isPublicJwk(publicKeyJwk)) {
+      return res.status(400).json({
+        error: "publicKeyJwk (ECDSA P-256) is required",
+        code: "PUBLIC_KEY_REQUIRED",
+      });
+    }
+    const browserFingerprintHash =
+      String(body.browserFingerprintHash || "").trim() || fingerprintPublicJwk(publicKeyJwk);
+    const uaMeta = detectBrowserMeta(req.headers["user-agent"]);
+    const browserName =
+      String(body.browserName || "").trim().slice(0, 80) || uaMeta.browserName;
+    const operatingSystem =
+      String(body.operatingSystem || "").trim().slice(0, 80) || uaMeta.operatingSystem;
+    const clientName = `${browserName} on ${operatingSystem}`.slice(0, 80);
+    const allowedCapabilities = effectiveBrowserCapabilities();
+    const now = Date.now();
+
+    const snap = await trustedClientsRef(uid).get();
+    let existingId = "";
+    snap.forEach((doc) => {
+      if (existingId || doc.id === "platform_admin") return;
+      const d = doc.data() || {};
+      if (d.isPlatformAdminClient) return;
+      const hash = String(d.browserFingerprintHash || "");
+      if (hash && hash === browserFingerprintHash) existingId = doc.id;
+    });
+
+    const clientId = existingId || randomBytes(16).toString("hex");
+    const trusted = {
+      ownerUid: uid,
+      clientId,
+      clientName,
+      browserName,
+      browser: browserName,
+      operatingSystem,
+      platform: operatingSystem,
+      browserFingerprintHash,
+      publicKey: publicKeyJwk,
+      lastSeenAt: now,
+      lastUsedAt: now,
+      updatedAt: now,
+      revoked: false,
+      persistentPairing: true,
+      autoApproveSessions: true,
+      allowedCapabilities,
+      requirePhoneUnlock: false,
+      expiresAt: null,
+      pairingMetadata: JSON.stringify({ pairedVia: "same_account_login" }),
+    };
+    if (!existingId) {
+      trusted.pairedAt = now;
+      trusted.createdAt = now;
+    }
+    await trustedClientsRef(uid).doc(clientId).set(trusted, { merge: true });
+    await writeAuditLog(uid, {
+      action: R.AUDIT_BROWSER_TRUSTED,
+      clientId,
+      result: "ok",
+      metadata: { pairedVia: "same_account_login", reused: Boolean(existingId) },
+    });
+    const saved = (await trustedClientsRef(uid).doc(clientId).get()).data();
+    return res.status(200).json({
+      ok: true,
+      client: sanitizeTrustedClient(clientId, saved || { ...trusted, clientId }),
+    });
+  } catch (e) {
+    const mapped = pairingErrorResponse(e);
+    return res.status(mapped.status).json({
+      error: mapped.error,
+      code: mapped.code === "PAIRING_FAILED" ? "SELF_PAIR_FAILED" : mapped.code,
     });
   }
 }
