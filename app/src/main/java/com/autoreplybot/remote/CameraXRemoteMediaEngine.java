@@ -457,9 +457,10 @@ public final class CameraXRemoteMediaEngine implements RemoteMediaEngine, Lifecy
         try {
             androidx.camera.video.PendingRecording pending =
                     recorder.prepareRecording(appContext, output);
+            // File recordings always include mic when session has audio permission
+            // (live mute must not strip audio from saved videos).
             boolean withAudio = config != null
                     && config.microphoneEnabled
-                    && !microphoneMuted
                     && hasPermission(Manifest.permission.RECORD_AUDIO);
             if (withAudio) {
                 pending = pending.withAudioEnabled();

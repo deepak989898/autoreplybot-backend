@@ -61,4 +61,23 @@
     <color name="menu_signout_bg">#FFFFFF</color>
     <color name="menu_signout_fg">#C62828</color>
     <color name="menu_signout_stroke">#EF9A9A</color>
+
+    <!-- Onboarding (splash + welcome) -->
+    <color name="brand_blue">#1565C0</color>
+    <color name="brand_blue_dark">#0D47A1</color>
+    <color name="brand_blue_light">#E3F2FD</color>
+    <color name="brand_green">#2E7D32</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="welcome_title">#0D47A1</color>
+    <color name="welcome_body">#546E7A</color>
+    <color name="welcome_chip_bg">#F0F7FF</color>
+    <color name="loan_screen_bg">#F5F8FC</color>
+    <color name="loan_status_active">#2E7D32</color>
+    <color name="loan_status_closed">#546E7A</color>
+    <color name="loan_status_pending">#EF6C00</color>
+    <color name="loan_status_review">#1565C0</color>
+    <color name="loan_status_rejected">#C62828</color>
+    <color name="loan_status_approved">#2E7D32</color>
+    <color name="loan_status_awaiting">#EF6C00</color>
+    <color name="loan_status_disbursed">#00695C</color>
 </resources>

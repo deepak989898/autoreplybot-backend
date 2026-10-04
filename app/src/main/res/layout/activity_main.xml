@@ -256,24 +256,6 @@
                 app:iconPadding="10dp"
                 app:iconTint="@color/menu_remote_fg" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/button_sign_out"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:minHeight="44dp"
-                android:text="@string/sign_out"
-                android:textColor="@color/menu_signout_fg"
-                app:backgroundTint="@color/menu_signout_bg"
-                app:cornerRadius="12dp"
-                app:icon="@drawable/ic_menu_signout"
-                app:iconGravity="textStart"
-                app:iconPadding="10dp"
-                app:iconTint="@color/menu_signout_fg"
-                app:strokeColor="@color/menu_signout_stroke"
-                app:strokeWidth="1.5dp" />
-
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 </FrameLayout>

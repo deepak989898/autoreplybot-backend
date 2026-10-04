@@ -74,6 +74,7 @@ public class RemoteMediaForegroundService extends Service {
 
     private static final Object LOCK = new Object();
     @Nullable private static volatile SessionSnapshot activeSnapshot;
+    @Nullable private static volatile RemoteMediaForegroundService instance;
 
     private final LocalBinder binder = new LocalBinder();
     @Nullable private RemoteMediaEngine mediaEngine;
@@ -124,9 +125,24 @@ public class RemoteMediaForegroundService extends Service {
         return activeSnapshot != null;
     }
 
+    /** True when a live remote session is streaming microphone to the website. */
+    public static boolean ownsLiveMicrophone() {
+        SessionSnapshot snap = activeSnapshot;
+        return snap != null && snap.microphoneEnabled;
+    }
+
     @Nullable
     public static SessionSnapshot getActiveSnapshot() {
         return activeSnapshot;
+    }
+
+    /** Re-enable live WebRTC mic after telephony/call-recording contention. */
+    public static void ensureLiveMicrophoneEnabled() {
+        RemoteMediaForegroundService svc = instance;
+        if (svc == null || !ownsLiveMicrophone()) return;
+        if (svc.webRtcPublisher != null) {
+            svc.webRtcPublisher.setMicrophoneMuted(false);
+        }
     }
 
     public static void startSession(@NonNull Context context,
@@ -161,6 +177,7 @@ public class RemoteMediaForegroundService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         ensureChannel();
     }
 
@@ -221,6 +238,8 @@ public class RemoteMediaForegroundService extends Service {
         recordingActive = false;
         recordingKind = "";
         stopping = false;
+        // Live WebRTC mic must keep exclusive capture — call recording would mute website audio.
+        RemoteCallRecordingService.stop(this);
         promoteForeground(session);
         acquireWakeLock();
 
@@ -717,6 +736,10 @@ public class RemoteMediaForegroundService extends Service {
             RemoteMediaCloudUploader.Result result = RemoteMediaCloudUploader.uploadFile(
                     file, kind, contentType, deviceId, sessionId, clientId);
             if (result != null) {
+                // Remove local capture after cloud save — website Media Files is the copy.
+                if (file.exists() && !file.delete()) {
+                    Log.w(TAG, "Uploaded but could not delete local " + file.getAbsolutePath());
+                }
                 broadcastMediaEvent(EVENT_STATUS,
                         "Uploaded to cloud: " + kind + " (" + result.mediaId + ")",
                         recordingActive, recordingKind);
@@ -773,6 +796,7 @@ public class RemoteMediaForegroundService extends Service {
             session = null;
             activeSnapshot = null;
         }
+        if (instance == this) instance = null;
         super.onDestroy();
     }
 

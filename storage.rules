@@ -50,12 +50,45 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
+    match /users/{userId}/devices/{deviceId}/call-recordings/{recordingId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validPrivateTransfer();
+      allow delete: if isOwner(userId);
+    }
+
     match /users/{userId}/devices/{deviceId}/exports/{exportId}/{fileName} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId)
           && request.resource.size > 0
           && request.resource.size <= 20 * 1024 * 1024
           && request.resource.contentType.matches('application/json|text/csv|text/plain');
+      allow delete: if isOwner(userId);
+    }
+
+    match /autoreplybot.apk {
+      // Public read so install links / signed downloads remain simple; write stays locked down.
+      allow read: if true;
+      allow write: if false;
+    }
+
+    function validSupportMedia() {
+      return request.resource.size > 0
+          && (
+            (
+              request.resource.size <= 10 * 1024 * 1024
+              && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp']
+            )
+            || (
+              request.resource.size <= 50 * 1024 * 1024
+              && request.resource.contentType in ['video/mp4', 'video/webm']
+            )
+          );
+    }
+
+    // Website Help/Support chat attachments (user ↔ Platform Admin).
+    match /support_chat/{userId}/{messageId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validSupportMedia();
       allow delete: if isOwner(userId);
     }
 

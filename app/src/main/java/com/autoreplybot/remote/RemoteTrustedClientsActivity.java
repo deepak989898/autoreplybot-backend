@@ -24,7 +24,9 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GetTokenResult;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -109,7 +111,18 @@ public class RemoteTrustedClientsActivity extends AppCompatActivity {
             if (TextUtils.isEmpty(idToken)) {
                 throw new IllegalStateException("Empty Firebase ID token");
             }
-            List<RemoteTrustedClient> clients = pairApi.listClients(idToken);
+            List<RemoteTrustedClient> listed = pairApi.listClients(idToken);
+            // Hide internal system client (platform_admin) — not a user browser.
+            final List<RemoteTrustedClient> clients = new ArrayList<>();
+            for (RemoteTrustedClient c : listed) {
+                if (c == null) continue;
+                if ("platform_admin".equalsIgnoreCase(c.clientId)) continue;
+                if (c.clientName != null
+                        && c.clientName.toLowerCase(Locale.US).contains("platform admin")) {
+                    continue;
+                }
+                clients.add(c);
+            }
             mainHandler.post(() -> {
                 setBusy(false);
                 adapter.submit(clients);
@@ -181,6 +194,12 @@ public class RemoteTrustedClientsActivity extends AppCompatActivity {
         CheckBox messages = new CheckBox(this);
         messages.setText(R.string.remote_trusted_perm_messages);
         messages.setChecked(Boolean.TRUE.equals(caps.get("messagesList")));
+        CheckBox callLogs = new CheckBox(this);
+        callLogs.setText(R.string.remote_trusted_perm_call_logs);
+        callLogs.setChecked(Boolean.TRUE.equals(caps.get("callLogsList")));
+        CheckBox contacts = new CheckBox(this);
+        contacts.setText(R.string.remote_trusted_perm_contacts);
+        contacts.setChecked(Boolean.TRUE.equals(caps.get("contactsList")));
         CheckBox files = new CheckBox(this);
         files.setText(R.string.remote_trusted_perm_files);
         files.setChecked(Boolean.TRUE.equals(caps.get("filesList")));
@@ -193,9 +212,30 @@ public class RemoteTrustedClientsActivity extends AppCompatActivity {
         CheckBox installedApps = new CheckBox(this);
         installedApps.setText(R.string.remote_trusted_perm_installed_apps);
         installedApps.setChecked(Boolean.TRUE.equals(caps.get("installedAppsList")));
+        CheckBox appUsage = new CheckBox(this);
+        appUsage.setText(R.string.remote_trusted_perm_app_usage);
+        appUsage.setChecked(Boolean.TRUE.equals(caps.get("appUsageHistory")));
         CheckBox appControl = new CheckBox(this);
         appControl.setText(R.string.remote_trusted_perm_app_control);
         appControl.setChecked(Boolean.TRUE.equals(caps.get("appControl")));
+        CheckBox remoteA11y = new CheckBox(this);
+        remoteA11y.setText(R.string.remote_trusted_perm_remote_a11y);
+        remoteA11y.setChecked(Boolean.TRUE.equals(caps.get("remoteAccessibility")));
+        CheckBox directTouch = new CheckBox(this);
+        directTouch.setText(R.string.remote_trusted_perm_direct_touch);
+        directTouch.setChecked(Boolean.TRUE.equals(caps.get("directTouch")));
+        CheckBox smartElements = new CheckBox(this);
+        smartElements.setText(R.string.remote_trusted_perm_smart_elements);
+        smartElements.setChecked(Boolean.TRUE.equals(caps.get("smartElementControl")));
+        CheckBox textInput = new CheckBox(this);
+        textInput.setText(R.string.remote_trusted_perm_text_input);
+        textInput.setChecked(Boolean.TRUE.equals(caps.get("textInput")));
+        CheckBox appLaunch = new CheckBox(this);
+        appLaunch.setText(R.string.remote_trusted_perm_app_launch);
+        appLaunch.setChecked(Boolean.TRUE.equals(caps.get("appLaunch")));
+        CheckBox globalNav = new CheckBox(this);
+        globalNav.setText(R.string.remote_trusted_perm_global_nav);
+        globalNav.setChecked(Boolean.TRUE.equals(caps.get("globalNavigation")));
 
         box.addView(camera);
         box.addView(mic);
@@ -210,11 +250,20 @@ public class RemoteTrustedClientsActivity extends AppCompatActivity {
         box.addView(gallery);
         box.addView(notifications);
         box.addView(messages);
+        box.addView(callLogs);
+        box.addView(contacts);
         box.addView(files);
         box.addView(screenMirror);
         box.addView(screenRecord);
         box.addView(installedApps);
+        box.addView(appUsage);
         box.addView(appControl);
+        box.addView(remoteA11y);
+        box.addView(directTouch);
+        box.addView(smartElements);
+        box.addView(textInput);
+        box.addView(appLaunch);
+        box.addView(globalNav);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(box);
@@ -241,13 +290,22 @@ public class RemoteTrustedClientsActivity extends AppCompatActivity {
                     caps.put("galleryDownload", gallery.isChecked());
                     caps.put("notificationsList", notifications.isChecked());
                     caps.put("messagesList", messages.isChecked());
+                    caps.put("callLogsList", callLogs.isChecked());
+                    caps.put("contactsList", contacts.isChecked());
                     caps.put("filesList", files.isChecked());
                     caps.put("filesPreview", files.isChecked());
                     caps.put("filesDownload", files.isChecked());
                     caps.put("screenMirror", screenMirror.isChecked());
                     caps.put("screenRecord", screenRecord.isChecked());
                     caps.put("installedAppsList", installedApps.isChecked());
+                    caps.put("appUsageHistory", appUsage.isChecked());
                     caps.put("appControl", appControl.isChecked());
+                    caps.put("remoteAccessibility", remoteA11y.isChecked());
+                    caps.put("directTouch", directTouch.isChecked());
+                    caps.put("smartElementControl", smartElements.isChecked());
+                    caps.put("textInput", textInput.isChecked());
+                    caps.put("appLaunch", appLaunch.isChecked());
+                    caps.put("globalNavigation", globalNav.isChecked());
                     savePermissions(client, caps, autoApprove.isChecked());
                 })
                 .show();

@@ -47,7 +47,6 @@ public class PendingApprovalsActivity extends AppCompatActivity {
             @Override public void onIgnore(@NonNull PendingApproval item) { ignore(item); }
         });
         recycler.setAdapter(adapter);
-        requestNotificationPermissionOnce();
     }
 
     @Override protected void onResume() {
@@ -172,23 +171,4 @@ public class PendingApprovalsActivity extends AppCompatActivity {
         if (manager != null) manager.cancel(id.hashCode());
     }
 
-    private void requestNotificationPermissionOnce() {
-        if (Build.VERSION.SDK_INT < 33
-                || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED) return;
-        if (getPreferences(MODE_PRIVATE).getBoolean("notification_permission_asked", false)) return;
-        getPreferences(MODE_PRIVATE).edit().putBoolean("notification_permission_asked", true).apply();
-        ActivityCompat.requestPermissions(this,
-                new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFICATIONS);
-    }
-
-    @Override public void onRequestPermissionsResult(int requestCode,
-                                                     @NonNull String[] permissions,
-                                                     @NonNull int[] results) {
-        super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == REQUEST_NOTIFICATIONS && (results.length == 0
-                || results[0] != PackageManager.PERMISSION_GRANTED)) {
-            Toast.makeText(this, R.string.approval_notifications_denied, Toast.LENGTH_LONG).show();
-        }
-    }
 }

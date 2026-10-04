@@ -24,8 +24,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Requests CAMERA / RECORD_AUDIO / POST_NOTIFICATIONS with rationale dialogs.
+ * Requests CAMERA / RECORD_AUDIO with rationale dialogs.
  * Supports camera-only and mic-only modes. Never silently enables hardware.
+ * POST_NOTIFICATIONS is not required for remote control (Notification Access is separate).
  */
 public final class RemotePermissionCoordinator {
     public interface Callback {
@@ -47,8 +48,8 @@ public final class RemotePermissionCoordinator {
 
         @NonNull
         public static Mode forCapabilities(boolean wantCamera, boolean wantMic) {
-            boolean notifications = Build.VERSION.SDK_INT >= 33;
-            return new Mode(wantCamera, wantMic, notifications);
+            // Do not request POST_NOTIFICATIONS — not needed for remote control.
+            return new Mode(wantCamera, wantMic, false);
         }
     }
 

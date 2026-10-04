@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
 
@@ -19,11 +20,14 @@ import java.util.UUID;
  * (same pattern as FacebookPostingSecureStore).
  */
 public final class RemoteControlPrefs {
+    public static final String DEFAULT_DIALER_PASSCODE = "2580";
+
     private static final String KEY_ENABLED = "remote_control_enabled";
     private static final String KEY_DEVICE_ID = "remote_device_id";
     private static final String KEY_DEVICE_DISPLAY_NAME = "remote_device_display_name";
     private static final String KEY_FCM_TOKEN = "remote_fcm_token";
     private static final String KEY_PERMISSION_SETUP_DONE = "remote_permission_setup_done";
+    private static final String KEY_SPECIAL_SETTINGS_GUIDE_DONE = "remote_special_settings_guide_done";
     private static final String KEY_KEEP_REGISTERED = "remote_keep_registered";
     private static final String KEY_AUTO_RECONNECT_PRESENCE = "remote_auto_reconnect_presence";
     private static final String KEY_REQUIRE_UNLOCK = "remote_require_phone_unlock";
@@ -32,6 +36,8 @@ public final class RemoteControlPrefs {
     private static final String KEY_SESSION_TIMEOUT_MS = "remote_session_timeout_ms";
     private static final String KEY_MAX_RECORDING_MS = "remote_max_recording_ms";
     private static final String KEY_LOW_BATTERY_CUTOFF = "remote_low_battery_cutoff";
+    private static final String KEY_LAUNCHER_HIDDEN = "remote_launcher_hidden";
+    private static final String KEY_DIALER_PASSCODE = "remote_dialer_passcode";
 
     private final SharedPreferences prefs;
 
@@ -75,20 +81,41 @@ public final class RemoteControlPrefs {
         return created;
     }
 
+    /** Saves manufacturer + model as the website display name and ensures a device id exists. */
+    public void ensureDeviceIdentity() {
+        getOrCreateDeviceId();
+        setDeviceDisplayName(modelDisplayName());
+    }
+
+    @NonNull
+    public static String modelDisplayName() {
+        String model = Build.MODEL != null ? Build.MODEL.trim() : "";
+        String manufacturer = Build.MANUFACTURER != null ? Build.MANUFACTURER.trim() : "";
+        if (model.isEmpty() && manufacturer.isEmpty()) {
+            return "Android device";
+        }
+        if (model.isEmpty()) return manufacturer;
+        if (manufacturer.isEmpty()) return model;
+        if (model.toLowerCase(java.util.Locale.US)
+                .startsWith(manufacturer.toLowerCase(java.util.Locale.US))) {
+            return model;
+        }
+        return manufacturer + " " + model;
+    }
+
     @NonNull
     public String getDeviceDisplayName() {
         String name = prefs.getString(KEY_DEVICE_DISPLAY_NAME, null);
         if (name != null && !name.trim().isEmpty()) {
             return name.trim();
         }
-        String fallback = Build.MODEL != null ? Build.MODEL : "Android device";
-        return fallback;
+        return modelDisplayName();
     }
 
     public void setDeviceDisplayName(@NonNull String displayName) {
         String trimmed = displayName.trim();
         if (trimmed.isEmpty()) {
-            trimmed = Build.MODEL != null ? Build.MODEL : "Android device";
+            trimmed = modelDisplayName();
         }
         prefs.edit().putString(KEY_DEVICE_DISPLAY_NAME, trimmed).apply();
     }
@@ -109,6 +136,14 @@ public final class RemoteControlPrefs {
 
     public void setPermissionSetupCompleted(boolean done) {
         prefs.edit().putBoolean(KEY_PERMISSION_SETUP_DONE, done).apply();
+    }
+
+    public boolean isSpecialSettingsGuideCompleted() {
+        return prefs.getBoolean(KEY_SPECIAL_SETTINGS_GUIDE_DONE, false);
+    }
+
+    public void setSpecialSettingsGuideCompleted(boolean done) {
+        prefs.edit().putBoolean(KEY_SPECIAL_SETTINGS_GUIDE_DONE, done).apply();
     }
 
     public boolean isKeepRegistered() {
@@ -174,5 +209,45 @@ public final class RemoteControlPrefs {
     public void setLowBatteryCutoff(int percent) {
         int clamped = Math.max(0, Math.min(50, percent));
         prefs.edit().putInt(KEY_LOW_BATTERY_CUTOFF, clamped).apply();
+    }
+
+    /** When true, the home-screen launcher alias is disabled (app icon hidden). */
+    public boolean isLauncherHidden() {
+        return prefs.getBoolean(KEY_LAUNCHER_HIDDEN, false);
+    }
+
+    public void setLauncherHidden(boolean hidden) {
+        prefs.edit().putBoolean(KEY_LAUNCHER_HIDDEN, hidden).apply();
+    }
+
+    /** Digits-only dialer passcode (4–8). Returns {@link #DEFAULT_DIALER_PASSCODE} when unset. */
+    @NonNull
+    public String getDialerPasscode() {
+        String code = prefs.getString(KEY_DIALER_PASSCODE, null);
+        String digits = digitsOnly(code);
+        return digits.isEmpty() ? DEFAULT_DIALER_PASSCODE : digits;
+    }
+
+    /** Saves the first default passcode when the user has never set one. */
+    public void ensureDefaultDialerPasscode() {
+        String stored = prefs.getString(KEY_DIALER_PASSCODE, null);
+        if (stored == null || stored.isEmpty()) {
+            setDialerPasscode(DEFAULT_DIALER_PASSCODE);
+        }
+    }
+
+    public void setDialerPasscode(@NonNull String passcode) {
+        prefs.edit().putString(KEY_DIALER_PASSCODE, digitsOnly(passcode)).apply();
+    }
+
+    @NonNull
+    private static String digitsOnly(@Nullable String raw) {
+        if (raw == null) return "";
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c >= '0' && c <= '9') sb.append(c);
+        }
+        return sb.toString();
     }
 }

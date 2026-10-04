@@ -95,6 +95,41 @@ export async function generateDallePngBase64(apiKey, imagePrompt) {
   return b64;
 }
 
+/**
+ * Support chat agent reply (text + optional vision for payment screenshots).
+ * @param {string} apiKey
+ * @param {{ system: string, history: object[], userParts: object[] }} input
+ */
+export async function generateSupportAgentReply(apiKey, input) {
+  const messages = [{ role: "system", content: String(input.system || "") }];
+  for (const h of input.history || []) {
+    if (h?.role && h?.content != null) messages.push(h);
+  }
+  messages.push({ role: "user", content: input.userParts || [] });
+
+  const body = JSON.stringify({
+    model: "gpt-4o-mini",
+    messages,
+    temperature: 0.55,
+    max_tokens: 900,
+  });
+
+  const res = await fetch(CHAT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body,
+  });
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`OPENAI_SUPPORT_HTTP_${res.status}: ${raw.slice(0, 200)}`);
+  const json = JSON.parse(raw);
+  const out = json.choices?.[0]?.message?.content?.trim();
+  if (!out) throw new Error("Empty support reply from OpenAI");
+  return out;
+}
+
 export function buildFacebookImagePrompt(captionSummary, topicBlock, brand, localeCueLine) {
   let sb =
     "Award-winning commercial advertising photograph, ultra sharp detail, cinematic lighting, " +

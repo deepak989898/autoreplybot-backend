@@ -107,12 +107,14 @@ public class RemoteScreenMirrorService extends Service {
         RemoteMediaProjectionHolder.Consent consent = RemoteMediaProjectionHolder.take();
         if (consent == null || consent.resultData == null) {
             Log.w(TAG, "No MediaProjection consent");
+            RemoteScreenMirrorConsentGate.leave();
             stopSelf();
             return START_NOT_STICKY;
         }
         startAsForeground(clientName != null ? clientName : "Browser");
         active = true;
         activeSessionId = sessionId;
+        RemoteMediaProjectionConsentActivity.clearMirrorConsentGuard();
         if (publisher != null) publisher.stop();
         publisher = new RemoteWebRtcPublisher(this);
         publisher.setListener(new RemoteWebRtcPublisher.Listener() {

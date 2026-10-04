@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged"
-    android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault"
-    android:canRetrieveWindowContent="false"
-    android:description="@string/remote_app_block_accessibility_desc"
-    android:notificationTimeout="250"
-    android:settingsActivity="com.autoreplybot.remote.RemoteControlHomeActivity" />

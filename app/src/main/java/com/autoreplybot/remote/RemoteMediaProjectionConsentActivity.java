@@ -16,7 +16,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.autoreplybot.R;
 
 /**
- * Official MediaProjection consent UI. Never starts capture silently.
+ * Official MediaProjection consent UI. When Remote Accessibility is connected,
+ * {@link RemoteMediaProjectionAutoApprove} clicks Cast/Start on the system dialog.
  */
 public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
     public static final String EXTRA_CONTINUE_ACTION = "continueAction";
@@ -35,6 +36,15 @@ public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
     public static final String EXTRA_RECORDING_ID = "recordingId";
 
     private static final int REQ_PROJECTION = 9101;
+    private boolean projectionRequested;
+
+    public static boolean isMirrorConsentInProgress(@NonNull String sessionId) {
+        return RemoteScreenMirrorConsentGate.isInFlight();
+    }
+
+    public static void clearMirrorConsentGuard() {
+        RemoteScreenMirrorConsentGate.leave();
+    }
 
     @NonNull
     public static Intent intentForMirror(@NonNull Context context,
@@ -54,7 +64,10 @@ public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
         i.putExtra(EXTRA_WITH_MIC, withMic);
         i.putExtra(EXTRA_QUALITY, quality);
         i.putExtra(EXTRA_FPS, fps);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (!(context instanceof Activity)) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
         return i;
     }
 
@@ -72,25 +85,58 @@ public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
         i.putExtra(EXTRA_WITH_MIC, withMic);
         i.putExtra(EXTRA_QUALITY, quality);
         i.putExtra(EXTRA_FPS, fps);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (!(context instanceof Activity)) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
         return i;
     }
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Android does not allow reusing the same MediaProjection resultData.
-        // Always request a fresh system consent for record/mirror.
+        Intent src = getIntent();
+        String action = src != null ? String.valueOf(src.getStringExtra(EXTRA_CONTINUE_ACTION)) : "";
+        String sessionId = safe(src != null ? src.getStringExtra(EXTRA_SESSION_ID) : null);
+        if (ACTION_MIRROR.equals(action) && !sessionId.isEmpty()) {
+            if (!RemoteScreenMirrorConsentGate.tryEnter(sessionId)) {
+                finish();
+                return;
+            }
+        }
+        if (projectionRequested || (savedInstanceState != null
+                && savedInstanceState.getBoolean("projectionRequested", false))) {
+            finish();
+            return;
+        }
+        requestProjectionConsent();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        // Ignore duplicate mirror requests while the cast dialog is already open.
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putBoolean("projectionRequested", projectionRequested);
+    }
+
+    private void requestProjectionConsent() {
+        RemoteSessionNotifAutoClick.disarm();
         RemoteMediaProjectionHolder.clear();
         MediaProjectionManager mpm =
                 (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         if (mpm == null) {
+            RemoteScreenMirrorConsentGate.leave();
             Toast.makeText(this, R.string.remote_screen_projection_unavailable, Toast.LENGTH_LONG)
                     .show();
             finish();
             return;
         }
-        // Android 14+: skip "single app vs entire screen" picker — entire display only.
         Intent captureIntent;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             captureIntent = mpm.createScreenCaptureIntent(
@@ -98,6 +144,8 @@ public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
         } else {
             captureIntent = mpm.createScreenCaptureIntent();
         }
+        projectionRequested = true;
+        RemoteMediaProjectionAutoApprove.arm(45_000L);
         startActivityForResult(captureIntent, REQ_PROJECTION);
     }
 
@@ -106,10 +154,23 @@ public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_PROJECTION) {
+            RemoteMediaProjectionAutoApprove.disarm();
+            RemoteScreenMirrorConsentGate.leave();
             finish();
             return;
         }
+        RemoteMediaProjectionAutoApprove.disarm();
         if (resultCode != Activity.RESULT_OK || data == null) {
+            RemoteScreenMirrorConsentGate.leave();
+            Intent src = getIntent();
+            String action = src != null ? String.valueOf(src.getStringExtra(EXTRA_CONTINUE_ACTION)) : "";
+            if (ACTION_RECORD.equals(action)) {
+                RemoteScreenRecordService.markFailed(
+                        this,
+                        safe(src != null ? src.getStringExtra(EXTRA_RECORDING_ID) : null),
+                        safe(src != null ? src.getStringExtra(EXTRA_TRANSFER_ID) : null),
+                        "Screen capture permission denied");
+            }
             Toast.makeText(this, R.string.remote_screen_permission_denied, Toast.LENGTH_LONG).show();
             RemoteMediaProjectionHolder.clear();
             finish();
@@ -143,6 +204,7 @@ public class RemoteMediaProjectionConsentActivity extends AppCompatActivity {
                     src.getBooleanExtra(EXTRA_WITH_MIC, false),
                     safe(src.getStringExtra(EXTRA_QUALITY)),
                     src.getIntExtra(EXTRA_FPS, 30));
+            RemoteScreenMirrorConsentGate.leave();
         }
         finish();
     }

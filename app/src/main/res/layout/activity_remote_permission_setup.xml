@@ -14,6 +14,14 @@
         app:title="@string/remote_setup_title" />
 
     <TextView
+        android:id="@+id/text_setup_progress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textAppearance="?attr/textAppearanceLabelLarge"
+        android:textColor="?attr/colorPrimary" />
+
+    <TextView
         android:id="@+id/text_setup_step"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

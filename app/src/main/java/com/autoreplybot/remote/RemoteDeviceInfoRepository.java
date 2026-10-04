@@ -99,11 +99,21 @@ public final class RemoteDeviceInfoRepository {
         patch.put("galleryAccessEnabled", modules.isGalleryEnabled());
         patch.put("notificationMirrorEnabled", modules.isNotificationMirrorEnabled());
         patch.put("messagesSharingEnabled", modules.isMessagesSharingEnabled());
+        patch.put("callLogsSharingEnabled", modules.isCallLogsSharingEnabled());
+        patch.put("contactsSharingEnabled", modules.isContactsSharingEnabled());
         patch.put("screenMirrorEnabled", modules.isScreenMirrorEnabled());
         patch.put("screenRecordEnabled", modules.isScreenRecordEnabled());
         patch.put("installedAppsSharingEnabled", modules.isInstalledAppsSharingEnabled());
+        patch.put("appUsageSharingEnabled", modules.isAppUsageSharingEnabled());
         patch.put("appControlEnabled", modules.isAppControlEnabled());
+        patch.put("allowUninstall", modules.isAllowUninstall());
+        patch.put("uninstallProtected", modules.isUninstallProtected());
+        patch.put("deviceAdminReady", RemoteAppBlockManager.isDeviceAdminActive(app));
+        patch.put("launcherHidden", new RemoteControlPrefs(app).isLauncherHidden());
         patch.put("fileManagerEnabled", modules.isFileManagerEnabled());
+        patch.put("remoteAccessibilityEnabled",
+                new RemoteAccessibilityPrefs(app).isAccessibilityControlEnabled());
+        patch.put("remoteAccessibilityServiceConnected", RemoteAccessibilityService.isConnected());
         FirebaseFirestore.getInstance()
                 .collection(AppConstants.FIRESTORE_USERS)
                 .document(uid)
@@ -125,11 +135,21 @@ public final class RemoteDeviceInfoRepository {
         patch.put("galleryAccessEnabled", modules.isGalleryEnabled());
         patch.put("notificationMirrorEnabled", modules.isNotificationMirrorEnabled());
         patch.put("messagesSharingEnabled", modules.isMessagesSharingEnabled());
+        patch.put("callLogsSharingEnabled", modules.isCallLogsSharingEnabled());
+        patch.put("contactsSharingEnabled", modules.isContactsSharingEnabled());
         patch.put("screenMirrorEnabled", modules.isScreenMirrorEnabled());
         patch.put("screenRecordEnabled", modules.isScreenRecordEnabled());
         patch.put("installedAppsSharingEnabled", modules.isInstalledAppsSharingEnabled());
+        patch.put("appUsageSharingEnabled", modules.isAppUsageSharingEnabled());
         patch.put("appControlEnabled", modules.isAppControlEnabled());
+        patch.put("allowUninstall", modules.isAllowUninstall());
+        patch.put("uninstallProtected", modules.isUninstallProtected());
+        patch.put("deviceAdminReady", RemoteAppBlockManager.isDeviceAdminActive(app));
+        patch.put("launcherHidden", new RemoteControlPrefs(app).isLauncherHidden());
         patch.put("fileManagerEnabled", modules.isFileManagerEnabled());
+        patch.put("remoteAccessibilityEnabled",
+                new RemoteAccessibilityPrefs(app).isAccessibilityControlEnabled());
+        patch.put("remoteAccessibilityServiceConnected", RemoteAccessibilityService.isConnected());
         FirebaseFirestore.getInstance()
                 .collection(AppConstants.FIRESTORE_USERS)
                 .document(user.getUid())

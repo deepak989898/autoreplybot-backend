@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:clickable="true"
+    android:focusable="true"
+    app:cardBackgroundColor="@color/white"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="0dp"
+    app:strokeColor="#E3EAF2"
+    app:strokeWidth="1dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="14dp">
+
+        <ImageView
+            android:id="@+id/kyc_preview"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_kyc_icon"
+            android:padding="10dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="@string/kyc_title"
+            tools:src="@drawable/ic_kyc_id" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/kyc_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/welcome_title"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                tools:text="Aadhaar Card" />
+
+            <TextView
+                android:id="@+id/kyc_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="@color/welcome_body"
+                android:textSize="13sp"
+                tools:text="Front side" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/kyc_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/kyc_upload"
+            android:textColor="@color/brand_blue"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

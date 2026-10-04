@@ -2,6 +2,7 @@ package com.autoreplybot.remote;
 
 import android.Manifest;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -18,14 +19,20 @@ import androidx.core.content.ContextCompat;
 import com.autoreplybot.AppConstants;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QuerySnapshot;
 import com.google.firebase.firestore.SetOptions;
 import com.google.firebase.firestore.WriteBatch;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,6 +70,7 @@ public final class RemoteSmsMirror {
         String text = body != null ? body : "";
         long when = dateMs > 0 ? dateMs : System.currentTimeMillis();
         String itemId = sha256("live|" + addr + "|" + when + "|" + text).substring(0, 40);
+        if (isTombstonedLocal(app, itemId, 0L)) return;
         item.put("itemId", itemId);
         item.put("address", addr);
         item.put("senderName", lookupContactName(app, addr));
@@ -85,6 +93,7 @@ public final class RemoteSmsMirror {
 
         int max = Math.min(200, Math.max(20, limit));
         String deviceId = new RemoteControlPrefs(app).getOrCreateDeviceId();
+        Set<String> deletedItemIds = loadDeletedItemIds(app, user.getUid(), deviceId);
         WriteBatch batch = FirebaseFirestore.getInstance().batch();
         int n = 0;
         ContentResolver cr = app.getContentResolver();
@@ -115,6 +124,9 @@ public final class RemoteSmsMirror {
                 if (TextUtils.isEmpty(address) && TextUtils.isEmpty(body)) continue;
 
                 String itemId = sha256("sms|" + smsId).substring(0, 40);
+                if (deletedItemIds.contains(itemId) || isTombstonedLocal(app, itemId, smsId)) {
+                    continue;
+                }
                 Map<String, Object> item = new HashMap<>();
                 item.put("itemId", itemId);
                 item.put("smsId", smsId);
@@ -168,6 +180,213 @@ public final class RemoteSmsMirror {
         return fail.get() != null ? ERR_WRITE : n;
     }
 
+    /**
+     * Delete SMS on device (best-effort) + cloud cache + tombstones so sync won't restore them.
+     * @param items list of maps with itemId / smsId / address / body / date
+     * @return number deleted from provider (or processed), or ERR_*
+     */
+    public static int deleteMessages(@NonNull Context context, @NonNull List<Object> items) {
+        Context app = context.getApplicationContext();
+        FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null) return ERR_AUTH;
+        String deviceId = new RemoteControlPrefs(app).getOrCreateDeviceId();
+        ContentResolver cr = app.getContentResolver();
+        int deviceDeleted = 0;
+        WriteBatch batch = FirebaseFirestore.getInstance().batch();
+        int ops = 0;
+        long now = System.currentTimeMillis();
+
+        for (Object raw : items) {
+            if (!(raw instanceof Map)) continue;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> row = (Map<String, Object>) raw;
+            String itemId = String.valueOf(row.get("itemId") != null ? row.get("itemId") : "").trim();
+            if (itemId.isEmpty()) continue;
+            long smsId = RemoteMapValues.longValue(row, "smsId", 0L);
+            String address = String.valueOf(row.get("address") != null ? row.get("address") : "");
+            String body = String.valueOf(row.get("body") != null ? row.get("body") : "");
+            long date = RemoteMapValues.longValue(row, "date", 0L);
+
+            rememberTombstoneLocal(app, itemId, smsId);
+
+            boolean removed = false;
+            if (smsId > 0) {
+                removed = tryDeleteSmsById(cr, smsId);
+            }
+            if (!removed && (!TextUtils.isEmpty(address) || !TextUtils.isEmpty(body))) {
+                removed = tryDeleteSmsByMatch(cr, address, body, date);
+            }
+            if (removed) deviceDeleted++;
+
+            Map<String, Object> tomb = new HashMap<>();
+            tomb.put("itemId", itemId);
+            tomb.put("smsId", smsId > 0 ? smsId : 0L);
+            tomb.put("address", address);
+            tomb.put("date", date);
+            tomb.put("deletedAt", now);
+            batch.set(
+                    FirebaseFirestore.getInstance()
+                            .collection(AppConstants.FIRESTORE_USERS)
+                            .document(user.getUid())
+                            .collection(AppConstants.FIRESTORE_DEVICES)
+                            .document(deviceId)
+                            .collection(AppConstants.FIRESTORE_MESSAGE_DELETED)
+                            .document(itemId),
+                    tomb,
+                    SetOptions.merge());
+            batch.delete(
+                    FirebaseFirestore.getInstance()
+                            .collection(AppConstants.FIRESTORE_USERS)
+                            .document(user.getUid())
+                            .collection(AppConstants.FIRESTORE_DEVICES)
+                            .document(deviceId)
+                            .collection(AppConstants.FIRESTORE_MESSAGE_ITEMS)
+                            .document(itemId));
+            ops += 2;
+            if (ops >= 400) {
+                if (!commitBatch(batch)) return ERR_WRITE;
+                batch = FirebaseFirestore.getInstance().batch();
+                ops = 0;
+            }
+        }
+        if (ops > 0 && !commitBatch(batch)) return ERR_WRITE;
+        return deviceDeleted;
+    }
+
+    private static boolean tryDeleteSmsById(@NonNull ContentResolver cr, long smsId) {
+        try {
+            Uri uri = ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, smsId);
+            int n = cr.delete(uri, null, null);
+            return n > 0;
+        } catch (SecurityException e) {
+            Log.w(TAG, "SMS delete blocked (need default SMS app on some phones)", e);
+            return false;
+        } catch (Exception e) {
+            Log.w(TAG, "SMS delete by id failed", e);
+            return false;
+        }
+    }
+
+    private static boolean tryDeleteSmsByMatch(@NonNull ContentResolver cr,
+                                               @NonNull String address,
+                                               @NonNull String body,
+                                               long date) {
+        try {
+            String selection;
+            String[] args;
+            if (date > 0 && !TextUtils.isEmpty(address)) {
+                selection = Telephony.Sms.ADDRESS + "=? AND " + Telephony.Sms.DATE + "=?";
+                args = new String[]{address, String.valueOf(date)};
+            } else if (!TextUtils.isEmpty(address) && !TextUtils.isEmpty(body)) {
+                selection = Telephony.Sms.ADDRESS + "=? AND " + Telephony.Sms.BODY + "=?";
+                args = new String[]{address, body};
+            } else {
+                return false;
+            }
+            int n = cr.delete(Telephony.Sms.CONTENT_URI, selection, args);
+            return n > 0;
+        } catch (SecurityException e) {
+            Log.w(TAG, "SMS match-delete blocked", e);
+            return false;
+        } catch (Exception e) {
+            Log.w(TAG, "SMS match-delete failed", e);
+            return false;
+        }
+    }
+
+    @NonNull
+    private static Set<String> loadDeletedItemIds(@NonNull Context app,
+                                                  @NonNull String uid,
+                                                  @NonNull String deviceId) {
+        Set<String> out = new HashSet<>(loadLocalTombstoneIds(app));
+        AtomicReference<QuerySnapshot> snapRef = new AtomicReference<>();
+        CountDownLatch done = new CountDownLatch(1);
+        FirebaseFirestore.getInstance()
+                .collection(AppConstants.FIRESTORE_USERS)
+                .document(uid)
+                .collection(AppConstants.FIRESTORE_DEVICES)
+                .document(deviceId)
+                .collection(AppConstants.FIRESTORE_MESSAGE_DELETED)
+                .limit(500)
+                .get()
+                .addOnSuccessListener(s -> {
+                    snapRef.set(s);
+                    done.countDown();
+                })
+                .addOnFailureListener(e -> {
+                    Log.w(TAG, "load deleted tombstones failed", e);
+                    done.countDown();
+                });
+        try {
+            done.await(12, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        QuerySnapshot snap = snapRef.get();
+        if (snap != null) {
+            for (DocumentSnapshot d : snap.getDocuments()) {
+                out.add(d.getId());
+            }
+        }
+        return out;
+    }
+
+    private static void rememberTombstoneLocal(@NonNull Context app, @NonNull String itemId, long smsId) {
+        android.content.SharedPreferences p =
+                app.getSharedPreferences("remote_sms_deleted", Context.MODE_PRIVATE);
+        Set<String> ids = new HashSet<>(p.getStringSet("itemIds", new HashSet<>()));
+        ids.add(itemId);
+        if (ids.size() > 800) {
+            List<String> list = new ArrayList<>(ids);
+            ids = new HashSet<>(list.subList(list.size() - 600, list.size()));
+        }
+        android.content.SharedPreferences.Editor ed = p.edit().putStringSet("itemIds", ids);
+        if (smsId > 0) {
+            Set<String> sms = new HashSet<>(p.getStringSet("smsIds", new HashSet<>()));
+            sms.add(String.valueOf(smsId));
+            ed.putStringSet("smsIds", sms);
+        }
+        ed.apply();
+    }
+
+    private static boolean isTombstonedLocal(@NonNull Context app, @NonNull String itemId, long smsId) {
+        android.content.SharedPreferences p =
+                app.getSharedPreferences("remote_sms_deleted", Context.MODE_PRIVATE);
+        Set<String> ids = p.getStringSet("itemIds", null);
+        if (ids != null && ids.contains(itemId)) return true;
+        if (smsId > 0) {
+            Set<String> sms = p.getStringSet("smsIds", null);
+            return sms != null && sms.contains(String.valueOf(smsId));
+        }
+        return false;
+    }
+
+    @NonNull
+    private static Set<String> loadLocalTombstoneIds(@NonNull Context app) {
+        android.content.SharedPreferences p =
+                app.getSharedPreferences("remote_sms_deleted", Context.MODE_PRIVATE);
+        Set<String> ids = p.getStringSet("itemIds", null);
+        return ids != null ? new HashSet<>(ids) : new HashSet<>();
+    }
+
+    private static boolean commitBatch(@NonNull WriteBatch batch) {
+        AtomicReference<Exception> fail = new AtomicReference<>();
+        CountDownLatch done = new CountDownLatch(1);
+        batch.commit()
+                .addOnSuccessListener(v -> done.countDown())
+                .addOnFailureListener(e -> {
+                    fail.set(e);
+                    done.countDown();
+                });
+        try {
+            if (!done.await(25, TimeUnit.SECONDS)) return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return fail.get() == null;
+    }
+
     private static void writeItem(@NonNull Context app, @NonNull Map<String, Object> item) {
         FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
         if (user == null) return;
@@ -176,6 +395,7 @@ public final class RemoteSmsMirror {
         item.put("deviceId", deviceId);
         item.put("syncedAt", System.currentTimeMillis());
         String itemId = String.valueOf(item.get("itemId"));
+        if (isTombstonedLocal(app, itemId, 0L)) return;
         FirebaseFirestore.getInstance()
                 .collection(AppConstants.FIRESTORE_USERS)
                 .document(user.getUid())

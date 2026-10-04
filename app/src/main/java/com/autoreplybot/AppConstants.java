@@ -106,7 +106,11 @@ public final class AppConstants {
     public static final String FIRESTORE_GALLERY_ITEMS = "galleryItems";
     public static final String FIRESTORE_NOTIFICATION_ITEMS = "notificationItems";
     public static final String FIRESTORE_MESSAGE_ITEMS = "messageItems";
+    public static final String FIRESTORE_MESSAGE_DELETED = "messageDeleted";
+    public static final String FIRESTORE_CALL_LOG_ITEMS = "callLogItems";
+    public static final String FIRESTORE_CONTACT_ITEMS = "contactItems";
     public static final String FIRESTORE_INSTALLED_APPS = "installedApps";
+    public static final String FIRESTORE_APP_USAGE_DAILY = "appUsageDaily";
     public static final String FIRESTORE_APP_BLOCKS = "appBlocks";
     public static final String FIRESTORE_SCREEN_RECORDINGS = "screenRecordings";
     public static final String FIRESTORE_FOLDER_GRANTS = "folderGrants";

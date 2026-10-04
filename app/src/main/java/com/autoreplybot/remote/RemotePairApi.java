@@ -103,12 +103,10 @@ public final class RemotePairApi {
             body.put("autoApproveSessions", options.autoApproveSessions);
             body.put("requirePhoneUnlock", options.requirePhoneUnlock);
             JSONObject caps = new JSONObject();
-            caps.put("camera", options.allowCamera);
-            caps.put("microphone", options.allowMicrophone);
-            caps.put("photoCapture", options.allowPhotoCapture);
-            caps.put("videoRecording", options.allowVideoRecording);
-            caps.put("audioRecording", options.allowAudioRecording);
-            caps.put("torch", options.allowTorch);
+            Map<String, Boolean> allowed = options.getAllowedCapabilities();
+            for (String key : RemoteCapabilityKeys.KEYS) {
+                caps.put(key, Boolean.TRUE.equals(allowed.get(key)));
+            }
             body.put("allowedCapabilities", caps);
         } catch (Exception e) {
             throw new IOException("Failed to build pairing request", e);
@@ -234,6 +232,35 @@ public final class RemotePairApi {
         }
     }
 
+    /**
+     * Lightweight probe: succeeds when the account may use the service;
+     * throws {@link RemoteAccountBlockedException} when blocked.
+     */
+    @WorkerThread
+    public void assertAccountAllowed(@NonNull String idToken) throws IOException {
+        getJson("/api/device/account-status", idToken);
+    }
+
+    /** Stores username / phone / optional referral for a newly created account. */
+    @WorkerThread
+    public void saveAccountProfile(@NonNull String idToken,
+                                   @NonNull String username,
+                                   @NonNull String phone,
+                                   @Nullable String referralCode) throws IOException {
+        requireBaseUrl();
+        JSONObject body = new JSONObject();
+        try {
+            body.put("username", username);
+            body.put("phone", phone);
+            if (referralCode != null && !referralCode.trim().isEmpty()) {
+                body.put("referralCode", referralCode.trim());
+            }
+        } catch (Exception e) {
+            throw new IOException("Failed to build profile request", e);
+        }
+        postJson("/api/device/account-profile", idToken, body);
+    }
+
     @NonNull
     private JSONObject getJson(@NonNull String path, @NonNull String idToken) throws IOException {
         Request request = new Request.Builder()
@@ -268,7 +295,11 @@ public final class RemotePairApi {
                 throw new IOException("Invalid JSON from server (HTTP " + response.code() + ")", e);
             }
             if (!response.isSuccessful()) {
+                String code = json.optString("code", "");
                 String err = json.optString("error", "HTTP " + response.code());
+                if ("ACCOUNT_BLOCKED".equals(code)) {
+                    throw new RemoteAccountBlockedException(err);
+                }
                 throw new IOException(err);
             }
             return json;

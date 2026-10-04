@@ -39,10 +39,21 @@ public final class RemoteCapabilityKeys {
             "filesDelete",
             "notificationsList",
             "messagesList",
+            "callLogsList",
+            "contactsList",
             "screenMirror",
             "screenRecord",
             "installedAppsList",
+            "appUsageHistory",
             "appControl",
+            "remoteAccessibility",
+            "directTouch",
+            "smartElementControl",
+            "textInput",
+            "appLaunch",
+            "globalNavigation",
+            "clipboardInput",
+            "allowSensitiveApps",
     };
 
     @NonNull

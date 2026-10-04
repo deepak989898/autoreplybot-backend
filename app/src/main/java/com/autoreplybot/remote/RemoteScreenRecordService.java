@@ -61,6 +61,57 @@ public class RemoteScreenRecordService extends Service {
     private static final int NOTIFICATION_ID = 73012;
 
     private static final AtomicBoolean ACTIVE = new AtomicBoolean(false);
+    /** Direct handle so STOP/PAUSE work even when startService is blocked in background. */
+    @Nullable private static volatile RemoteScreenRecordService instance;
+    @Nullable private static volatile String pendingRecordingId;
+    @Nullable private static volatile String pendingTransferId;
+
+    public static void setPending(@NonNull String recordingId, @NonNull String transferId) {
+        pendingRecordingId = recordingId;
+        pendingTransferId = transferId;
+    }
+
+    public static void clearPending() {
+        pendingRecordingId = null;
+        pendingTransferId = null;
+    }
+
+    public static void cancelPending(@NonNull Context context) {
+        String rid = pendingRecordingId;
+        String tid = pendingTransferId;
+        clearPending();
+        RemoteMediaProjectionAutoApprove.disarm();
+        if (rid != null && !rid.isEmpty()) {
+            markFailed(context, rid, tid, "Cancelled");
+        }
+    }
+
+    public static void markWaitingForPermission(@NonNull Context context,
+                                                @NonNull String recordingId,
+                                                @Nullable String transferId,
+                                                boolean withMic,
+                                                @NonNull String quality,
+                                                int fps) {
+        writeRecordingRow(context, recordingId, transferId, "Waiting for Permission", 0L, 0L,
+                withMic, quality, fps, null, System.currentTimeMillis());
+        if (transferId != null && !transferId.isEmpty()) {
+            updateTransferRow(context, transferId, "pending", 0, null, null, null);
+        }
+    }
+
+    public static void markFailed(@NonNull Context context,
+                                  @NonNull String recordingId,
+                                  @Nullable String transferId,
+                                  @NonNull String message) {
+        writeRecordingRow(context, recordingId, transferId, "Failed", 0L, 0L,
+                false, "720p", 30, message, System.currentTimeMillis());
+        if (transferId != null && !transferId.isEmpty()) {
+            updateTransferRow(context, transferId, "failed", 0, null, "RECORD_FAILED", message);
+        }
+        if (recordingId.equals(pendingRecordingId)) {
+            clearPending();
+        }
+    }
 
     @Nullable private MediaProjection projection;
     @Nullable private VirtualDisplay virtualDisplay;
@@ -107,22 +158,58 @@ public class RemoteScreenRecordService extends Service {
     }
 
     public static void stop(@NonNull Context context) {
-        Intent i = new Intent(context, RemoteScreenRecordService.class);
-        i.setAction(ACTION_STOP);
-        // Service already in foreground while recording; startService is enough.
-        context.startService(i);
+        RemoteScreenRecordService svc = instance;
+        if (svc != null) {
+            svc.progressHandler.post(() -> svc.finishRecording(true));
+            return;
+        }
+        if (pendingRecordingId != null) {
+            cancelPending(context);
+            return;
+        }
+        dispatchControl(context, ACTION_STOP);
     }
 
     public static void pause(@NonNull Context context) {
-        Intent i = new Intent(context, RemoteScreenRecordService.class);
-        i.setAction(ACTION_PAUSE);
-        context.startService(i);
+        RemoteScreenRecordService svc = instance;
+        if (svc != null) {
+            svc.progressHandler.post(svc::pauseRecording);
+            return;
+        }
+        dispatchControl(context, ACTION_PAUSE);
     }
 
     public static void resume(@NonNull Context context) {
-        Intent i = new Intent(context, RemoteScreenRecordService.class);
-        i.setAction(ACTION_RESUME);
-        context.startService(i);
+        RemoteScreenRecordService svc = instance;
+        if (svc != null) {
+            svc.progressHandler.post(svc::resumeRecording);
+            return;
+        }
+        dispatchControl(context, ACTION_RESUME);
+    }
+
+    private static void dispatchControl(@NonNull Context context, @NonNull String action) {
+        try {
+            Intent i = new Intent(context, RemoteScreenRecordService.class);
+            i.setAction(action);
+            // Prefer startForegroundService so background command delivery is allowed.
+            ContextCompat.startForegroundService(context, i);
+        } catch (Exception e) {
+            Log.w(TAG, "dispatch " + action + " failed", e);
+            try {
+                Intent i = new Intent(context, RemoteScreenRecordService.class);
+                i.setAction(action);
+                context.startService(i);
+            } catch (Exception e2) {
+                Log.e(TAG, "fallback startService " + action + " failed", e2);
+            }
+        }
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        instance = this;
     }
 
     @Override
@@ -133,14 +220,36 @@ public class RemoteScreenRecordService extends Service {
         }
         String action = intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            if (!ACTIVE.get()) {
+                cancelPending(this);
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            // Ensure we stay a valid FGS if Android delivered via startForegroundService.
+            try {
+                startAsForeground();
+            } catch (Exception ignored) {
+            }
             finishRecording(true);
             return START_NOT_STICKY;
         }
         if (ACTION_PAUSE.equals(action)) {
+            if (ACTIVE.get()) {
+                try {
+                    startAsForeground();
+                } catch (Exception ignored) {
+                }
+            }
             pauseRecording();
             return START_STICKY;
         }
         if (ACTION_RESUME.equals(action)) {
+            if (ACTIVE.get()) {
+                try {
+                    startAsForeground();
+                } catch (Exception ignored) {
+                }
+            }
             resumeRecording();
             return START_STICKY;
         }
@@ -163,10 +272,12 @@ public class RemoteScreenRecordService extends Service {
         fps = intent.getIntExtra(EXTRA_FPS, 30);
         RemoteMediaProjectionHolder.Consent consent = RemoteMediaProjectionHolder.take();
         if (consent == null || consent.resultData == null) {
-            writeRecordingStatus("Failed", "MediaProjection consent required — approve the system dialog");
+            markFailed(this, recordingId != null ? recordingId : "",
+                    transferId, "MediaProjection consent required — approve the system dialog");
             stopSelf();
             return START_NOT_STICKY;
         }
+        clearPending();
         finishing.set(false);
         pausedAccumulatedMs = 0L;
         pauseStartedAt = 0L;
@@ -180,12 +291,53 @@ public class RemoteScreenRecordService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "start failed", e);
             ACTIVE.set(false);
-            writeRecordingStatus("Failed", e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : "start failed";
+            if (msg.toLowerCase(Locale.US).contains("re-use")
+                    || msg.toLowerCase(Locale.US).contains("reuse")
+                    || msg.toLowerCase(Locale.US).contains("timed out")) {
+                msg = "Screen capture permission expired. Tap Record Screen again and approve Cast.";
+            }
+            writeRecordingStatus("Failed", msg);
             RemoteMediaProjectionHolder.clear();
+            releaseCaptureOnly();
             stopForeground(true);
             stopSelf();
         }
         return START_STICKY;
+    }
+
+    /** Release capture objects without upload (used on failed start). */
+    private void releaseCaptureOnly() {
+        progressHandler.removeCallbacks(progressTick);
+        try {
+            if (recorder != null) {
+                try {
+                    recorder.reset();
+                } catch (Exception ignored) {
+                }
+                try {
+                    recorder.release();
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        recorder = null;
+        if (virtualDisplay != null) {
+            try {
+                virtualDisplay.release();
+            } catch (RuntimeException ignored) {
+            }
+            virtualDisplay = null;
+        }
+        MediaProjection proj = projection;
+        projection = null;
+        if (proj != null) {
+            try {
+                proj.stop();
+            } catch (RuntimeException ignored) {
+            }
+        }
     }
 
     private void beginCapture(@NonNull RemoteMediaProjectionHolder.Consent consent) throws Exception {
@@ -409,9 +561,36 @@ public class RemoteScreenRecordService extends Service {
                                     long durationMs,
                                     long sizeBytes,
                                     @Nullable String error) {
+        if (recordingId == null) return;
+        long createdAt = startedAt > 0 ? startedAt : System.currentTimeMillis();
+        writeRecordingRow(this, recordingId, transferId, status, durationMs, sizeBytes,
+                withMic, quality, fps, error, createdAt);
+    }
+
+    private void updateTransfer(@NonNull String uid,
+                                @NonNull String tid,
+                                @NonNull String status,
+                                int progress,
+                                @Nullable String storagePath,
+                                @Nullable String errorCode,
+                                @Nullable String errorMessage) {
+        updateTransferRow(uid, tid, status, progress, storagePath, errorCode, errorMessage);
+    }
+
+    private static void writeRecordingRow(@NonNull Context context,
+                                          @NonNull String recordingId,
+                                          @Nullable String transferId,
+                                          @NonNull String status,
+                                          long durationMs,
+                                          long sizeBytes,
+                                          boolean withMic,
+                                          @NonNull String quality,
+                                          int fps,
+                                          @Nullable String error,
+                                          long createdAtMs) {
         FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
-        if (user == null || recordingId == null) return;
-        String deviceId = new RemoteControlPrefs(this).getOrCreateDeviceId();
+        if (user == null || recordingId.isEmpty()) return;
+        String deviceId = new RemoteControlPrefs(context).getOrCreateDeviceId();
         Map<String, Object> row = new HashMap<>();
         row.put("ownerUid", user.getUid());
         row.put("deviceId", deviceId);
@@ -425,7 +604,7 @@ public class RemoteScreenRecordService extends Service {
         row.put("fps", fps);
         row.put("withMic", withMic);
         row.put("transferId", transferId != null ? transferId : "");
-        row.put("createdAt", startedAt > 0 ? startedAt : System.currentTimeMillis());
+        if (createdAtMs > 0) row.put("createdAt", createdAtMs);
         if ("Completed".equals(status) || "Failed".equals(status)) {
             row.put("completedAt", System.currentTimeMillis());
         }
@@ -440,13 +619,25 @@ public class RemoteScreenRecordService extends Service {
                 .set(row, SetOptions.merge());
     }
 
-    private void updateTransfer(@NonNull String uid,
-                                @NonNull String tid,
-                                @NonNull String status,
-                                int progress,
-                                @Nullable String storagePath,
-                                @Nullable String errorCode,
-                                @Nullable String errorMessage) {
+    private static void updateTransferRow(@NonNull Context context,
+                                          @NonNull String tid,
+                                          @NonNull String status,
+                                          int progress,
+                                          @Nullable String storagePath,
+                                          @Nullable String errorCode,
+                                          @Nullable String errorMessage) {
+        FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null || tid.isEmpty()) return;
+        updateTransferRow(user.getUid(), tid, status, progress, storagePath, errorCode, errorMessage);
+    }
+
+    private static void updateTransferRow(@NonNull String uid,
+                                          @NonNull String tid,
+                                          @NonNull String status,
+                                          int progress,
+                                          @Nullable String storagePath,
+                                          @Nullable String errorCode,
+                                          @Nullable String errorMessage) {
         Map<String, Object> patch = new HashMap<>();
         patch.put("status", status);
         patch.put("progress", progress);
@@ -527,6 +718,7 @@ public class RemoteScreenRecordService extends Service {
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         if (ACTIVE.get() && !finishing.get()) finishRecording(false);
         super.onDestroy();
     }

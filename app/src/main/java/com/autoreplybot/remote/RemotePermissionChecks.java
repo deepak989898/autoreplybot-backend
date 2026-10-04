@@ -28,9 +28,9 @@ public final class RemotePermissionChecks {
         return granted(context, Manifest.permission.RECORD_AUDIO);
     }
 
+    /** POST_NOTIFICATIONS is intentionally not used — sessions start without user alerts. */
     public static boolean hasPostNotifications(@NonNull Context context) {
-        if (Build.VERSION.SDK_INT < 33) return true;
-        return granted(context, Manifest.permission.POST_NOTIFICATIONS);
+        return true;
     }
 
     public static boolean hasFineLocation(@NonNull Context context) {
@@ -75,14 +75,52 @@ public final class RemotePermissionChecks {
         return false;
     }
 
-    /** True when at least one SAF folder URI is stored locally. */
+    /** True when internal storage or another SAF folder grant is active. */
     public static boolean hasFolderAccess(@NonNull Context context) {
-        return new RemoteModulePrefs(context).hasAnyFolderGrant();
+        RemoteFolderGrantHelper.restoreDefaultGrantIfPersisted(context);
+        return RemoteFolderGrantHelper.hasValidFolderAccess(context);
     }
 
     public static boolean hasSmsAccess(@NonNull Context context) {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS)
                 == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static boolean hasCallLogAccess(@NonNull Context context) {
+        return granted(context, Manifest.permission.READ_CALL_LOG);
+    }
+
+    /** Call log + phone state + mic — required to auto-record answered calls. */
+    public static boolean hasCallRecordingReady(@NonNull Context context) {
+        return hasCallLogAccess(context)
+                && hasMicrophone(context)
+                && granted(context, Manifest.permission.READ_PHONE_STATE);
+    }
+
+    public static boolean wasAsked(@NonNull Context context, @NonNull String permission) {
+        return context.getApplicationContext()
+                .getSharedPreferences("remote_perm_asked", Context.MODE_PRIVATE)
+                .getBoolean(permission, false);
+    }
+
+    public static void markAsked(@NonNull Context context, @NonNull String permission) {
+        context.getApplicationContext()
+                .getSharedPreferences("remote_perm_asked", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(permission, true)
+                .apply();
+    }
+
+    public static boolean wasNeverAsked(@NonNull Context context, @NonNull String permission) {
+        return !wasAsked(context, permission);
+    }
+
+    public static boolean wasDeniedOnce(@NonNull Context context, @NonNull String permission) {
+        return wasAsked(context, permission) && !granted(context, permission);
+    }
+
+    public static boolean hasContactsAccess(@NonNull Context context) {
+        return granted(context, Manifest.permission.READ_CONTACTS);
     }
 
     private static boolean granted(@NonNull Context context, @NonNull String permission) {

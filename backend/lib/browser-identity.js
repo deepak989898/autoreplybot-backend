@@ -95,6 +95,7 @@ export {
   normalizeAllowedCapabilities,
   capabilitiesAllowed,
   defaultCapabilitiesForNewBrowser,
+  effectiveBrowserCapabilities,
   mergeCapabilitiesWithoutElevation,
   requireCapability,
   CAPABILITY_KEYS,

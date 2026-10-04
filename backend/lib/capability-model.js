@@ -27,43 +27,33 @@ export const CAPABILITY_KEYS = [
   "filesDelete",
   "notificationsList",
   "messagesList",
+  "callLogsList",
+  "contactsList",
   "screenMirror",
   "screenRecord",
   "installedAppsList",
+  "appUsageHistory",
   "appControl",
+  "remoteAccessibility",
+  "directTouch",
+  "smartElementControl",
+  "textInput",
+  "appLaunch",
+  "globalNavigation",
+  "clipboardInput",
+  "allowSensitiveApps",
 ];
 
-/** Defaults for a newly paired browser (phone can raise caps later). */
+/** Defaults for a newly paired browser — all capabilities allowed. */
 export function defaultCapabilitiesForNewBrowser() {
-  return {
-    camera: true,
-    microphone: true,
-    photoCapture: true,
-    videoRecording: false,
-    audioRecording: false,
-    torch: true,
-    locationCurrent: false,
-    locationLive: false,
-    deviceInfoRead: true,
-    galleryList: false,
-    galleryPreview: false,
-    galleryDownload: false,
-    galleryDelete: false,
-    filesList: false,
-    filesPreview: false,
-    filesDownload: false,
-    filesUpload: false,
-    filesRename: false,
-    filesMove: false,
-    filesCopy: false,
-    filesDelete: false,
-    notificationsList: false,
-    messagesList: false,
-    screenMirror: false,
-    screenRecord: false,
-    installedAppsList: false,
-    appControl: false,
-  };
+  const out = {};
+  for (const key of CAPABILITY_KEYS) out[key] = true;
+  return out;
+}
+
+/** Effective caps for any paired browser (full trust; phone module prefs still gate sync on device). */
+export function effectiveBrowserCapabilities(_stored) {
+  return defaultCapabilitiesForNewBrowser();
 }
 
 /**
@@ -119,7 +109,7 @@ export function mergeCapabilitiesWithoutElevation(previous, proposedRaw) {
  * @param {ReturnType<typeof normalizeAllowedCapabilities>} allowed
  */
 export function capabilitiesAllowed(requested, allowed) {
-  const caps = normalizeAllowedCapabilities(allowed);
+  const caps = effectiveBrowserCapabilities(allowed);
   for (const c of requested || []) {
     const key = String(c || "").trim();
     if (!key) continue;
@@ -135,6 +125,6 @@ export function capabilitiesAllowed(requested, allowed) {
 }
 
 export function requireCapability(allowed, capabilityKey) {
-  const caps = normalizeAllowedCapabilities(allowed);
+  const caps = effectiveBrowserCapabilities(allowed);
   return Boolean(caps[capabilityKey]);
 }

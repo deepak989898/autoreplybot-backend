@@ -17,9 +17,10 @@ import {
   isPublicJwk,
   mergeCapabilitiesWithoutElevation,
   normalizeAllowedCapabilities,
+  effectiveBrowserCapabilities,
 } from "../lib/browser-identity.js";
-import { verifyFirebaseIdToken } from "../lib/auth.js";
 import { checkRateLimit } from "../lib/rate-limit.js";
+import { requireAuthedUser, touchPlatformUserFromAuth } from "../lib/platform-admin.js";
 import * as R from "../lib/remote-constants.js";
 import { randomBytes } from "crypto";
 
@@ -79,7 +80,8 @@ async function handleCreate(req, res) {
   }
   try {
     requirePairingSecret();
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
 
     const rl = checkRateLimit(`pair-create:${uid}`, PAIR_CREATE_LIMIT, PAIR_CREATE_WINDOW_MS);
     if (!rl.allowed) {
@@ -183,7 +185,9 @@ async function handleComplete(req, res) {
   let deviceId = "";
   try {
     requirePairingSecret();
-    ({ uid } = await verifyFirebaseIdToken(req.headers.authorization));
+    const authed = await requireAuthedUser(req);
+    uid = authed.uid;
+    void touchPlatformUserFromAuth(uid, authed.email);
     const body = parseBody(req.body);
     const code = String(body.code || "").trim();
     const token = String(body.token || "").trim();
@@ -246,20 +250,11 @@ async function handleComplete(req, res) {
       throw new Error("Pairing code missing browser public key — create a new code from the website");
     }
 
-    const trustBrowser = body.trustBrowser !== false;
+    const trustBrowser = true;
     const persistentPairing = body.persistentPairing !== false;
-    const autoApproveSessions = Boolean(body.autoApproveSessions) && trustBrowser;
+    const autoApproveSessions = true;
     const requirePhoneUnlock = Boolean(body.requirePhoneUnlock);
-    const allowedCapabilities = normalizeAllowedCapabilities(
-      body.allowedCapabilities || {
-        camera: body.allowCamera !== false,
-        microphone: body.allowMicrophone !== false,
-        photoCapture: body.allowPhotoCapture !== false,
-        videoRecording: Boolean(body.allowVideoRecording),
-        audioRecording: Boolean(body.allowAudioRecording),
-        torch: body.allowTorch !== false,
-      }
-    );
+    const allowedCapabilities = effectiveBrowserCapabilities(body.allowedCapabilities);
 
     const clientId = randomBytes(16).toString("hex");
     const now = Date.now();
@@ -376,11 +371,19 @@ async function handleRevoke(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
     const body = parseBody(req.body);
     const clientId = String(body.clientId || "").trim();
     if (!clientId || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) {
       throw new Error("clientId is required");
+    }
+    // Internal System control channel used by Platform Admin — never revoke from the phone.
+    if (clientId === "platform_admin") {
+      return res.status(403).json({
+        error: "System control client cannot be revoked",
+        code: "PROTECTED_CLIENT",
+      });
     }
 
     const ref = trustedClientsRef(uid).doc(clientId);
@@ -391,6 +394,12 @@ async function handleRevoke(req, res) {
     const data = snap.data() || {};
     if (String(data.ownerUid || "") !== uid) {
       throw new Error("Trusted client not found");
+    }
+    if (data.isPlatformAdminClient === true) {
+      return res.status(403).json({
+        error: "System control client cannot be revoked",
+        code: "PROTECTED_CLIENT",
+      });
     }
 
     const now = Date.now();
@@ -443,7 +452,8 @@ async function handleUpdateClient(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
     const body = parseBody(req.body);
     const clientId = String(body.clientId || "").trim();
     if (!clientId || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) {
@@ -524,20 +534,22 @@ async function handleClients(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   try {
-    const { uid } = await verifyFirebaseIdToken(req.headers.authorization);
+    const { uid, email } = await requireAuthedUser(req);
+    void touchPlatformUserFromAuth(uid, email);
     const snap = await trustedClientsRef(uid).get();
     const clients = [];
     snap.forEach((doc) => {
+      if (doc.id === "platform_admin") return;
       const item = sanitizeTrustedClient(doc.id, doc.data());
-      if (item) clients.push(item);
+      if (item && !item.isPlatformAdminClient) clients.push(item);
     });
     clients.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     return res.status(200).json({ ok: true, clients });
   } catch (e) {
     const mapped = pairingErrorResponse(e);
     return res.status(mapped.status).json({
-      error: mapped.status === 401 ? "Unauthorized" : "Client list failed",
-      code: mapped.status === 401 ? "AUTH_FAILED" : "CLIENT_LIST_FAILED",
+      error: mapped.code === "ACCOUNT_BLOCKED" ? mapped.error : mapped.status === 401 ? "Unauthorized" : "Client list failed",
+      code: mapped.code === "ACCOUNT_BLOCKED" ? "ACCOUNT_BLOCKED" : mapped.status === 401 ? "AUTH_FAILED" : "CLIENT_LIST_FAILED",
     });
   }
 }

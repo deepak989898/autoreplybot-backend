@@ -24,8 +24,16 @@ export const COL_GALLERY_ITEMS = "galleryItems";
 export const COL_NOTIFICATION_ITEMS = "notificationItems";
 /** users/{uid}/devices/{deviceId}/messageItems/{itemId} */
 export const COL_MESSAGE_ITEMS = "messageItems";
+/** users/{uid}/devices/{deviceId}/messageDeleted/{itemId} — tombstones so sync won't restore deleted SMS */
+export const COL_MESSAGE_DELETED = "messageDeleted";
+/** users/{uid}/devices/{deviceId}/callLogItems/{itemId} */
+export const COL_CALL_LOG_ITEMS = "callLogItems";
+/** users/{uid}/devices/{deviceId}/contactItems/{itemId} */
+export const COL_CONTACT_ITEMS = "contactItems";
 /** users/{uid}/devices/{deviceId}/installedApps/{appId} */
 export const COL_INSTALLED_APPS = "installedApps";
+/** users/{uid}/devices/{deviceId}/appUsageDaily/{itemId} */
+export const COL_APP_USAGE_DAILY = "appUsageDaily";
 /** users/{uid}/devices/{deviceId}/appBlocks/{blockId} */
 export const COL_APP_BLOCKS = "appBlocks";
 /** users/{uid}/devices/{deviceId}/screenRecordings/{recordingId} */
@@ -67,7 +75,11 @@ export const AUDIT_GALLERY_TRANSFER = "GALLERY_FILE_REQUESTED";
 export const AUDIT_GALLERY_DELETE = "GALLERY_DELETION_REQUESTED";
 export const AUDIT_NOTIFICATIONS_SYNC = "NOTIFICATIONS_SYNC_REQUESTED";
 export const AUDIT_MESSAGES_SYNC = "MESSAGES_SYNC_REQUESTED";
+export const AUDIT_MESSAGES_DELETE = "MESSAGES_DELETE_REQUESTED";
+export const AUDIT_CALL_LOGS_SYNC = "CALL_LOGS_SYNC_REQUESTED";
+export const AUDIT_CONTACTS_SYNC = "CONTACTS_SYNC_REQUESTED";
 export const AUDIT_APPS_SYNC = "INSTALLED_APPS_SYNC_REQUESTED";
+export const AUDIT_APP_USAGE_SYNC = "APP_USAGE_SYNC_REQUESTED";
 export const AUDIT_APP_CONTROL = "APP_CONTROL_COMMAND";
 export const AUDIT_SCREEN_RECORD = "SCREEN_RECORD_COMMAND";
 export const AUDIT_FOLDER_GRANTED = "FOLDER_ACCESS_GRANTED";

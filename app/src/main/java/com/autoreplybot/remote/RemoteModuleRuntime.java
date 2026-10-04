@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.autoreplybot.BuildConfig;
 
@@ -30,18 +31,26 @@ public final class RemoteModuleRuntime {
     private static final AtomicBoolean started = new AtomicBoolean(false);
     private static final ExecutorService io = Executors.newSingleThreadExecutor();
     private static final Handler main = new Handler(Looper.getMainLooper());
+    @Nullable private static volatile Context appContext;
 
     private RemoteModuleRuntime() {}
 
     public static void start(@NonNull Context context) {
         Context app = context.getApplicationContext();
+        appContext = app;
         RemoteControlPrefs prefs = new RemoteControlPrefs(app);
         if (!prefs.isRemoteControlEnabled()) {
             RemoteModuleCommandListener.stop();
+            RemoteCallRecordingWatcher.stop(app);
+            RemoteSessionRequestWatch.stop();
+            RemoteDeviceRepository.stopPresenceLoop();
             started.set(false);
             return;
         }
         RemoteModuleCommandListener.start(app);
+        RemoteCallRecordingWatcher.syncWithPrefs(app);
+        RemoteSessionRequestWatch.start(app);
+        RemoteDeviceRepository.startPresenceLoop(app);
         if (started.compareAndSet(false, true)) {
             syncCapabilitySecret(app);
         } else if (!new RemoteModulePrefs(app).isCapabilitySecretSynced()) {
@@ -51,6 +60,10 @@ public final class RemoteModuleRuntime {
 
     public static void stop() {
         RemoteModuleCommandListener.stop();
+        RemoteSessionRequestWatch.stop();
+        RemoteDeviceRepository.stopPresenceLoop();
+        Context app = appContext;
+        if (app != null) RemoteCallRecordingWatcher.stop(app);
         started.set(false);
     }
 

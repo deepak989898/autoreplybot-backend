@@ -53,13 +53,21 @@ public final class RemoteAppBlockManager {
         String enabled = Settings.Secure.getString(
                 context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (TextUtils.isEmpty(enabled)) return false;
-        String needle = context.getPackageName() + "/"
-                + RemoteAppBlockAccessibilityService.class.getName();
-        String shortNeedle = context.getPackageName() + "/.remote.RemoteAppBlockAccessibilityService";
+        String pkg = context.getPackageName();
+        // Single service now (RemoteAccessibilityService). Still accept legacy AppBlock name
+        // if an older build left it enabled until the user reboots / updates.
+        String[] needles = {
+                pkg + "/" + RemoteAccessibilityService.class.getName(),
+                pkg + "/.remote.RemoteAccessibilityService",
+        };
         for (String part : enabled.split(":")) {
-            if (needle.equalsIgnoreCase(part) || shortNeedle.equalsIgnoreCase(part)) return true;
-            if (part != null && part.startsWith(context.getPackageName())
-                    && part.contains("RemoteAppBlockAccessibilityService")) {
+            if (part == null) continue;
+            for (String needle : needles) {
+                if (needle.equalsIgnoreCase(part)) return true;
+            }
+            if (part.startsWith(pkg)
+                    && (part.contains("RemoteAccessibilityService")
+                    || part.contains("RemoteAppBlockAccessibilityService"))) {
                 return true;
             }
         }
@@ -228,6 +236,7 @@ public final class RemoteAppBlockManager {
 
     void clearCameraHardwareQuietly() {
         if (!isDeviceAdminActive(app)) return;
+        if (new RemoteModulePrefs(app).isPendingSelfUninstall()) return;
         DevicePolicyManager dpm = (DevicePolicyManager) app.getSystemService(Context.DEVICE_POLICY_SERVICE);
         if (dpm == null) return;
         try {

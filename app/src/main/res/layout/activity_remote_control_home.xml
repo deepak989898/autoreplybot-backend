@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
@@ -11,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         app:navigationIcon="@drawable/ic_arrow_back_24"
-        app:title="@string/remote_control_title" />
+        app:title="@string/loan_profile_settings" />
 
     <ProgressBar
         android:id="@+id/progress"
@@ -38,111 +37,45 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="1dp">
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:paddingHorizontal="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="10dp">
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switch_remote_enabled"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:minHeight="40dp"
-                        android:text="@string/remote_control_enable"
-                        android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    android:padding="20dp">
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/remote_control_enable_hint"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:maxLines="2"
-                        android:ellipsize="end" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:gravity="center_vertical"
-                        android:minHeight="32dp"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/remote_online_status"
-                            android:textAppearance="?attr/textAppearanceBodyMedium"
-                            android:textStyle="bold" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chip_online"
-                            style="@style/Widget.Material3.Chip.Assist"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:clickable="false"
-                            android:focusable="false"
-                            android:text="@string/remote_status_offline"
-                            app:chipMinHeight="28dp"
-                            app:ensureMinTouchTargetSize="false" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/remote_device_id_label"
-                        android:textAppearance="?attr/textAppearanceLabelMedium" />
-
-                    <TextView
-                        android:id="@+id/text_device_id"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:fontFamily="monospace"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textIsSelectable="true"
-                        android:maxLines="1"
-                        android:ellipsize="middle"
-                        tools:text="550e8400-e29b…" />
+                        android:text="@string/remote_referral_code"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textStyle="bold" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:hint="@string/remote_device_name_hint"
-                        app:boxCollapsedPaddingTop="0dp">
+                        android:layout_marginTop="16dp"
+                        android:hint="@string/remote_pair_code_hint">
 
                         <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/input_device_name"
+                            android:id="@+id/input_pair_code"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:minHeight="40dp"
-                            android:paddingTop="8dp"
-                            android:paddingBottom="8dp"
-                            android:inputType="textCapWords"
-                            android:maxLines="1" />
+                            android:importantForAutofill="no"
+                            android:inputType="number"
+                            android:maxLength="6" />
                     </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_save_name"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:id="@+id/button_pair_save"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:minHeight="40dp"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        android:text="@string/remote_save_name" />
+                        android:layout_height="56dp"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/remote_pair_save"
+                        android:textAllCaps="false"
+                        app:cornerRadius="28dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -185,85 +118,12 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="2dp"
-                android:text="@string/remote_home_accordion_hint"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="#64748B" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_pairing"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:cardBackgroundColor="#E3F2FD"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="2dp"
-                app:strokeColor="#64B5F6"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="14dp">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/remote_pairing_section"
-                        android:textColor="#1565C0"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_pair_website"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:minHeight="52dp"
-                        android:text="@string/remote_pair_website"
-                        android:textColor="@color/menu_contacts_fg"
-                        app:backgroundTint="@color/menu_contacts_bg"
-                        app:cornerRadius="14dp"
-                        app:icon="@drawable/ic_menu_remote"
-                        app:iconGravity="textStart"
-                        app:iconPadding="12dp"
-                        app:iconTint="@color/menu_contacts_fg" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_trusted_browsers"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:minHeight="52dp"
-                        android:text="@string/remote_trusted_browsers"
-                        android:textColor="@color/menu_privacy_fg"
-                        app:backgroundTint="@color/menu_privacy_bg"
-                        app:cornerRadius="14dp"
-                        app:icon="@drawable/ic_menu_privacy"
-                        app:iconGravity="textStart"
-                        app:iconPadding="12dp"
-                        app:iconTint="@color/menu_privacy_fg" />
-                
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
+            <!-- Permission rows stay in the layout for setup logic but are not shown. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/card_permissions"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                app:cardBackgroundColor="#F3E5F5"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="2dp"
-                app:strokeColor="#BA68C8"
-                app:strokeWidth="1dp">
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -359,34 +219,6 @@
 
                         <com.google.android.material.chip.Chip
                             android:id="@+id/chip_microphone"
-                            style="@style/Widget.Material3.Chip.Assist"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:clickable="false"
-                            android:focusable="false"
-                            android:text="@string/status_disabled"
-                            app:ensureMinTouchTargetSize="false" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:id="@+id/row_perm_notifications"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:background="?attr/selectableItemBackground"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingVertical="4dp">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/remote_perm_notifications"
-                            android:textAppearance="?attr/textAppearanceBodyLarge" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chip_notifications"
                             style="@style/Widget.Material3.Chip.Assist"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -565,6 +397,62 @@
                     </LinearLayout>
 
                     <LinearLayout
+                        android:id="@+id/row_perm_call_logs"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingVertical="4dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/remote_perm_call_logs"
+                            android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_call_logs"
+                            style="@style/Widget.Material3.Chip.Assist"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:text="@string/status_disabled"
+                            app:ensureMinTouchTargetSize="false" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/row_perm_contacts"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingVertical="4dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/remote_perm_contacts"
+                            android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_contacts"
+                            style="@style/Widget.Material3.Chip.Assist"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:text="@string/status_disabled"
+                            app:ensureMinTouchTargetSize="false" />
+                    </LinearLayout>
+
+                    <LinearLayout
                         android:id="@+id/row_perm_screen"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -621,6 +509,34 @@
                     </LinearLayout>
 
                     <LinearLayout
+                        android:id="@+id/row_perm_app_usage"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingVertical="4dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/remote_perm_app_usage"
+                            android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_app_usage"
+                            style="@style/Widget.Material3.Chip.Assist"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:clickable="false"
+                            android:focusable="false"
+                            android:text="@string/status_disabled"
+                            app:ensureMinTouchTargetSize="false" />
+                    </LinearLayout>
+
+                    <LinearLayout
                         android:id="@+id/row_perm_app_control"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -649,13 +565,16 @@
                             app:ensureMinTouchTargetSize="true" />
                     </LinearLayout>
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_open_device_admin"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                    <TextView
+                        android:id="@+id/text_permissions_all_granted"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/remote_open_device_admin" />
+                        android:layout_marginTop="12dp"
+                        android:gravity="center"
+                        android:text="@string/remote_perm_all_granted"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/button_enable_missing_permissions"
@@ -665,173 +584,11 @@
                         android:layout_marginTop="12dp"
                         android:text="@string/remote_perm_enable_missing" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_open_app_settings"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/remote_open_app_settings" />
-                
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_management"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                app:cardBackgroundColor="#FFF3E0"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="2dp"
-                app:strokeColor="#FFB74D"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <LinearLayout
-                        android:id="@+id/header_management"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:background="#EF6C00"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:padding="14dp">
-
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_menu_settings"
-                            app:tint="@android:color/white" />
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:text="@string/remote_management_title"
-                            android:textColor="@android:color/white"
-                            android:textSize="16sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/chevron_management"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="▼"
-                            android:textColor="@android:color/white"
-                            android:textSize="14sp" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:id="@+id/body_management"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="14dp"
-                        android:visibility="gone">
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="@string/remote_management_hint"
-                            android:textAppearance="?attr/textAppearanceBodySmall"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switch_mgmt_location"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="@string/remote_location_enable" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/remote_location_mode_label"
-                        android:textAppearance="?attr/textAppearanceLabelLarge" />
-
-                    <RadioGroup
-                        android:id="@+id/radio_mgmt_location_mode"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <RadioButton
-                            android:id="@+id/radio_mgmt_mode_current"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:checked="true"
-                            android:text="@string/remote_location_mode_current" />
-
-                        <RadioButton
-                            android:id="@+id/radio_mgmt_mode_background"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/remote_location_mode_background" />
-                    </RadioGroup>
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switch_mgmt_gallery"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/remote_gallery_enable" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switch_mgmt_notifications"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/remote_notif_enable" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_mgmt_notif_sync"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/remote_notif_sync_now" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switch_mgmt_files"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/remote_files_enable" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_mgmt_choose_folder"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/remote_perm_choose_folder" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/remote_files_folders_label"
-                        android:textAppearance="?attr/textAppearanceLabelLarge" />
-
-                    <LinearLayout
-                        android:id="@+id/mgmt_folder_list"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical" />
-                
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+            <!-- Trusted browsers management removed — all paired browsers are fully trusted by default. -->
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

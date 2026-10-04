@@ -3,9 +3,12 @@ package com.autoreplybot.remote;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.ImageFormat;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.media.projection.MediaProjection;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -66,6 +69,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class RemoteWebRtcPublisher {
     private static final String TAG = "RemoteWebRtcPub";
+    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
+    private static final long STILL_CAPTURE_TIMEOUT_MS = 3500L;
     private static final String VIDEO_TRACK_ID = "ARDAMSv0";
     private static final String AUDIO_TRACK_ID = "ARDAMSa0";
     private static final Object FACTORY_LOCK = new Object();
@@ -173,7 +178,7 @@ public final class RemoteWebRtcPublisher {
         this.cameraEnabled = false;
         this.screenEnabled = true;
         this.microphoneEnabled = microphoneEnabled;
-        this.mediaProjectionData = new Intent(projectionData);
+        this.mediaProjectionData = projectionData;
         this.mediaProjectionResultCode = resultCode;
         this.captureHeight = preferredHeight > 0 ? preferredHeight : 720;
         this.captureFps = fps > 0 ? Math.min(60, fps) : 30;
@@ -222,11 +227,15 @@ public final class RemoteWebRtcPublisher {
                 return;
             }
             AtomicBoolean done = new AtomicBoolean(false);
+            final Runnable[] timeoutRef = new Runnable[1];
             VideoSink sink = new VideoSink() {
                 @Override
                 public void onFrame(VideoFrame frame) {
                     if (!done.compareAndSet(false, true)) {
                         return;
+                    }
+                    if (timeoutRef[0] != null) {
+                        MAIN_HANDLER.removeCallbacks(timeoutRef[0]);
                     }
                     try {
                         track.removeSink(this);
@@ -246,9 +255,21 @@ public final class RemoteWebRtcPublisher {
                     }
                 }
             };
+            timeoutRef[0] = () -> {
+                if (!done.compareAndSet(false, true)) return;
+                try {
+                    track.removeSink(sink);
+                } catch (RuntimeException ignored) {
+                }
+                callback.onComplete(false, "frame_timeout");
+            };
             try {
                 track.addSink(sink);
+                MAIN_HANDLER.postDelayed(timeoutRef[0], STILL_CAPTURE_TIMEOUT_MS);
             } catch (Exception e) {
+                if (timeoutRef[0] != null) {
+                    MAIN_HANDLER.removeCallbacks(timeoutRef[0]);
+                }
                 callback.onComplete(false,
                         e.getMessage() != null ? e.getMessage() : "sink_failed");
             }
@@ -426,7 +447,7 @@ public final class RemoteWebRtcPublisher {
                     SurfaceTextureHelper.create("RemoteWebRtcCapture", eglBase.getEglBaseContext());
             videoSource = factory.createVideoSource(videoCapturer.isScreencast());
             videoCapturer.initialize(surfaceTextureHelper, appContext, videoSource.getCapturerObserver());
-            int[] size = sizeForHeight(captureHeight);
+            int[] size = sizeForScreenCapture(appContext, captureHeight);
             videoCapturer.startCapture(size[0], size[1], captureFps);
             localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, videoSource);
             localVideoTrack.setEnabled(true);
@@ -618,9 +639,13 @@ public final class RemoteWebRtcPublisher {
             }
         }
         eglBase = EglBase.create();
+        // VOICE_COMMUNICATION keeps near-end capture usable while a phone call is active
+        // on many OEMs; do not open a second MediaRecorder (call recording) during live sessions.
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+                .setAudioSource(android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION)
                 .setUseHardwareAcousticEchoCanceler(true)
                 .setUseHardwareNoiseSuppressor(true)
+                .setUseLowLatency(true)
                 .createAudioDeviceModule();
         DefaultVideoEncoderFactory encoderFactory =
                 new DefaultVideoEncoderFactory(eglBase.getEglBaseContext(), true, true);
@@ -715,6 +740,32 @@ public final class RemoteWebRtcPublisher {
         if (h >= 700) return new int[]{1280, 720};
         if (h >= 450) return new int[]{854, 480};
         return new int[]{640, 360};
+    }
+
+    /**
+     * Capture size that matches current display orientation to reduce letterboxing
+     * and improve remote-control tap accuracy.
+     */
+    @NonNull
+    private static int[] sizeForScreenCapture(@NonNull android.content.Context context, int preferredHeight) {
+        Point display = RemoteAccessibilityCoordinateMapper.screenSize(context);
+        int dw = Math.max(1, display.x);
+        int dh = Math.max(1, display.y);
+        boolean portrait = dh >= dw;
+        int shortSide;
+        if (preferredHeight >= 1000) shortSide = 1080;
+        else if (preferredHeight >= 700) shortSide = 720;
+        else if (preferredHeight >= 450) shortSide = 480;
+        else shortSide = 360;
+        int longSide = Math.round(shortSide * (Math.max(dw, dh) / (float) Math.min(dw, dh)));
+        longSide = Math.max(shortSide + 2, Math.min(longSide, 2560));
+        // WebRTC / encoders prefer even dimensions.
+        shortSide &= ~1;
+        longSide &= ~1;
+        if (portrait) {
+            return new int[]{shortSide, longSide};
+        }
+        return new int[]{longSide, shortSide};
     }
 
     private final PeerConnection.Observer peerObserver = new PeerConnection.Observer() {

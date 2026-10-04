@@ -134,6 +134,13 @@ public class RemoteAutoStartActivity extends AppCompatActivity {
                                     @NonNull String clientId,
                                     @NonNull String clientName,
                                     boolean withMic) {
+        if (RemoteScreenMirrorConsentGate.isInFlight()
+                || (RemoteScreenMirrorService.isActive()
+                && sessionId.equals(RemoteScreenMirrorService.getActiveSessionId()))) {
+            finish();
+            return;
+        }
+        RemoteSessionNotifAutoClick.disarm();
         auditRepository.append(
                 RemoteAuditAction.SESSION_STARTED,
                 prefs.getOrCreateDeviceId(),

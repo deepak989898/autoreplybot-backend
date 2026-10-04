@@ -235,7 +235,15 @@ export async function endActiveSessionsForDevice(
  */
 export function pairingErrorResponse(e) {
   const msg = e instanceof Error ? e.message : String(e);
-  if (msg.includes("Authorization") || msg.includes("Unauthorized")) {
+  const errCode = e && typeof e === "object" && "code" in e ? String(e.code || "") : "";
+  if (errCode === "ACCOUNT_BLOCKED") {
+    return {
+      status: 403,
+      error: msg || "Your account has been disabled by an administrator.",
+      code: "ACCOUNT_BLOCKED",
+    };
+  }
+  if (msg.includes("Authorization") || msg.includes("Unauthorized") || errCode === "AUTH_FAILED") {
     return { status: 401, error: "Unauthorized", code: "AUTH_FAILED" };
   }
   if (msg.includes("PAIRING_TOKEN_SECRET")) {

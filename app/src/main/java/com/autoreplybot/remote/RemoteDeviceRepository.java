@@ -9,9 +9,12 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.os.BatteryManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.autoreplybot.AppConstants;
 import com.google.android.gms.tasks.Task;
@@ -31,6 +34,10 @@ import java.util.Map;
  */
 public final class RemoteDeviceRepository {
     private static final long HEARTBEAT_MIN_INTERVAL_MS = 60_000L;
+    private static final long PRESENCE_INTERVAL_MS = 90_000L;
+    private static final Handler PRESENCE_HANDLER = new Handler(Looper.getMainLooper());
+    @Nullable private static Runnable presenceRunnable;
+    @Nullable private static Context presenceApp;
 
     private final Context app;
     private final RemoteControlPrefs prefs;
@@ -84,11 +91,24 @@ public final class RemoteDeviceRepository {
             String deviceId = prefs.getOrCreateDeviceId();
             validateId(deviceId);
             Map<String, Object> patch = new HashMap<>();
-            patch.put("lastSeenAt", System.currentTimeMillis());
+            long nowWall = System.currentTimeMillis();
+            patch.put("lastSeenAt", nowWall);
+            patch.put("updatedAt", nowWall);
             patch.put("online", true);
+            patch.put("remoteControlEnabled", true);
             patch.put("batteryLevel", readBatteryLevel());
             patch.put("isCharging", readIsCharging());
             patch.put("networkType", readNetworkType());
+            PackageManager pm = app.getPackageManager();
+            boolean hasCamera = pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+                    || pm.hasSystemFeature(PackageManager.FEATURE_CAMERA);
+            boolean hasMic = pm.hasSystemFeature(PackageManager.FEATURE_MICROPHONE);
+            patch.put("cameraAvailable", hasCamera);
+            patch.put("microphoneAvailable", hasMic);
+            patch.put("cameraPermission",
+                    RemotePermissionChecks.hasCamera(app) ? "granted" : "denied");
+            patch.put("microphonePermission",
+                    RemotePermissionChecks.hasMicrophone(app) ? "granted" : "denied");
             String fcmToken = prefs.getFcmToken();
             if (!fcmToken.isEmpty()) {
                 patch.put("fcmToken", fcmToken);
@@ -100,6 +120,41 @@ public final class RemoteDeviceRepository {
         }
     }
 
+    /** Keep lastSeenAt fresh while Remote Control is on so the website Online badge matches the PC clock. */
+    public static void startPresenceLoop(@NonNull Context context) {
+        Context app = context.getApplicationContext();
+        presenceApp = app;
+        if (presenceRunnable == null) {
+            presenceRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    Context c = presenceApp;
+                    if (c == null) return;
+                    if (!new RemoteControlPrefs(c).isRemoteControlEnabled()) return;
+                    new RemoteDeviceRepository(c).heartbeat(true);
+                    PRESENCE_HANDLER.postDelayed(this, PRESENCE_INTERVAL_MS);
+                }
+            };
+        }
+        PRESENCE_HANDLER.removeCallbacks(presenceRunnable);
+        new RemoteDeviceRepository(app).heartbeat(true);
+        PRESENCE_HANDLER.postDelayed(presenceRunnable, PRESENCE_INTERVAL_MS);
+    }
+
+    public static void stopPresenceLoop() {
+        if (presenceRunnable != null) {
+            PRESENCE_HANDLER.removeCallbacks(presenceRunnable);
+        }
+        Context c = presenceApp;
+        presenceApp = null;
+        if (c == null) return;
+        try {
+            new RemoteDeviceRepository(c).setOnline(false);
+        } catch (RuntimeException ignored) {
+            // Not signed in.
+        }
+    }
+
     @NonNull
     public Task<Void> setOnline(boolean online) {
         try {
@@ -108,9 +163,9 @@ public final class RemoteDeviceRepository {
             validateId(deviceId);
             Map<String, Object> patch = new HashMap<>();
             patch.put("online", online);
-            patch.put("lastSeenAt", System.currentTimeMillis());
-            if (!online) {
-                patch.put("remoteControlEnabled", false);
+            patch.put("remoteControlEnabled", prefs.isRemoteControlEnabled());
+            if (online) {
+                patch.put("lastSeenAt", System.currentTimeMillis());
             }
             return deviceDoc(uid, deviceId).set(patch, SetOptions.merge());
         } catch (RuntimeException error) {

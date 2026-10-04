@@ -1,0 +1,82 @@
+KALYANI LOAN — DIGITAL LOAN FACILITY AGREEMENT
+
+This Digital Loan Facility Agreement (“Agreement”) is entered into electronically between the borrower identified in the Kalyani Loan application, including name, mobile number, email address, and KYC records (“Borrower”), and the lending party operating through the Kalyani Loan platform together with its partner non-banking financial companies or other licensed lenders as may be disclosed at sanction (“Lender”).
+
+By scrolling this Agreement, ticking the confirmation box, and tapping Submit, the Borrower makes an irrevocable electronic offer to accept the sanctioned facility on the terms below. The timestamp of acceptance will be stored with the application record and will constitute the Borrower’s signature for all legal purposes permitted under the Information Technology Act, 2000 and applicable Indian law.
+
+1. DEFINITIONS AND INTERPRETATION
+“Facility” means the personal loan sanctioned in the application, up to the approved limit stated in the app after the Lender’s decision. “Sanctioned Limit” means the principal amount approved by the Lender, which may be equal to or lower than the amount requested. “Disbursement” means transfer of the Sanctioned Limit, or any part thereof actually remitted, to the bank account nominated by the Borrower. “EMI” means the equated monthly instalment calculated on the sanctioned principal, tenure, and disclosed annual interest rate on a reducing-balance basis. “UTR” means the Unique Transaction Reference or UPI reference recorded by the Lender as evidence of disbursement. Headings are for convenience only and do not affect interpretation. Words in the singular include the plural.
+
+2. SANCTION AND LIMIT
+The Lender may sanction an amount equal to or lower than the amount requested. The Sanctioned Limit displayed in the application after approval is the maximum principal that may be disbursed under this Agreement. Sanction does not itself create a right to immediate funds. Funds become payable only after (a) the Borrower submits accurate bank particulars, (b) this Agreement is accepted, and (c) the Lender records disbursement with a UTR. The Lender may decline disbursement if bank details cannot be verified or if information provided is incomplete or inconsistent.
+
+3. PURPOSE
+The Facility is a personal loan for lawful personal use by the Borrower. The Borrower shall not use proceeds for any illegal activity, speculation prohibited by law, money laundering, terrorist financing, gambling where unlawful, or on behalf of a third party without prior written disclosure. The Lender may request evidence of use and may recall the Facility if the purpose is misstated.
+
+4. ELIGIBILITY AND KYC
+The Borrower represents that they are a resident individual of competent legal capacity, that KYC documents uploaded are genuine and current, and that identity, address, and contact details are true. The Borrower authorises the Lender to verify KYC with authorised agencies, banks, and credit information companies. Any material misstatement, suppression, or use of another person’s identity is grounds for immediate cancellation, refusal of disbursement, and recovery of any amount already paid, together with costs.
+
+5. DISBURSEMENT
+After the Borrower submits accurate bank account details and accepts this Agreement, the Lender may disburse the Sanctioned Limit to that account in one or more tranches. The Lender will record a UTR or UPI reference. The loan becomes outstanding from the date of successful credit, as evidenced by that reference, regardless of when the Borrower actually checks the account. The Lender is not responsible for delays caused by the Borrower’s bank, incorrect IFSC, frozen accounts, or payment-system outages.
+
+6. BANK ACCOUNT PARTICULARS
+The Borrower is solely responsible for the correctness of account holder name, bank name, account number, and IFSC. The nominated account must belong to the Borrower. The Lender is not liable for delay, rejection, or mis-credit arising from incorrect particulars supplied by the Borrower. If funds are credited to an unintended account because of Borrower error, recovery from the unintended beneficiary is the Borrower’s responsibility. The Borrower shall promptly notify the Lender of any change in bank details before disbursement.
+
+7. INTEREST AND CHARGES
+Interest is charged at the annual percentage displayed at sanction, on a reducing-balance EMI basis, unless a different method is required by applicable regulation and disclosed in the app. EMI amounts shown at sanction are estimates rounded to the nearest rupee. The first EMI due date is calculated from the disbursement date, not from the date of application or sanction. Overdue charges, bounce charges, and other fees, if any, will be as disclosed in the app or in a subsequent notice. Taxes, if applicable, shall be borne by the Borrower as required by law.
+
+8. REPAYMENT
+The Borrower shall repay each EMI on or before the due date through the methods offered in the app, and may be required to submit payment proof including a screenshot and UTR. Payment is complete only when the Lender records it as received. The Borrower remains liable until the Lender confirms credit. Prepayment, if permitted, will be applied to outstanding principal after any disclosed charges. The Borrower shall not withhold EMI because of a dispute with a third party or because of delay in using the funds.
+
+9. SCHEDULE AND STATEMENTS
+The in-app repayment schedule, Home status, and any electronic statement constitute the primary record of outstanding principal, EMI dates, and payment status. The Borrower should check the app regularly. Silence or failure to open the app does not excuse non-payment. The Lender may correct obvious computational errors.
+
+10. BORROWER REPRESENTATIONS AND COVENANTS
+The Borrower confirms that: (a) information in the application is true and complete; (b) bank details belong to the Borrower; (c) the Borrower is not an undischarged insolvent; (d) no material litigation exists that would impair repayment; (e) the Borrower will keep contact details current; (f) the Borrower will not assign this Agreement without consent; and (g) the Borrower will cooperate with reasonable verification after disbursement. These representations are continuing.
+
+11. DEFAULT
+The following are events of default: failure to pay any EMI when due; providing false KYC or bank details; using funds for an unlawful purpose; insolvency, attachment, or similar proceedings; and any other material breach of this Agreement. Upon default the Lender may, to the extent permitted by law: levy disclosed overdue charges; report to credit information companies; suspend further facilities; demand immediate repayment of the entire outstanding; and pursue recovery through courts, arbitration, or authorised collection agents.
+
+12. SET-OFF AND APPROPRIATION
+The Lender may appropriate amounts received first towards charges, then interest, then principal, unless regulation requires otherwise. The Lender may set off any amount payable to the Borrower against amounts due under this Facility.
+
+13. DATA, COMMUNICATION, AND PRIVACY
+The Borrower authorises use of submitted KYC, application, device, and repayment data to assess, service, recover, and audit the Facility, and to communicate by app notification, SMS, email, or call. The Borrower consents to sharing with the Lender’s partners, banks, payment processors, KYC vendors, and regulators as required. The privacy policy forms part of this Agreement. The Borrower should keep login credentials confidential.
+
+14. ELECTRONIC RECORDS
+Electronic records, including Firestore application status, sanctioned amount, bank details, agreement timestamp, and UTR, are conclusive evidence of the transaction in the absence of manifest error. The Borrower agrees that electronic acceptance has the same effect as a wet-ink signature.
+
+15. LIMITATION OF LIABILITY
+To the extent permitted by law, the Lender is not liable for indirect, incidental, or consequential loss, bank delays, unavailability of the app, network failure, or acts of third-party payment systems. Nothing in this Agreement excludes liability that cannot legally be excluded, including liability for fraud or wilful misconduct. The Lender’s aggregate liability in connection with this Facility shall not exceed the principal actually disbursed, except where such cap is prohibited.
+
+16. FORCE MAJEURE
+The Lender is not responsible for delay or failure caused by events beyond reasonable control, including natural disasters, epidemics, war, strikes, utility failure, cyber incidents affecting third parties, or changes in law or payment-system rules.
+
+17. ASSIGNMENT
+The Lender may assign or securitise the Facility, in whole or in part, to another licensed entity without the Borrower’s consent, provided the Borrower’s obligations do not increase solely by reason of assignment. The Borrower may not assign rights or obligations.
+
+18. NOTICES
+Notices may be sent to the email, mobile number, or in-app inbox associated with the account. A notice is deemed received when sent, if not returned as undeliverable, or when displayed in the app. The Borrower must update contact details promptly.
+
+19. GOVERNING LAW AND DISPUTE RESOLUTION
+This Agreement is governed by the laws of India. Subject to any mandatory consumer-protection forum, competent courts at the Lender’s notified location shall have jurisdiction. The Borrower may also use statutory grievance mechanisms. Nothing here limits rights that cannot be waived.
+
+20. GRIEVANCE REDRESSAL
+The Borrower may raise queries through Help & Support in the app or by writing to the published support email. The Lender will endeavour to respond within a reasonable period. Regulatory complaint routes remain available where applicable.
+
+21. SEVERABILITY AND WAIVER
+If any clause is held unenforceable, the remainder continues in effect. Failure to enforce a right is not a waiver. A waiver must be express and in writing or recorded electronically by the Lender.
+
+22. ENTIRE AGREEMENT
+This Agreement, together with the in-app sanction summary (amount, tenure, rate, EMI), KYC acknowledgements, and the privacy policy, is the entire understanding for this Facility and supersedes prior oral statements. Changes must be recorded in the app or in a written addendum.
+
+23. COOLING-OFF AND CANCELLATION BEFORE DISBURSEMENT
+Until disbursement is recorded, the Borrower may request cancellation through the app or support channel. After disbursement, cancellation is not available except by prepayment of outstanding dues as permitted.
+
+24. ACKNOWLEDGEMENT OF STEPS
+The Borrower acknowledges the process: application and KYC; review; sanction of a specific limit; nomination of a bank account; acceptance of this Agreement; disbursement against UTR; and thereafter EMI repayment. Status colours in the app (In review, Approved, Awaiting disbursement, Disbursed, Rejected) are for convenience and match the official record.
+
+25. FINAL ACCEPTANCE
+By submitting, the Borrower acknowledges having had an opportunity to read this Agreement in full by scrolling, understands the Sanctioned Limit, interest, tenure, and EMI, confirms that bank details are correct, and requests disbursement to the nominated bank account. The Borrower agrees to repay the Facility in accordance with this Agreement.
+
+END OF AGREEMENT

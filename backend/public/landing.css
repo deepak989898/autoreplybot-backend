@@ -435,9 +435,7 @@ a { color: var(--blue); text-decoration: none; }
   .hero-visual { min-height: 0; }
   .script-note { position: static; display: block; text-align: right; margin: 0 8px 0 0; }
   .menu-toggle { display: inline-block; }
-  .nav-links, .nav .btn {
-    display: none;
-  }
+  .nav-links { display: none; }
   .nav.open .nav-links {
     display: flex;
     flex-direction: column;
@@ -449,10 +447,19 @@ a { color: var(--blue); text-decoration: none; }
     padding: 16px 20px 20px;
     border-bottom: 1px solid var(--line);
     align-items: flex-start;
+    z-index: 41;
   }
-  .nav.open .btn {
+  .nav .btn-download-app {
     display: inline-flex;
-    margin: 8px 20px 16px auto;
+    margin-left: auto;
+    padding: 10px 14px;
+    font-size: 0.82rem;
+    white-space: nowrap;
   }
+  .brand {
+    font-size: 1rem;
+    min-width: 0;
+  }
+  .brand img { width: 36px; height: 36px; }
   .phone { width: 230px; height: 460px; }
 }

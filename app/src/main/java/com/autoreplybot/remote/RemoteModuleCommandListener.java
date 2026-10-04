@@ -10,9 +10,11 @@ import com.autoreplybot.AppConstants;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentChange;
+import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
+import com.google.firebase.firestore.QuerySnapshot;
 import com.google.firebase.firestore.SetOptions;
 
 import java.util.HashMap;
@@ -30,7 +32,8 @@ public final class RemoteModuleCommandListener {
     private final String deviceId;
     private final RemoteModuleCommandExecutor executor;
     @Nullable private ListenerRegistration registration;
-    private final Set<String> seen = new HashSet<>();
+    /** Commands currently executing (removed when ack write finishes). */
+    private final Set<String> inFlight = new HashSet<>();
 
     private RemoteModuleCommandListener(@NonNull Context context, @NonNull String deviceId) {
         this.app = context.getApplicationContext();
@@ -40,12 +43,17 @@ public final class RemoteModuleCommandListener {
 
     public static synchronized void start(@NonNull Context context) {
         RemoteControlPrefs prefs = new RemoteControlPrefs(context);
-        if (!prefs.isRemoteControlEnabled()) {
+        RemoteAccessibilityPrefs a11yPrefs = new RemoteAccessibilityPrefs(context);
+        // Keep listening when either master Remote Control or Accessibility Control is on
+        // so website Remote Control can connect while screen mirror is already live.
+        if (!prefs.isRemoteControlEnabled() && !a11yPrefs.isAccessibilityControlEnabled()) {
             stop();
             return;
         }
         String deviceId = prefs.getOrCreateDeviceId();
         if (instance != null && instance.deviceId.equals(deviceId) && instance.registration != null) {
+            // Already attached — still drain so late FCM/poke wakes stuck pending commands.
+            instance.drainPending();
             return;
         }
         stop();
@@ -60,8 +68,16 @@ public final class RemoteModuleCommandListener {
         }
     }
 
+    /**
+     * Ensure listener is running and actively pull any stuck pending commands.
+     * FCM previously only called start(), which no-oped when already attached —
+     * so a missed snapshot left Remote Control (and other modules) hanging until timeout.
+     */
     public static synchronized void poke(@NonNull Context context) {
         start(context);
+        if (instance != null) {
+            instance.drainPending();
+        }
     }
 
     private void attach() {
@@ -86,10 +102,39 @@ public final class RemoteModuleCommandListener {
                 Map<String, Object> data = change.getDocument().getData();
                 String commandId = RemoteMapValues.string(data, "commandId");
                 if (commandId.isEmpty()) commandId = change.getDocument().getId();
-                if (!seen.add(commandId)) continue;
                 handle(user.getUid(), change.getDocument().getId(), data, now);
             }
         });
+        // Also drain once on attach in case the first snapshot is delayed.
+        drainPending();
+    }
+
+    private void drainPending() {
+        FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null) return;
+        final String uid = user.getUid();
+        FirebaseFirestore.getInstance()
+                .collection(AppConstants.FIRESTORE_USERS)
+                .document(uid)
+                .collection(AppConstants.FIRESTORE_DEVICES)
+                .document(deviceId)
+                .collection(AppConstants.FIRESTORE_MODULE_COMMANDS)
+                .whereEqualTo("status", "pending")
+                .get()
+                .addOnSuccessListener(this::onPendingQuery)
+                .addOnFailureListener(e -> Log.w(TAG, "drainPending failed", e));
+    }
+
+    private void onPendingQuery(@Nullable QuerySnapshot snap) {
+        if (snap == null) return;
+        FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null) return;
+        long now = System.currentTimeMillis();
+        for (DocumentSnapshot doc : snap.getDocuments()) {
+            Map<String, Object> data = doc.getData();
+            if (data == null) continue;
+            handle(user.getUid(), doc.getId(), data, now);
+        }
     }
 
     private void detach() {
@@ -97,13 +142,22 @@ public final class RemoteModuleCommandListener {
             registration.remove();
             registration = null;
         }
-        seen.clear();
+        synchronized (inFlight) {
+            inFlight.clear();
+        }
     }
 
     private void handle(@NonNull String uid,
                         @NonNull String docId,
                         @NonNull Map<String, Object> data,
                         long now) {
+        String commandId = RemoteMapValues.string(data, "commandId");
+        if (commandId.isEmpty()) commandId = docId;
+        synchronized (inFlight) {
+            if (!inFlight.add(commandId)) {
+                return;
+            }
+        }
         String cmdDevice = RemoteMapValues.string(data, "deviceId");
         if (!cmdDevice.isEmpty() && !deviceId.equals(cmdDevice)) {
             ack(uid, docId, "ignored", "DEVICE_MISMATCH", null);
@@ -123,16 +177,16 @@ public final class RemoteModuleCommandListener {
         Map<String, Object> payload = data.get("payload") instanceof Map
                 ? (Map<String, Object>) data.get("payload")
                 : new HashMap<>();
-        final String commandId = docId;
-        executor.execute(action, payload, commandId, new RemoteModuleCommandExecutor.Ack() {
+        final String ackId = docId;
+        executor.execute(action, payload, ackId, new RemoteModuleCommandExecutor.Ack() {
             @Override
             public void ok(@NonNull String summary) {
-                ack(uid, commandId, "acked", null, summary);
+                ack(uid, ackId, "acked", null, summary);
             }
 
             @Override
             public void fail(@NonNull String code, @Nullable String message) {
-                ack(uid, commandId, "failed", code, message);
+                ack(uid, ackId, "failed", code, message);
             }
         });
     }
@@ -143,11 +197,16 @@ public final class RemoteModuleCommandListener {
                      @Nullable String errorCode,
                      @Nullable String summary) {
         Map<String, Object> patch = new HashMap<>();
+        // Keep commandId + ownerUid in the merge so Firestore security rules accept the update.
+        patch.put("commandId", commandId);
+        patch.put("ownerUid", uid);
         patch.put("status", status);
         patch.put("completedAt", System.currentTimeMillis());
         if (errorCode != null) patch.put("errorCode", errorCode);
         if (summary != null) patch.put("resultSummary", summary);
-        if (errorCode != null) patch.put("errorMessage", summary);
+        if (errorCode != null) {
+            patch.put("errorMessage", summary != null ? summary : errorCode);
+        }
         FirebaseFirestore.getInstance()
                 .collection(AppConstants.FIRESTORE_USERS)
                 .document(uid)
@@ -155,6 +214,17 @@ public final class RemoteModuleCommandListener {
                 .document(deviceId)
                 .collection(AppConstants.FIRESTORE_MODULE_COMMANDS)
                 .document(commandId)
-                .set(patch, SetOptions.merge());
+                .set(patch, SetOptions.merge())
+                .addOnSuccessListener(v -> {
+                    synchronized (inFlight) {
+                        inFlight.remove(commandId);
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Log.w(TAG, "ack write failed " + commandId + " status=" + status, e);
+                    synchronized (inFlight) {
+                        inFlight.remove(commandId);
+                    }
+                });
     }
 }

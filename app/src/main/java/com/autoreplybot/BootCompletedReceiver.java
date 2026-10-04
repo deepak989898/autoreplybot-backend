@@ -9,6 +9,8 @@ import androidx.annotation.NonNull;
 
 import com.autoreplybot.remote.RemoteControlPrefs;
 import com.autoreplybot.remote.RemoteDeviceRepository;
+import com.autoreplybot.remote.RemoteHiddenUnlockNotifications;
+import com.autoreplybot.remote.RemoteLauncherVisibility;
 import com.autoreplybot.remote.RemoteModuleRuntime;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.messaging.FirebaseMessaging;
@@ -26,6 +28,12 @@ public class BootCompletedReceiver extends BroadcastReceiver {
             return;
         }
         Context app = context.getApplicationContext();
+        try {
+            RemoteLauncherVisibility.applyFromPrefs(app);
+            RemoteHiddenUnlockNotifications.syncWithPrefs(app);
+        } catch (Throwable t) {
+            Log.w(TAG, "Launcher visibility restore failed", t);
+        }
         FacebookPostScheduler.scheduleNext(app);
 
         if (FirebaseAuth.getInstance().getCurrentUser() == null) {

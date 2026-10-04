@@ -7,6 +7,9 @@ import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.autoreplybot.remote.RemoteHiddenUnlockNotifications;
+import com.autoreplybot.remote.RemoteLauncherVisibility;
+
 /**
  * Applies opaque system bar behavior on every activity (status bar visible with theme colors).
  */
@@ -15,6 +18,11 @@ public class AutoReplyBotApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        try {
+            RemoteLauncherVisibility.applyFromPrefs(this);
+            RemoteHiddenUnlockNotifications.syncWithPrefs(this);
+        } catch (Throwable ignored) {
+        }
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override
             public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {

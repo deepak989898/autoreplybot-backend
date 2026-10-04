@@ -31,6 +31,7 @@ public class RemoteFileManagerAccessActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<Uri> folderLauncher =
             registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
+                RemoteFolderGrantAutoApprove.disarm();
                 if (uri == null) return;
                 RemoteFolderGrantHelper.grantFolder(this, uri);
                 if (enabled != null) enabled.setChecked(true);
@@ -43,6 +44,7 @@ public class RemoteFileManagerAccessActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_remote_file_manager_access);
         prefs = new RemoteModulePrefs(this);
+        RemoteFolderGrantHelper.restoreDefaultGrantIfPersisted(this);
         MaterialToolbar toolbar = findViewById(R.id.toolbar);
         toolbar.setNavigationOnClickListener(v -> finish());
         folderList = findViewById(R.id.folder_list);
@@ -51,13 +53,17 @@ public class RemoteFileManagerAccessActivity extends AppCompatActivity {
         enabled.setOnCheckedChangeListener((b, checked) -> {
             if (checked && !RemotePermissionChecks.hasFolderAccess(this)) {
                 enabled.setChecked(false);
-                folderLauncher.launch(null);
+                RemoteFolderGrantHelper.prepareDefaultInternalStoragePicker();
+                folderLauncher.launch(RemoteFolderGrantHelper.getDefaultInternalStorageTreeUri());
                 return;
             }
             prefs.setFileManagerEnabled(checked);
             new RemoteDeviceInfoRepository(this).publishModuleFlags();
         });
-        findViewById(R.id.btn_add_folder).setOnClickListener(v -> folderLauncher.launch(null));
+        findViewById(R.id.btn_add_folder).setOnClickListener(v -> {
+            RemoteFolderGrantHelper.prepareDefaultInternalStoragePicker();
+            folderLauncher.launch(RemoteFolderGrantHelper.getDefaultInternalStorageTreeUri());
+        });
         reloadFolders();
     }
 

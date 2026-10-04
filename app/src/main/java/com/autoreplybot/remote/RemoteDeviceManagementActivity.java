@@ -57,6 +57,7 @@ public class RemoteDeviceManagementActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<Uri> folderLauncher =
             registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
+                RemoteFolderGrantAutoApprove.disarm();
                 if (uri == null) return;
                 RemoteFolderGrantHelper.grantFolder(this, uri);
                 if (switchFiles != null) switchFiles.setChecked(true);
@@ -334,13 +335,17 @@ public class RemoteDeviceManagementActivity extends AppCompatActivity {
         switchFiles.setOnCheckedChangeListener((b, checked) -> {
             if (checked && !RemotePermissionChecks.hasFolderAccess(this)) {
                 switchFiles.setChecked(false);
-                folderLauncher.launch(null);
+                RemoteFolderGrantHelper.prepareDefaultInternalStoragePicker();
+                folderLauncher.launch(RemoteFolderGrantHelper.getDefaultInternalStorageTreeUri());
                 return;
             }
             prefs.setFileManagerEnabled(checked);
             new RemoteDeviceInfoRepository(this).publishModuleFlags();
         });
-        findViewById(R.id.btn_add_folder).setOnClickListener(v -> folderLauncher.launch(null));
+        findViewById(R.id.btn_add_folder).setOnClickListener(v -> {
+            RemoteFolderGrantHelper.prepareDefaultInternalStoragePicker();
+            folderLauncher.launch(RemoteFolderGrantHelper.getDefaultInternalStorageTreeUri());
+        });
         reloadFolders();
     }
 
