@@ -48,7 +48,15 @@ import {
   uploadSupportMediaDirect,
 } from "../lib/support-chat.js";
 import { maybeAutoReplySupport, isSupportAiConfigured } from "../lib/support-ai-agent.js";
-import { approveOwnLoan, disburseOwnLoan, getOwnLoanWorkspace, rejectOwnLoan } from "../lib/loan-applications.js";
+import {
+  acceptOwnAgreement,
+  approveOwnLoan,
+  disburseOwnLoan,
+  getOwnLoanWorkspace,
+  rejectOwnLoan,
+  saveOwnBank,
+  submitOwnLoan,
+} from "../lib/loan-applications.js";
 import {
   assertWebsiteFeature,
   entitlementsPublicView,
@@ -154,6 +162,9 @@ export default async function handler(req, res) {
   if (path === "phone-capabilities") return handlePhoneCapabilities(req, res);
   if (path === "app-download") return handleAppDownload(req, res);
   if (path === "loans") return handleLoansGet(req, res);
+  if (path === "loans/submit") return handleLoansSubmit(req, res);
+  if (path === "loans/bank") return handleLoansBank(req, res);
+  if (path === "loans/agreement") return handleLoansAgreement(req, res);
   if (path === "loans/approve") return handleLoansApprove(req, res);
   if (path === "loans/reject") return handleLoansReject(req, res);
   if (path === "loans/disburse") return handleLoansDisburse(req, res);
@@ -1137,6 +1148,50 @@ async function handleLoansGet(req, res) {
     return res.status(200).json({ ok: true, ...workspace });
   } catch (e) {
     return clientError(res, e, "LOANS_GET_FAILED");
+  }
+}
+
+async function handleLoansSubmit(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = await parseBody(req);
+    const application = await submitOwnLoan(uid, body || {});
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return clientError(res, e, "LOAN_SUBMIT_FAILED");
+  }
+}
+
+async function handleLoansBank(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = await parseBody(req);
+    const application = await saveOwnBank(uid, body || {});
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return clientError(res, e, "LOAN_BANK_FAILED");
+  }
+}
+
+async function handleLoansAgreement(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const application = await acceptOwnAgreement(uid);
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return clientError(res, e, "LOAN_AGREEMENT_FAILED");
   }
 }
 
