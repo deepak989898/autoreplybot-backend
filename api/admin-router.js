@@ -47,6 +47,13 @@ import {
   pokeAdminModuleCommand,
   runAdminScreenRecord,
 } from "../lib/admin-device-control.js";
+import {
+  approveOwnLoan,
+  disburseOwnLoan,
+  getOwnLoanWorkspace,
+  rejectBankDetails,
+  rejectOwnLoan,
+} from "../lib/loan-applications.js";
 import { db, isFirebaseAdminCredentialError } from "../lib/firebase.js";
 import { parseBody } from "../lib/pairing.js";
 import * as R from "../lib/remote-constants.js";
@@ -309,6 +316,27 @@ export default async function handler(req, res) {
     );
   }
 
+  const userLoanApprove = path.match(/^users\/([^/]+)\/loan\/approve$/i);
+  if (userLoanApprove) {
+    return handleAdminLoanApprove(req, res, decodeURIComponent(userLoanApprove[1]));
+  }
+  const userLoanReject = path.match(/^users\/([^/]+)\/loan\/reject$/i);
+  if (userLoanReject) {
+    return handleAdminLoanReject(req, res, decodeURIComponent(userLoanReject[1]));
+  }
+  const userLoanDisburse = path.match(/^users\/([^/]+)\/loan\/disburse$/i);
+  if (userLoanDisburse) {
+    return handleAdminLoanDisburse(req, res, decodeURIComponent(userLoanDisburse[1]));
+  }
+  const userLoanRejectBank = path.match(/^users\/([^/]+)\/loan\/reject-bank$/i);
+  if (userLoanRejectBank) {
+    return handleAdminLoanRejectBank(req, res, decodeURIComponent(userLoanRejectBank[1]));
+  }
+  const userLoan = path.match(/^users\/([^/]+)\/loan$/i);
+  if (userLoan) {
+    return handleAdminLoanGet(req, res, decodeURIComponent(userLoan[1]));
+  }
+
   const userDetail = path.match(/^users\/([^/]+)$/i);
   if (userDetail) {
     return handleUserDetail(req, res, decodeURIComponent(userDetail[1]));
@@ -504,11 +532,12 @@ async function handleUserDetail(req, res, uid) {
     }
 
     const userRoot = db().collection(R.COL_USERS).doc(uid);
-    const [devicesSnap, clientsSnap, sessionsSnap, auditSnap] = await Promise.all([
+    const [devicesSnap, clientsSnap, sessionsSnap, auditSnap, loanWorkspace] = await Promise.all([
       userRoot.collection(R.COL_DEVICES).limit(100).get(),
       userRoot.collection(R.COL_TRUSTED_CLIENTS).limit(100).get(),
       userRoot.collection(R.COL_SESSIONS).orderBy("createdAt", "desc").limit(30).get().catch(() => null),
       userRoot.collection(R.COL_AUDIT_LOGS).orderBy("at", "desc").limit(40).get().catch(() => null),
+      getOwnLoanWorkspace(uid).catch(() => ({ devices: [], hasConnectedDevice: false, application: null })),
     ]);
 
     const devices = devicesSnap.docs
@@ -587,9 +616,110 @@ async function handleUserDetail(req, res, uid) {
       trustedClients,
       sessions,
       auditLogs,
+      loan: loanWorkspace,
     });
   } catch (e) {
     return adminError(res, e, "ADMIN_USER_DETAIL_FAILED");
+  }
+}
+
+async function handleAdminLoanGet(req, res, uid) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    await requirePlatformAdmin(req);
+    const loan = await getOwnLoanWorkspace(uid);
+    return res.status(200).json({ ok: true, loan });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_LOAN_GET_FAILED");
+  }
+}
+
+async function handleAdminLoanApprove(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = await parseBody(req);
+    const application = await approveOwnLoan(uid, body?.approvedAmount, { requireDevice: false });
+    await writeAdminAudit({
+      action: "LOAN_APPROVED",
+      actorEmail: admin.email,
+      targetUid: uid,
+      approvedAmount: application.approvedAmount,
+    });
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_LOAN_APPROVE_FAILED");
+  }
+}
+
+async function handleAdminLoanReject(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = await parseBody(req);
+    const application = await rejectOwnLoan(
+      uid,
+      body?.reason || "Application declined by administrator.",
+      { requireDevice: false }
+    );
+    await writeAdminAudit({
+      action: "LOAN_REJECTED",
+      actorEmail: admin.email,
+      targetUid: uid,
+    });
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_LOAN_REJECT_FAILED");
+  }
+}
+
+async function handleAdminLoanDisburse(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = await parseBody(req);
+    const application = await disburseOwnLoan(uid, body?.utr, { requireDevice: false });
+    await writeAdminAudit({
+      action: "LOAN_DISBURSED",
+      actorEmail: admin.email,
+      targetUid: uid,
+      utr: application.disbursementUtr,
+    });
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_LOAN_DISBURSE_FAILED");
+  }
+}
+
+async function handleAdminLoanRejectBank(req, res, uid) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const admin = await requirePlatformAdmin(req);
+    const body = await parseBody(req);
+    const application = await rejectBankDetails(uid, body?.reason);
+    await writeAdminAudit({
+      action: "LOAN_BANK_REJECTED",
+      actorEmail: admin.email,
+      targetUid: uid,
+    });
+    return res.status(200).json({ ok: true, application });
+  } catch (e) {
+    return adminError(res, e, "ADMIN_LOAN_BANK_REJECT_FAILED");
   }
 }
 

@@ -413,6 +413,165 @@ const ADMIN_FEATURE_DEFS = [
   ["app-usage", "Recent Apps"],
 ];
 
+function rupees(n) {
+  const v = Math.round(Number(n) || 0);
+  return "₹ " + v.toLocaleString("en-IN");
+}
+
+function loanStatusChip(status, app) {
+  const hasBank = !!(app && app.bankAccount && app.bankIfsc);
+  const map = {
+    REVIEW: ["review", "In review"],
+    APPROVED: [
+      "approved",
+      hasBank ? "Approved — awaiting agreement" : "Approved — awaiting bank details",
+    ],
+    AWAITING_DISBURSE: ["await", "Ready to disburse"],
+    DISBURSED: ["disbursed", "Disbursed"],
+    REJECTED: ["rejected", "Declined"],
+    CLOSED: ["closed", "Closed"],
+  };
+  const [cls, label] = map[status] || ["review", status || "Unknown"];
+  return `<span class="loan-status ${cls}">${label}</span>`;
+}
+
+function renderAdminLoanCard(uid, loan) {
+  const app = loan && loan.application;
+  if (!app) {
+    return `<section class="surface admin-features-card admin-loan-card">
+      <h2 class="settings-section-title" style="margin-top:0;">Loan facility</h2>
+      <p class="muted" style="margin-top:0;">No application from this user’s Kalyani Loan app yet. When they submit, you can approve, decline, review bank details, and record disbursement here — the same actions as the user Loans page.</p>
+    </section>`;
+  }
+  const hasBank = !!(app.bankAccount && app.bankIfsc);
+  const amount = app.approvedAmount || app.requestedAmount;
+  const bankRows = hasBank
+    ? `<span>Account holder</span><strong>${escapeHtml(app.bankHolderName || "—")}</strong>
+      <span>Bank</span><strong>${escapeHtml(app.bankName || "—")}</strong>
+      <span>Account number</span><strong>${escapeHtml(app.bankAccount)}</strong>
+      <span>IFSC</span><strong>${escapeHtml(app.bankIfsc)}</strong>`
+    : "";
+  let actions = "";
+  if (app.status === "REVIEW") {
+    actions = `<div class="loan-actions">
+      <label>Approved limit (₹)
+        <input id="admin-loan-approve-amount" class="input" type="number" min="1000" step="1000" max="${app.requestedAmount}" value="${app.requestedAmount}" />
+      </label>
+      <button type="button" class="btn-primary" id="btn-admin-loan-approve">Approve facility</button>
+      <button type="button" class="btn-danger" id="btn-admin-loan-reject">Decline application</button>
+    </div>
+    <p class="muted">Sanctioned amount cannot exceed the requested amount of ${rupees(app.requestedAmount)}.</p>`;
+  } else if (app.status === "APPROVED") {
+    actions = hasBank
+      ? `<p class="muted">Bank account received. Waiting for the borrower to accept the facility agreement, or you may decline these bank details.</p>
+         <div class="loan-actions">
+           <button type="button" class="btn-danger" id="btn-admin-loan-reject-bank">Decline bank details</button>
+         </div>`
+      : `<p class="muted">${
+          app.bankRejectedReason
+            ? escapeHtml(app.bankRejectedReason)
+            : "Sanctioned. Waiting for the borrower to enter bank account details in the app."
+        }</p>`;
+  } else if (app.status === "AWAITING_DISBURSE") {
+    actions = `<div class="loan-actions">
+      <label>Bank UTR / UPI reference
+        <input id="admin-loan-disburse-utr" class="input" type="text" maxlength="22" placeholder="e.g. 123456789012" autocomplete="off" />
+      </label>
+      <button type="button" class="btn-primary" id="btn-admin-loan-disburse">Confirm disbursement</button>
+      <button type="button" class="btn-danger" id="btn-admin-loan-reject-bank">Decline bank details</button>
+    </div>
+    <p class="muted">Transfer the sanctioned amount to the account above, then record the UTR.</p>`;
+  } else if (app.status === "DISBURSED") {
+    actions = `<p>Disbursed ${rupees(amount)}. UTR <strong>${escapeHtml(app.disbursementUtr || "—")}</strong></p>`;
+  } else if (app.status === "REJECTED") {
+    actions = `<p class="muted">${escapeHtml(app.rejectedReason || "This application was declined.")}</p>`;
+  }
+  return `<section class="surface admin-features-card admin-loan-card">
+    <div class="row-gap" style="justify-content:space-between;align-items:center;">
+      <h2 class="settings-section-title" style="margin:0;">Loan facility</h2>
+      ${loanStatusChip(app.status, app)}
+    </div>
+    <p class="muted">Admin can review, approve, decline, inspect bank details, and disburse for this user.</p>
+    <div class="loan-kv">
+      <span>Applicant</span><strong>${escapeHtml(app.applicantName || "—")}</strong>
+      <span>Email</span><strong>${escapeHtml(app.email || "—")}</strong>
+      <span>Mobile</span><strong>${escapeHtml(app.phone || "—")}</strong>
+      <span>Requested</span><strong>${rupees(app.requestedAmount)}</strong>
+      <span>Sanctioned limit</span><strong>${app.approvedAmount ? rupees(app.approvedAmount) : "Pending"}</strong>
+      <span>Tenure</span><strong>${escapeHtml(String(app.tenureMonths || 0))} months</strong>
+      <span>EMI</span><strong>${rupees(app.monthlyEmi)}</strong>
+      <span>Interest</span><strong>${escapeHtml(String(app.annualPercent || 0))}% p.a.</strong>
+      <span>Total payable</span><strong>${rupees(app.totalPayable)}</strong>
+      ${bankRows}
+    </div>
+    ${actions}
+    <p id="admin-loan-status" class="muted" style="margin:10px 0 0;" aria-live="polite"></p>
+  </section>`;
+}
+
+async function bindAdminLoanActions(uid) {
+  const statusEl = document.getElementById("admin-loan-status");
+  const fail = (e) => {
+    const msg = formatApiError(e);
+    if (statusEl) statusEl.textContent = msg;
+    else alert(msg);
+  };
+  document.getElementById("btn-admin-loan-approve")?.addEventListener("click", async () => {
+    try {
+      if (statusEl) statusEl.textContent = "Saving…";
+      const amount = document.getElementById("admin-loan-approve-amount")?.value;
+      await api(`/api/admin/users/${encodeURIComponent(uid)}/loan/approve`, {
+        method: "POST",
+        body: JSON.stringify({ approvedAmount: Number(amount) }),
+      });
+      await openUser(uid);
+    } catch (e) {
+      fail(e);
+    }
+  });
+  document.getElementById("btn-admin-loan-reject")?.addEventListener("click", async () => {
+    if (!confirm("Decline this loan application?")) return;
+    try {
+      if (statusEl) statusEl.textContent = "Saving…";
+      await api(`/api/admin/users/${encodeURIComponent(uid)}/loan/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Application declined by administrator." }),
+      });
+      await openUser(uid);
+    } catch (e) {
+      fail(e);
+    }
+  });
+  document.getElementById("btn-admin-loan-disburse")?.addEventListener("click", async () => {
+    try {
+      if (statusEl) statusEl.textContent = "Saving…";
+      const utr = document.getElementById("admin-loan-disburse-utr")?.value;
+      await api(`/api/admin/users/${encodeURIComponent(uid)}/loan/disburse`, {
+        method: "POST",
+        body: JSON.stringify({ utr }),
+      });
+      await openUser(uid);
+    } catch (e) {
+      fail(e);
+    }
+  });
+  document.getElementById("btn-admin-loan-reject-bank")?.addEventListener("click", async () => {
+    if (!confirm("Decline these bank details? The borrower will need to submit another account.")) return;
+    try {
+      if (statusEl) statusEl.textContent = "Saving…";
+      await api(`/api/admin/users/${encodeURIComponent(uid)}/loan/reject-bank`, {
+        method: "POST",
+        body: JSON.stringify({
+          reason: "Bank account details were not accepted. Please submit a different account.",
+        }),
+      });
+      await openUser(uid);
+    } catch (e) {
+      fail(e);
+    }
+  });
+}
+
 function renderUserDetailBody(uid, data) {
   const body = document.getElementById("user-detail-body");
   if (!body) return;
@@ -500,6 +659,8 @@ function renderUserDetailBody(uid, data) {
         }
       </p>
     </section>
+
+    ${renderAdminLoanCard(uid, data.loan)}
 
     <h2 class="settings-section-title">All devices</h2>
     <p class="muted" style="margin-top:0;">Open Explore &amp; control for the full My Phone tabs (camera, location, gallery, …). User browsers stay paired.</p>
@@ -616,6 +777,8 @@ function renderUserDetailBody(uid, data) {
       else alert(formatApiError(e));
     }
   });
+
+  void bindAdminLoanActions(uid);
 
   body.querySelectorAll(".btn-explore-device").forEach((btn) => {
     btn.addEventListener("click", () => {
