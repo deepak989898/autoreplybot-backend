@@ -452,17 +452,19 @@ function renderAdminLoanCard(uid, loan) {
       <span>IFSC</span><strong>${escapeHtml(app.bankIfsc)}</strong>`
     : "";
   let actions = "";
-  if (app.status === "REVIEW") {
-    actions = `<div class="loan-actions">
+  const limitEditor = (label) => `<div class="loan-actions">
       <label>Approved limit (₹)
-        <input id="admin-loan-approve-amount" class="input" type="number" min="1000" step="1000" max="${app.requestedAmount}" value="${app.requestedAmount}" />
+        <input id="admin-loan-approve-amount" class="input" type="number" min="1000" step="100" max="200000" value="${amount}" />
       </label>
-      <button type="button" class="btn-primary" id="btn-admin-loan-approve">Approve facility</button>
-      <button type="button" class="btn-danger" id="btn-admin-loan-reject">Decline application</button>
+      <button type="button" class="btn-primary" id="btn-admin-loan-approve">${label}</button>
+      ${app.status === "REVIEW" ? `<button type="button" class="btn-danger" id="btn-admin-loan-reject">Decline application</button>` : ""}
     </div>
-    <p class="muted">Sanctioned amount cannot exceed the requested amount of ${rupees(app.requestedAmount)}.</p>`;
+    <p class="muted">The exact sanctioned amount you enter is saved (₹1,000–₹2,00,000), even if it differs from the requested ${rupees(app.requestedAmount)}.</p>`;
+  if (app.status === "REVIEW") {
+    actions = limitEditor("Approve facility");
   } else if (app.status === "APPROVED") {
-    actions = hasBank
+    actions = `${limitEditor("Update sanctioned limit")}${
+      hasBank
       ? `<p class="muted">Bank account received. Waiting for the borrower to accept the facility agreement, or you may decline these bank details.</p>
          <div class="loan-actions">
            <button type="button" class="btn-danger" id="btn-admin-loan-reject-bank">Decline bank details</button>
@@ -471,7 +473,8 @@ function renderAdminLoanCard(uid, loan) {
           app.bankRejectedReason
             ? escapeHtml(app.bankRejectedReason)
             : "Sanctioned. Waiting for the borrower to enter bank account details in the app."
-        }</p>`;
+        }</p>`
+    }`;
   } else if (app.status === "AWAITING_DISBURSE") {
     actions = `<div class="loan-actions">
       <label>Bank UTR / UPI reference

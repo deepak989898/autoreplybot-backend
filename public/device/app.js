@@ -9255,12 +9255,12 @@ function renderLoanWorkspace(data) {
   let actions = "";
   const limitEditor = (label) => `<div class="loan-actions">
       <label>Approved limit (₹)
-        <input id="loan-approve-amount" class="input" type="number" min="1000" step="1000" max="200000" value="${amount}" />
+        <input id="loan-approve-amount" class="input" type="number" min="1000" step="100" max="200000" value="${amount}" />
       </label>
       <button type="button" class="btn-primary" id="btn-loan-approve">${label}</button>
       ${app.status === "REVIEW" ? `<button type="button" class="btn-danger" id="btn-loan-reject">Decline</button>` : ""}
     </div>
-    <p class="muted">Set any sanctioned amount from ₹1,000 to ₹2,00,000 in ₹1,000 steps. This can be higher or lower than the requested ${rupees(app.requestedAmount)}.</p>`;
+    <p class="muted">Set any sanctioned amount from ₹1,000 to ₹2,00,000. The exact figure you enter is saved (for example ₹2,500). This can be higher or lower than the requested ${rupees(app.requestedAmount)}.</p>`;
   if (app.status === "REVIEW") {
     actions = limitEditor("Approve facility");
   } else if (app.status === "APPROVED") {
