@@ -9367,15 +9367,6 @@ let loanSupportPoll = 0;
 let loanSupportFile = null;
 let loanSupportBusy = false;
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Could not read file"));
-    reader.readAsDataURL(file);
-  });
-}
-
 function openLoanSupportZoom(url, name) {
   if (typeof openSupportImageViewer === "function" && url) {
     openSupportImageViewer(url, name);
