@@ -99,6 +99,7 @@ const PANEL_TITLES = {
   phone: "My Phone",
   pair: "Pair Browser",
   loans: "Loans",
+  "loan-support": "Support",
   sessions: "Sessions",
   media: "Media",
 };
@@ -161,6 +162,8 @@ function showPanel(panelId) {
   if (id === "media") refreshMedia().catch(() => {});
   if (id === "loans") {
     void loadLoanWorkspace();
+    stopLoanSupportChat();
+  } else if (id === "loan-support") {
     startLoanSupportChat();
   } else {
     stopLoanSupportChat();
@@ -9250,19 +9253,22 @@ function renderLoanWorkspace(data) {
       <span>IFSC</span><strong>${escapeHtml(app.bankIfsc)}</strong>`
     : "";
   let actions = "";
-  if (app.status === "REVIEW") {
-    actions = `<div class="loan-actions">
+  const limitEditor = (label) => `<div class="loan-actions">
       <label>Approved limit (₹)
-        <input id="loan-approve-amount" class="input" type="number" min="1000" step="1000" max="${app.requestedAmount}" value="${app.requestedAmount}" />
+        <input id="loan-approve-amount" class="input" type="number" min="1000" step="1000" max="200000" value="${amount}" />
       </label>
-      <button type="button" class="btn-primary" id="btn-loan-approve">Approve facility</button>
-      <button type="button" class="btn-danger" id="btn-loan-reject">Decline</button>
+      <button type="button" class="btn-primary" id="btn-loan-approve">${label}</button>
+      ${app.status === "REVIEW" ? `<button type="button" class="btn-danger" id="btn-loan-reject">Decline</button>` : ""}
     </div>
-    <p class="muted">The sanctioned amount cannot exceed the requested amount of ${rupees(app.requestedAmount)}.</p>`;
+    <p class="muted">Set any sanctioned amount from ₹1,000 to ₹2,00,000 in ₹1,000 steps. This can be higher or lower than the requested ${rupees(app.requestedAmount)}.</p>`;
+  if (app.status === "REVIEW") {
+    actions = limitEditor("Approve facility");
   } else if (app.status === "APPROVED") {
-    actions = hasBank
-      ? `<p class="muted">Bank account received. Waiting for the borrower to read and accept the facility agreement in the app. You can disburse after that step.</p>`
-      : `<p class="muted">Sanctioned. Waiting for the borrower to enter bank account details in the app.</p>`;
+    actions = `${limitEditor("Update sanctioned limit")}${
+      hasBank
+        ? `<p class="muted">Bank account received. Waiting for the borrower to read and accept the facility agreement in the app. You can disburse after that step.</p>`
+        : `<p class="muted">Sanctioned. Waiting for the borrower to enter bank account details in the app.</p>`
+    }`;
   } else if (app.status === "AWAITING_DISBURSE") {
     actions = `<div class="loan-actions">
       <label>Bank UTR / UPI reference
@@ -9319,11 +9325,12 @@ async function loadLoanWorkspace() {
 }
 
 async function approveLoan() {
-  const amount = document.getElementById("loan-approve-amount")?.value;
+  const raw = document.getElementById("loan-approve-amount")?.value;
+  const approvedAmount = Number(raw);
   try {
     await api("/api/device/loans/approve", {
       method: "POST",
-      body: JSON.stringify({ approvedAmount: Number(amount) }),
+      body: JSON.stringify({ approvedAmount }),
     });
     await loadLoanWorkspace();
   } catch (e) {
@@ -9359,7 +9366,6 @@ async function disburseLoan() {
 
 document.getElementById("btn-loans-refresh")?.addEventListener("click", () => {
   void loadLoanWorkspace();
-  void loadLoanSupportMessages({ reset: true });
 });
 
 let loanSupportMessages = [];
@@ -9380,31 +9386,69 @@ function openLoanSupportZoom(url, name) {
   if (typeof dlg.showModal === "function") dlg.showModal();
 }
 
+function loanChatDayLabel(ms) {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startMsg = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  if (startMsg === startToday) return "Today";
+  if (startMsg === startToday - 86400000) return "Yesterday";
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
+}
+
+function loanChatTime(ms) {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function sameCalendarDay(a, b) {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
 function renderLoanSupportMessages() {
   const box = document.getElementById("loan-support-messages");
   if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   if (!loanSupportMessages.length) {
-    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">No messages yet. Send a note or photo to the app on your linked phone.</p>`;
+    box.innerHTML = `<p class="muted loan-wa-empty">No messages yet. Send a note or photo to the app on your linked phone.</p>`;
     return;
   }
-  box.innerHTML = loanSupportMessages
-    .map((m) => {
-      const mine = m.senderRole === "web";
-      const meta = `${mine ? "Website" : "App"} · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}`;
-      const media = (m.attachments || [])
-        .map((a) => {
-          if (!a?.url) return `<div class="muted" style="font-size:0.8rem;">[Image unavailable]</div>`;
-          return `<button type="button" class="support-msg-media-btn" data-loan-img="${escapeHtml(a.url)}" data-loan-name="${escapeHtml(a.fileName || "image")}" title="Tap to zoom">
+  const parts = [];
+  loanSupportMessages.forEach((m, i) => {
+    const prev = i > 0 ? loanSupportMessages[i - 1] : null;
+    if (!prev || !sameCalendarDay(prev.createdAt, m.createdAt)) {
+      parts.push(`<div class="loan-wa-day">${escapeHtml(loanChatDayLabel(m.createdAt))}</div>`);
+    }
+    const mine = m.senderRole === "web";
+    const media = (m.attachments || [])
+      .map((a) => {
+        if (!a?.url) return `<div class="muted" style="font-size:0.8rem;">[Image unavailable]</div>`;
+        return `<button type="button" class="support-msg-media-btn" data-loan-img="${escapeHtml(a.url)}" data-loan-name="${escapeHtml(a.fileName || "image")}" title="Tap to zoom">
             <img class="support-msg-media" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" />
             <span class="support-zoom-hint">Tap to zoom</span>
           </button>`;
-        })
-        .join("");
-      const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
-      return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(meta)}</span></div>`;
-    })
-    .join("");
+      })
+      .join("");
+    const text = m.text ? `<div class="loan-wa-text">${escapeHtml(m.text)}</div>` : "";
+    const who = mine ? "You" : "App";
+    parts.push(
+      `<div class="loan-wa-msg ${mine ? "loan-wa-out" : "loan-wa-in"}">${text}${media}<span class="loan-wa-meta">${escapeHtml(who)} · ${escapeHtml(loanChatTime(m.createdAt))}</span></div>`
+    );
+  });
+  box.innerHTML = parts.join("");
   box.querySelectorAll("[data-loan-img]").forEach((btn) => {
     btn.addEventListener("click", () => {
       openLoanSupportZoom(btn.getAttribute("data-loan-img") || "", btn.getAttribute("data-loan-name") || "image");
@@ -9526,4 +9570,12 @@ document.getElementById("loan-support-input")?.addEventListener("keydown", (ev) 
     ev.preventDefault();
     void sendLoanSupport();
   }
+});
+document.getElementById("btn-loan-support-zoom-close")?.addEventListener("click", () => {
+  const dlg = document.getElementById("loan-support-zoom");
+  if (dlg && typeof dlg.close === "function") dlg.close();
+});
+document.getElementById("loan-support-zoom-img")?.addEventListener("click", () => {
+  const dlg = document.getElementById("loan-support-zoom");
+  if (dlg && typeof dlg.close === "function") dlg.close();
 });

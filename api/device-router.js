@@ -1169,7 +1169,7 @@ async function handleLoansSubmit(req, res) {
   }
   try {
     const uid = await requireAuthed(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await submitOwnLoan(uid, body || {});
     return res.status(200).json({ ok: true, application });
   } catch (e) {
@@ -1184,7 +1184,7 @@ async function handleLoansBank(req, res) {
   }
   try {
     const uid = await requireAuthed(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await saveOwnBank(uid, body || {});
     return res.status(200).json({ ok: true, application });
   } catch (e) {
@@ -1213,7 +1213,7 @@ async function handleLoansApprove(req, res) {
   }
   try {
     const uid = await requireAuthed(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await approveOwnLoan(uid, body?.approvedAmount);
     await writeAuditLog(uid, {
       action: "LOAN_APPROVED",
@@ -1233,7 +1233,7 @@ async function handleLoansReject(req, res) {
   }
   try {
     const uid = await requireAuthed(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await rejectOwnLoan(uid, body?.reason);
     await writeAuditLog(uid, {
       action: "LOAN_REJECTED",
@@ -1252,7 +1252,7 @@ async function handleLoansDisburse(req, res) {
   }
   try {
     const uid = await requireAuthed(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await disburseOwnLoan(uid, body?.utr);
     await writeAuditLog(uid, {
       action: "LOAN_DISBURSED",

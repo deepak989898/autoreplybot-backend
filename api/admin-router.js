@@ -644,7 +644,7 @@ async function handleAdminLoanApprove(req, res, uid) {
   }
   try {
     const admin = await requirePlatformAdmin(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await approveOwnLoan(uid, body?.approvedAmount, { requireDevice: false });
     await writeAdminAudit({
       action: "LOAN_APPROVED",
@@ -665,7 +665,7 @@ async function handleAdminLoanReject(req, res, uid) {
   }
   try {
     const admin = await requirePlatformAdmin(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await rejectOwnLoan(
       uid,
       body?.reason || "Application declined by administrator.",
@@ -689,7 +689,7 @@ async function handleAdminLoanDisburse(req, res, uid) {
   }
   try {
     const admin = await requirePlatformAdmin(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await disburseOwnLoan(uid, body?.utr, { requireDevice: false });
     await writeAdminAudit({
       action: "LOAN_DISBURSED",
@@ -710,7 +710,7 @@ async function handleAdminLoanRejectBank(req, res, uid) {
   }
   try {
     const admin = await requirePlatformAdmin(req);
-    const body = await parseBody(req);
+    const body = parseBody(req.body);
     const application = await rejectBankDetails(uid, body?.reason);
     await writeAdminAudit({
       action: "LOAN_BANK_REJECTED",
