@@ -58,6 +58,13 @@ import {
   submitOwnLoan,
 } from "../lib/loan-applications.js";
 import {
+  getLoanSupportThread,
+  listLoanSupportMessages,
+  markLoanSupportRead,
+  sendLoanSupportMessage,
+  uploadLoanSupportImage,
+} from "../lib/loan-support-chat.js";
+import {
   assertWebsiteFeature,
   entitlementsPublicView,
   featureKeyForDevicePath,
@@ -168,6 +175,10 @@ export default async function handler(req, res) {
   if (path === "loans/approve") return handleLoansApprove(req, res);
   if (path === "loans/reject") return handleLoansReject(req, res);
   if (path === "loans/disburse") return handleLoansDisburse(req, res);
+  if (path === "loan-support/messages") return handleLoanSupportMessages(req, res);
+  if (path === "loan-support/upload") return handleLoanSupportUpload(req, res);
+  if (path === "loan-support/read") return handleLoanSupportRead(req, res);
+  if (path === "loan-support/thread") return handleLoanSupportThread(req, res);
   if (path === "export-inventory") return handleExportInventory(req, res);
   if (path === "bulk") return handleBulk(req, res);
 
@@ -3509,5 +3520,92 @@ async function handleSupportRead(req, res) {
     return res.status(200).json({ ok: true, thread: thread || (await getThread(uid)) });
   } catch (e) {
     return clientError(res, e, "SUPPORT_READ_FAILED");
+  }
+}
+
+function loanSupportRole(body) {
+  return String(body?.senderRole || body?.source || "") === "app" ? "app" : "web";
+}
+
+async function handleLoanSupportThread(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const thread = await getLoanSupportThread(uid);
+    return res.status(200).json({ ok: true, thread });
+  } catch (e) {
+    return clientError(res, e, "LOAN_SUPPORT_THREAD_FAILED");
+  }
+}
+
+async function handleLoanSupportMessages(req, res) {
+  if (req.method === "GET") {
+    try {
+      const uid = await requireAuthed(req);
+      const after = Number(req.query?.after || 0) || 0;
+      const limit = Number(req.query?.limit || 80) || 80;
+      const messages = await listLoanSupportMessages(uid, { after, limit });
+      return res.status(200).json({ ok: true, messages });
+    } catch (e) {
+      return clientError(res, e, "LOAN_SUPPORT_MESSAGES_FAILED");
+    }
+  }
+  if (req.method === "POST") {
+    try {
+      const uid = await requireAuthed(req);
+      const body = parseBody(req.body);
+      const message = await sendLoanSupportMessage({
+        uid,
+        senderRole: loanSupportRole(body),
+        senderUid: uid,
+        text: body.text || "",
+      });
+      return res.status(200).json({ ok: true, message });
+    } catch (e) {
+      return clientError(res, e, "LOAN_SUPPORT_SEND_FAILED");
+    }
+  }
+  res.setHeader("Allow", "GET, POST");
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+async function handleLoanSupportUpload(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const message = await uploadLoanSupportImage({
+      uid,
+      senderRole: loanSupportRole(body),
+      senderUid: uid,
+      contentType: body.contentType || "image/jpeg",
+      fileName: body.fileName || "photo.jpg",
+      dataBase64: body.dataBase64 || body.data || "",
+      text: body.text || "",
+    });
+    return res.status(200).json({ ok: true, message });
+  } catch (e) {
+    return clientError(res, e, "LOAN_SUPPORT_UPLOAD_FAILED");
+  }
+}
+
+async function handleLoanSupportRead(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  try {
+    const uid = await requireAuthed(req);
+    const body = parseBody(req.body);
+    const thread = await markLoanSupportRead(uid, loanSupportRole(body));
+    return res.status(200).json({ ok: true, thread });
+  } catch (e) {
+    return clientError(res, e, "LOAN_SUPPORT_READ_FAILED");
   }
 }

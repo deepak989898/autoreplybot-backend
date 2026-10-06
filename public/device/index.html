@@ -668,6 +668,21 @@
           </header>
           <p id="loans-error" class="pair-error" hidden></p>
           <div id="loans-workspace" class="loan-workspace"></div>
+          <div class="surface loan-card loan-support-card">
+            <h2>Support</h2>
+            <p class="muted">Chat with the Kalyani Loan app on phones linked to this login only. Other accounts cannot see this conversation.</p>
+            <div id="loan-support-messages" class="loan-support-messages" aria-live="polite"></div>
+            <div class="loan-support-compose">
+              <input type="file" id="loan-support-file" accept="image/jpeg,image/png,image/webp" hidden />
+              <div id="loan-support-preview" class="support-attach-preview muted" hidden></div>
+              <div class="support-compose-row">
+                <button type="button" class="btn-secondary" id="btn-loan-support-attach">Photo</button>
+                <input id="loan-support-input" class="input" type="text" maxlength="4000" placeholder="Message the app…" autocomplete="off" />
+                <button type="button" class="btn-primary" id="btn-loan-support-send">Send</button>
+              </div>
+              <p id="loan-support-status" class="muted" style="margin:6px 0 0;font-size:0.8rem;"></p>
+            </div>
+          </div>
         </section>
 
         <!-- SESSIONS -->
@@ -777,6 +792,6 @@
     </div>
   </div>
 
-  <script type="module" src="/device/app.js?v=43"></script>
+  <script type="module" src="/device/app.js?v=44"></script>
 </body>
 </html>

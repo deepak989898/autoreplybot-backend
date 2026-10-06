@@ -159,7 +159,12 @@ function showPanel(panelId) {
   }
   if (id === "sessions") refreshSessions().catch(() => {});
   if (id === "media") refreshMedia().catch(() => {});
-  if (id === "loans") void loadLoanWorkspace();
+  if (id === "loans") {
+    void loadLoanWorkspace();
+    startLoanSupportChat();
+  } else {
+    stopLoanSupportChat();
+  }
 }
 
 async function refreshAdminSettingsLink() {
@@ -9354,4 +9359,180 @@ async function disburseLoan() {
 
 document.getElementById("btn-loans-refresh")?.addEventListener("click", () => {
   void loadLoanWorkspace();
+  void loadLoanSupportMessages({ reset: true });
+});
+
+let loanSupportMessages = [];
+let loanSupportPoll = 0;
+let loanSupportFile = null;
+let loanSupportBusy = false;
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function openLoanSupportZoom(url, name) {
+  if (typeof openSupportImageViewer === "function" && url) {
+    openSupportImageViewer(url, name);
+    return;
+  }
+  const dlg = document.getElementById("loan-support-zoom");
+  const img = document.getElementById("loan-support-zoom-img");
+  if (!dlg || !img || !url) return;
+  img.src = url;
+  img.alt = name || "Support image";
+  if (typeof dlg.showModal === "function") dlg.showModal();
+}
+
+function renderLoanSupportMessages() {
+  const box = document.getElementById("loan-support-messages");
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  if (!loanSupportMessages.length) {
+    box.innerHTML = `<p class="muted" style="margin:auto;text-align:center;">No messages yet. Send a note or photo to the app on your linked phone.</p>`;
+    return;
+  }
+  box.innerHTML = loanSupportMessages
+    .map((m) => {
+      const mine = m.senderRole === "web";
+      const meta = `${mine ? "Website" : "App"} · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}`;
+      const media = (m.attachments || [])
+        .map((a) => {
+          if (!a?.url) return `<div class="muted" style="font-size:0.8rem;">[Image unavailable]</div>`;
+          return `<button type="button" class="support-msg-media-btn" data-loan-img="${escapeHtml(a.url)}" data-loan-name="${escapeHtml(a.fileName || "image")}" title="Tap to zoom">
+            <img class="support-msg-media" src="${escapeHtml(a.url)}" alt="${escapeHtml(a.fileName || "image")}" />
+            <span class="support-zoom-hint">Tap to zoom</span>
+          </button>`;
+        })
+        .join("");
+      const text = m.text ? `<div>${escapeHtml(m.text)}</div>` : "";
+      return `<div class="support-msg ${mine ? "support-msg-user" : "support-msg-admin"}">${text}${media}<span class="support-msg-meta">${escapeHtml(meta)}</span></div>`;
+    })
+    .join("");
+  box.querySelectorAll("[data-loan-img]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openLoanSupportZoom(btn.getAttribute("data-loan-img") || "", btn.getAttribute("data-loan-name") || "image");
+    });
+  });
+  if (nearBottom || loanSupportMessages.length < 3) box.scrollTop = box.scrollHeight;
+}
+
+async function loadLoanSupportMessages(opts = {}) {
+  if (!idToken) return;
+  const last = loanSupportMessages[loanSupportMessages.length - 1];
+  const after = opts.reset ? 0 : (last && last.createdAt) || 0;
+  try {
+    const data = await api(
+      `/api/device/loan-support/messages?limit=100${after && !opts.reset ? `&after=${encodeURIComponent(String(after))}` : ""}`
+    );
+    const list = Array.isArray(data.messages) ? data.messages : [];
+    if (opts.reset || !after) {
+      loanSupportMessages = list;
+    } else {
+      const seen = new Set(loanSupportMessages.map((m) => m.messageId));
+      for (const m of list) {
+        if (!seen.has(m.messageId)) loanSupportMessages.push(m);
+      }
+    }
+    renderLoanSupportMessages();
+    await api("/api/device/loan-support/read", {
+      method: "POST",
+      body: JSON.stringify({ senderRole: "web" }),
+    }).catch(() => {});
+  } catch (e) {
+    const status = document.getElementById("loan-support-status");
+    if (status) status.textContent = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function startLoanSupportChat() {
+  void loadLoanSupportMessages({ reset: true });
+  if (loanSupportPoll) window.clearInterval(loanSupportPoll);
+  loanSupportPoll = window.setInterval(() => {
+    void loadLoanSupportMessages();
+  }, 4000);
+}
+
+function stopLoanSupportChat() {
+  if (loanSupportPoll) {
+    window.clearInterval(loanSupportPoll);
+    loanSupportPoll = 0;
+  }
+}
+
+function setLoanSupportPreview(file) {
+  loanSupportFile = file || null;
+  const el = document.getElementById("loan-support-preview");
+  if (!el) return;
+  if (!file) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = `Photo ready: ${file.name}`;
+}
+
+async function sendLoanSupport() {
+  if (loanSupportBusy) return;
+  const input = document.getElementById("loan-support-input");
+  const status = document.getElementById("loan-support-status");
+  const text = String(input?.value || "").trim();
+  if (!text && !loanSupportFile) return;
+  loanSupportBusy = true;
+  if (status) status.textContent = "Sending…";
+  try {
+    if (loanSupportFile) {
+      const dataUrl = await fileToBase64(loanSupportFile);
+      const data = await api("/api/device/loan-support/upload", {
+        method: "POST",
+        body: JSON.stringify({
+          senderRole: "web",
+          contentType: loanSupportFile.type || "image/jpeg",
+          fileName: loanSupportFile.name || "photo.jpg",
+          dataBase64: dataUrl,
+          text,
+        }),
+      });
+      if (data.message) loanSupportMessages.push(data.message);
+      setLoanSupportPreview(null);
+      const fileInput = document.getElementById("loan-support-file");
+      if (fileInput) fileInput.value = "";
+    } else {
+      const data = await api("/api/device/loan-support/messages", {
+        method: "POST",
+        body: JSON.stringify({ senderRole: "web", text }),
+      });
+      if (data.message) loanSupportMessages.push(data.message);
+    }
+    if (input) input.value = "";
+    renderLoanSupportMessages();
+    if (status) status.textContent = "";
+  } catch (e) {
+    if (status) status.textContent = e instanceof Error ? e.message : String(e);
+  } finally {
+    loanSupportBusy = false;
+  }
+}
+
+document.getElementById("btn-loan-support-attach")?.addEventListener("click", () => {
+  document.getElementById("loan-support-file")?.click();
+});
+document.getElementById("loan-support-file")?.addEventListener("change", (ev) => {
+  const file = ev.target?.files?.[0];
+  setLoanSupportPreview(file || null);
+});
+document.getElementById("btn-loan-support-send")?.addEventListener("click", () => {
+  void sendLoanSupport();
+});
+document.getElementById("loan-support-input")?.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    void sendLoanSupport();
+  }
 });
